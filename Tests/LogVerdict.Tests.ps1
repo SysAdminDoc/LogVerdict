@@ -216,6 +216,96 @@ Describe 'Signature reduction' {
     }
 }
 
+Describe 'Text-log timestamps' {
+    # Real line shapes taken from C:\Windows\Logs\CBS\CBS.log, dism.log and
+    # setupapi.dev.log on Windows 11.
+    $timeCases = @(
+        @{ Line = '2026-07-31 00:31:52, Error  CSI  00000123 Failed to stage'; Pattern = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})'; Format = 'yyyy-MM-dd HH:mm:ss'; Year = 2026; Hour = 0 }
+        @{ Line = '2026-07-09 01:51:30, Info   DISM   API: PID=3';             Pattern = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})'; Format = 'yyyy-MM-dd HH:mm:ss'; Year = 2026; Hour = 1 }
+        @{ Line = '>>>  Section start 2026/06/09 17:27:28.488';                Pattern = 'Section start (\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})'; Format = 'yyyy/MM/dd HH:mm:ss'; Year = 2026; Hour = 17 }
+        @{ Line = '07/31/2026 10:15:00:123 NetpDoDomainJoin: status 0x0';      Pattern = '^(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})'; Format = 'MM/dd/yyyy HH:mm:ss'; Year = 2026; Hour = 10 }
+    )
+
+    It 'parses <Line>' -ForEach $timeCases {
+        InModuleScope LogVerdict -Parameters @{ line = $Line; pattern = $Pattern; fmt = $Format; year = $Year; hour = $Hour } {
+            param($line, $pattern, $fmt, $year, $hour)
+            $t = ConvertFrom-LVLogTimestamp -Line $line -TimePattern $pattern -TimeFormat $fmt
+            $t | Should -Not -BeNullOrEmpty
+            $t.Year | Should -Be $year
+            $t.Hour | Should -Be $hour
+        }
+    }
+
+    It 'returns null rather than guessing when a line carries no timestamp' {
+        InModuleScope LogVerdict {
+            $t = ConvertFrom-LVLogTimestamp -Line '!!!  inf: Failed to open registry key' `
+                    -TimePattern '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})' -TimeFormat 'yyyy-MM-dd HH:mm:ss'
+            $t | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'parses with InvariantCulture so a non-English locale still reads the log' {
+        InModuleScope LogVerdict {
+            # These formats are fixed by the writing component, not by the machine
+            # locale. Parsing under the current culture would fail on exactly the
+            # machines that are hardest to troubleshoot.
+            $original = [System.Threading.Thread]::CurrentThread.CurrentCulture
+            try {
+                [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::new('de-DE')
+                $t = ConvertFrom-LVLogTimestamp -Line '2026-07-31 00:31:52, Error  CSI' `
+                        -TimePattern '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})' -TimeFormat 'yyyy-MM-dd HH:mm:ss'
+                $t.Year | Should -Be 2026
+                $t.Month | Should -Be 7
+            } finally {
+                [System.Threading.Thread]::CurrentThread.CurrentCulture = $original
+            }
+        }
+    }
+
+    It 'does not let one undated record destroy the span of a whole signature' {
+        InModuleScope LogVerdict {
+            # $null compares as less than any date in PowerShell, so an unguarded
+            # min/max drags FirstSeen to null and silently zeroes SpanDays.
+            $base = Get-Date '2026-07-10 12:00:00'
+            $records = @(
+                [pscustomobject]@{ Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0; Level=2
+                    LevelName='Error'; TimeCreated=$base; MachineName='T'; RecordId=1; Message='Failed to stage package 1' }
+                [pscustomobject]@{ Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0; Level=2
+                    LevelName='Error'; TimeCreated=$base.AddDays(10); MachineName='T'; RecordId=2; Message='Failed to stage package 2' }
+                [pscustomobject]@{ Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0; Level=2
+                    LevelName='Error'; TimeCreated=$null; MachineName='T'; RecordId=3; Message='Failed to stage package 3' }
+            )
+            $sigs = Group-LVSignature -Record $records -WindowDays 30
+            @($sigs).Count | Should -Be 1
+            $sigs[0].Count | Should -Be 3
+            $sigs[0].UndatedCount | Should -Be 1
+            $sigs[0].FirstSeen | Should -Be $base
+            $sigs[0].LastSeen | Should -Be $base.AddDays(10)
+            $sigs[0].SpanDays | Should -Be 10
+        }
+    }
+
+    It 'rates a wholly undated signature across the window instead of inventing a span' {
+        InModuleScope LogVerdict {
+            $records = 1..4 | ForEach-Object {
+                [pscustomobject]@{ Source='textlog'; Channel='SetupAPI'; Provider='SetupAPI'; Id=0; Level=2
+                    LevelName='Error'; TimeCreated=$null; MachineName='T'; RecordId=$_; Message='!!! inf: failed' }
+            }
+            $sigs = Group-LVSignature -Record $records -WindowDays 30
+            $sigs[0].FirstSeen | Should -BeNullOrEmpty
+            $sigs[0].SpanDays | Should -Be 0
+            $sigs[0].UndatedCount | Should -Be 4
+        }
+    }
+
+    It 'renders a null timestamp as undated rather than as an empty string' {
+        InModuleScope LogVerdict {
+            Format-LVWhen $null | Should -Be 'undated'
+            Format-LVWhen (Get-Date '2026-07-31 08:05:00') | Should -Be '2026-07-31 08:05'
+        }
+    }
+}
+
 Describe 'Verdict resolution' {
     BeforeAll {
         $script:TestDb = [pscustomobject]@{

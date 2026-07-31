@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Event collection no longer truncates silently at the per-channel record cap; affected channels are named and flagged as lower bounds.
 - `-Channel a,b,c` now works when the entry script is launched via `powershell.exe -File`, which hands the whole list over as a single string instead of binding it to the array parameter.
 - Requested channels that do not exist on the machine are reported rather than silently skipped.
+- **Text-log lines carry their real timestamps.** Every line used to inherit the file's `LastWriteTime`, collapsing each log into a single instant: first/last seen were meaningless, the rate was wrong, rate escalation could never fire on a text rule, and `-DaysBack` filtered on the file rather than on the lines inside it, so a file touched today contributed lines from months ago. CBS, DISM, Panther and NetSetup lines are parsed from their own timestamps; SetupAPI error lines, which carry none, inherit the most recent `Section start` header above them. Timestamps parse under InvariantCulture because these formats are fixed by the writing component, not by the machine locale.
+- Lines with no parseable timestamp are marked undated and rendered as `undated` rather than being given a fabricated time, and a single undated line no longer drags a whole signature's first-seen date to null.
 - **Reports are written without a UTF-8 BOM.** `Set-Content -Encoding UTF8` emits one under Windows PowerShell 5.1 but not under PS 7, so the defect was invisible when testing on pwsh alone. The BOM made the JSON report - the tool's machine-readable contract - unreadable to strict parsers such as Python's `json.load`.
 
 ### Added

@@ -41,8 +41,9 @@ function Group-LVSignature {
                 Id            = $r.Id
                 Template      = $template
                 Count         = 0
-                FirstSeen     = $r.TimeCreated
-                LastSeen      = $r.TimeCreated
+                UndatedCount  = 0
+                FirstSeen     = $null
+                LastSeen      = $null
                 WorstLevel    = $r.Level
                 LevelName     = $r.LevelName
                 SampleMessage = $r.Message
@@ -53,8 +54,17 @@ function Group-LVSignature {
 
         $b = $buckets[$key]
         $b.Count++
-        if ($r.TimeCreated -lt $b.FirstSeen) { $b.FirstSeen = $r.TimeCreated }
-        if ($r.TimeCreated -gt $b.LastSeen)  { $b.LastSeen  = $r.TimeCreated }
+
+        # Undated records carry a null time (text-log lines with no parseable
+        # timestamp). PowerShell compares $null as less than any date, so guarding
+        # here is what stops one undated line from dragging FirstSeen to null and
+        # silently destroying the span for the whole signature.
+        if ($null -eq $r.TimeCreated) {
+            $b.UndatedCount++
+        } else {
+            if ($null -eq $b.FirstSeen -or $r.TimeCreated -lt $b.FirstSeen) { $b.FirstSeen = $r.TimeCreated }
+            if ($null -eq $b.LastSeen  -or $r.TimeCreated -gt $b.LastSeen)  { $b.LastSeen  = $r.TimeCreated }
+        }
         # Windows levels run 1=Critical .. 4=Information, so the lower number wins.
         if ($r.Level -gt 0 -and $r.Level -lt $b.WorstLevel) {
             $b.WorstLevel = $r.Level
@@ -65,8 +75,14 @@ function Group-LVSignature {
 
     $days = [Math]::Max(1, $WindowDays)
     $signatures = foreach ($b in $buckets.Values) {
-        $spanDays = ($b.LastSeen - $b.FirstSeen).TotalDays
-        if ($spanDays -lt 0) { $spanDays = 0 }
+        # A signature made up entirely of undated lines has no measurable span, so it
+        # is rated across the observation window rather than given a fabricated one.
+        if ($null -eq $b.FirstSeen -or $null -eq $b.LastSeen) {
+            $spanDays = 0
+        } else {
+            $spanDays = ($b.LastSeen - $b.FirstSeen).TotalDays
+            if ($spanDays -lt 0) { $spanDays = 0 }
+        }
 
         # A lone occurrence has no span to measure. Dividing by a floor of one day
         # would report it as "1/day", which reads as a daily recurrence when it

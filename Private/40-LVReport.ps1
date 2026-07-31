@@ -44,6 +44,21 @@ function Add-LVLine {
     [void]$Builder.AppendLine($Text)
 }
 
+function Format-LVWhen {
+    <#
+        .SYNOPSIS
+        Render a timestamp, or say plainly that there is not one.
+
+        .DESCRIPTION
+        Text-log lines whose timestamp cannot be parsed carry a null time. Formatting
+        a null date yields an empty string, which reads as a rendering bug and hides
+        the fact that the tool genuinely does not know when the line was written.
+    #>
+    param($When)
+    if ($null -eq $When) { return 'undated' }
+    return ('{0:yyyy-MM-dd HH:mm}' -f $When)
+}
+
 function Write-LVConsoleReport {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Result)
@@ -85,7 +100,7 @@ function Write-LVConsoleReport {
         $color = $script:LVVerdictColor[$f.Verdict]
         Write-Host ''
         Write-Host ('  [{0}] {1}' -f $f.Verdict.ToUpper(), $f.Title) -ForegroundColor $color
-        Write-Host ('    {0}  x{1}  ({2}/day, last seen {3:yyyy-MM-dd HH:mm})' -f $f.Key, $f.Count, $f.PerDay, $f.LastSeen) -ForegroundColor DarkGray
+        Write-Host ('    {0}  x{1}  ({2}/day, last seen {3})' -f $f.Key, $f.Count, $f.PerDay, (Format-LVWhen $f.LastSeen)) -ForegroundColor DarkGray
         Write-Host ('    What it means : {0}' -f $f.Plain)
         Write-Host ('    Why it matters: {0}' -f $f.Why)
         Write-Host ('    Do this       : {0}' -f $f.Action) -ForegroundColor White
@@ -134,7 +149,7 @@ function ConvertTo-LVTextReport {
     foreach ($f in $Result.Findings) {
         Add-LVLine $sb ('[{0}] {1}' -f $f.Verdict.ToUpper(), $f.Title)
         Add-LVLine $sb ('  Signature   : {0}' -f $f.Key)
-        Add-LVLine $sb ('  Occurrences : {0} ({1}/day) between {2:yyyy-MM-dd HH:mm} and {3:yyyy-MM-dd HH:mm}' -f $f.Count, $f.PerDay, $f.FirstSeen, $f.LastSeen)
+        Add-LVLine $sb ('  Occurrences : {0} ({1}/day) between {2} and {3}' -f $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen))
         Add-LVLine $sb ('  Rule        : {0} (confidence: {1})' -f $f.RuleId, $f.Confidence)
         Add-LVLine $sb ('  Means       : {0}' -f $f.Plain)
         Add-LVLine $sb ('  Matters     : {0}' -f $f.Why)
@@ -235,7 +250,7 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
 
         Add-LVLine $sb ('<div class="f" style="border-left-color:{0}">' -f $hex)
         Add-LVLine $sb ('<h2><span class="badge" style="color:{0}">{1}</span>{2}</h2>' -f $hex, $f.Verdict, (ConvertTo-LVHtmlEncoded $f.Title))
-        Add-LVLine $sb ('<div class="meta">{0} &middot; {1} occurrence(s) &middot; {2}/day &middot; {3:yyyy-MM-dd HH:mm} to {4:yyyy-MM-dd HH:mm} &middot; rule {5} ({6})</div>' -f (ConvertTo-LVHtmlEncoded $f.Key), $f.Count, $f.PerDay, $f.FirstSeen, $f.LastSeen, $f.RuleId, $f.Confidence)
+        Add-LVLine $sb ('<div class="meta">{0} &middot; {1} occurrence(s) &middot; {2}/day &middot; {3} to {4} &middot; rule {5} ({6})</div>' -f (ConvertTo-LVHtmlEncoded $f.Key), $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen), $f.RuleId, $f.Confidence)
         Add-LVLine $sb ('<div class="row"><div class="lbl">Means</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.Plain))
         Add-LVLine $sb ('<div class="row"><div class="lbl">Matters</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.Why))
         Add-LVLine $sb ('<div class="row"><div class="lbl">Do this</div><div class="act">{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.Action))
