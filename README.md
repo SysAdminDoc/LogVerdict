@@ -101,6 +101,8 @@ The rules are the product. Adding one is a JSON edit, no code:
 }
 ```
 
+`Data/verdicts.schema.json` describes the full rule format - point your editor at it for completion and inline validation. [CONTRIBUTING.md](CONTRIBUTING.md) walks through adding a rule end to end.
+
 Put site-specific rules in `Data/verdicts.local.json` - it is merged automatically, wins ties against the shipped rules, and survives updates. Validate with:
 
 ```powershell

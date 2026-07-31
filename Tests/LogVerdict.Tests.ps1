@@ -76,6 +76,26 @@ Describe 'Verdict database' {
         Test-LogVerdictDatabase -Path $bad -Quiet | Should -BeFalse
     }
 
+    It 'keeps the published JSON Schema in step with the code' {
+        # Contributors validate against the schema in their editor; the module validates
+        # against $script:LVVerdictRank and $script:LVRuleStatus at runtime. If those
+        # drift apart, a rule passes in the editor and is rejected at scan time.
+        $schemaPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data/verdicts.schema.json'
+        Test-Path -LiteralPath $schemaPath | Should -BeTrue
+        $schema = Get-Content -LiteralPath $schemaPath -Raw | ConvertFrom-Json
+
+        $schemaVerdicts = @($schema.definitions.rule.properties.verdict.enum) | Sort-Object
+        $schemaStatuses = @($schema.definitions.rule.properties.status.enum) | Sort-Object
+
+        InModuleScope LogVerdict -Parameters @{ sv = $schemaVerdicts; ss = $schemaStatuses } {
+            param($sv, $ss)
+            ($sv -join ',') | Should -Be ((@($script:LVVerdictRank.Keys) | Sort-Object) -join ',')
+            ($ss -join ',') | Should -Be ((@($script:LVRuleStatus) | Sort-Object) -join ',')
+        }
+
+        $schema.properties.schemaVersion.maximum | Should -Be 2
+    }
+
     It 'rejects a rule using an invalid verdict' {
         $bad = Join-Path $TestDrive 'bad.json'
         @'

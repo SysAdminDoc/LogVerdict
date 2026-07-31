@@ -23,6 +23,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **`Data/verdicts.schema.json`** - a JSON Schema for the rule format, so editors validate and autocomplete rules as they are written. A test keeps its verdict and status vocabularies in step with the code, so a rule cannot pass in an editor and be rejected at scan time.
+- **CONTRIBUTING.md** - how to find an unrecognized signature, write a rule for it, and validate it, plus the project conventions that are easy to trip over (PS 5.1 compatibility, pure ASCII, the diagnostics stream, verifying under 5.1 rather than only pwsh 7).
 - Collector test coverage: text-log parsing against fixture files, and mocked `Get-WinEvent` failures covering empty, denied, truncated and metadata-less channels. This layer previously had no tests and held every defect found in the last review.
 - **29 new rules, taking the verdict database from 36 to 65.** Written against the signatures a real Windows 11 machine actually produces, and grounded in each event's own message text rather than recall. Covers Hyper-V/WSL virtual switch noise, the Store app state database, AppX deployment and packaging, CloudStore settings sync, WMI query failures, PowerShell script block logging, DPAPI decryption failures, Code Integrity blocks, exploit mitigations, BITS transfers, known-folder permissions, storage diagnostics and telemetry connectivity.
 - Measured on the development machine, an `-AllChannels` scan went from 88.2% of signatures unrecognized to 62.7%; by record volume, unrecognized events fell to 3.1%, so 96.9% of what a reader actually sees is now explained.
