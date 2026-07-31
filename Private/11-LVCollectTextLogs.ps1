@@ -122,13 +122,16 @@ function Get-LVTextLogRecord {
     [CmdletBinding()]
     param(
         [int]$DaysBack = 30,
-        [int]$MaxMatchesPerFile = 4000
+        [int]$MaxMatchesPerFile = 4000,
+        # Injection seam: lets the suite exercise the real parser against fixture files
+        # instead of whatever happens to be in C:\Windows on the machine running tests.
+        [object[]]$Target = $script:LVTextLogTarget
     )
 
     $cutoff = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
     $records = New-Object System.Collections.Generic.List[object]
 
-    foreach ($target in $script:LVTextLogTarget) {
+    foreach ($target in $Target) {
         $path = $target.Path
         if (-not (Test-Path -LiteralPath $path)) {
             Write-LVLog -Level info -Message ("{0}: not present on this machine" -f $target.Name)

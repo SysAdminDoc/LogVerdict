@@ -187,16 +187,16 @@ function Get-LVEventRecord {
         try {
             $events = Get-WinEvent -FilterHashtable $filter -MaxEvents $MaxPerChannel -ErrorAction Stop
         } catch {
+            # Deliberately if/elseif, not switch: `continue` inside a switch continues
+            # the SWITCH rather than this foreach, so the loop body would fall through
+            # and emit one phantom record per erroring channel.
             $kind = Get-LVErrorKind -ErrorRecord $_
-            switch ($kind) {
-                'empty'   { continue }
-                'missing' { continue }
-                'denied'  { $denied.Add($ch) | Out-Null; continue }
-                default   {
-                    Write-LVLog -Level warn -Message ("Channel '{0}' unreadable: {1}" -f $ch, $_.Exception.Message)
-                    continue
-                }
+            if ($kind -eq 'denied') {
+                $denied.Add($ch) | Out-Null
+            } elseif ($kind -eq 'other') {
+                Write-LVLog -Level warn -Message ("Channel '{0}' unreadable: {1}" -f $ch, $_.Exception.Message)
             }
+            continue
         }
 
         $events = @($events)

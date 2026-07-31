@@ -57,16 +57,24 @@ function ConvertTo-LVArrayOutput {
         the empty-collection trap.
 
         .DESCRIPTION
-        The usual idiom `return , $array` keeps a populated array intact, but turns an
-        EMPTY one into a single-element array whose only element is the empty array.
-        Callers that foreach over the result then iterate once over a phantom item and
-        add it to their own collection. Emitting nothing for the empty case is what
-        every caller here actually expects.
+        Two idioms are wrong here and this avoids both.
+
+        `return , $array` keeps a populated array intact but turns an EMPTY one into a
+        single-element array whose only element is the empty array, so callers iterate
+        once over a phantom item.
+
+        Mixing the two - nothing for empty, a wrapped array otherwise - is worse still,
+        because `@(f).Count` then answers 0 for an empty result and 1 for a result of
+        fifty records. Callers cannot write uniform code against that.
+
+        The contract is therefore plain PowerShell streaming: emit each element, emit
+        nothing when there are none. `@(f)` counts correctly in every case, and
+        `foreach ($x in (f))` iterates correctly in every case.
     #>
     param([AllowEmptyCollection()][AllowNull()][object[]]$Value)
 
     if ($null -eq $Value -or $Value.Count -eq 0) { return @() }
-    return , $Value
+    return $Value
 }
 
 function Write-LVTextFile {

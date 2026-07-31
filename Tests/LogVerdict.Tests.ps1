@@ -350,6 +350,173 @@ Describe 'Text-log timestamps' {
     }
 }
 
+Describe 'Text-log collection against fixtures' {
+    BeforeAll {
+        $script:FixtureDir = Join-Path $TestDrive 'logs'
+        New-Item -ItemType Directory -Path $script:FixtureDir -Force | Out-Null
+
+        # A CBS-shaped log: two real errors on different days, one benign Info line
+        # that must not match, and one error too old for a 30-day window.
+        $script:CbsPath = Join-Path $script:FixtureDir 'CBS.log'
+        $recent = (Get-Date).AddDays(-2)
+        $older  = (Get-Date).AddDays(-9)
+        $ancient = (Get-Date).AddDays(-400)
+        @(
+            ('{0:yyyy-MM-dd HH:mm:ss}, Info                  CBS    TI: --- Initializing' -f $recent)
+            ('{0:yyyy-MM-dd HH:mm:ss}, Error                 CSI    00000001 Failed to stage package Foo' -f $recent)
+            ('{0:yyyy-MM-dd HH:mm:ss}, Error                 CSI    00000002 Failed to stage package Bar' -f $older)
+            ('{0:yyyy-MM-dd HH:mm:ss}, Error                 CSI    00000003 Failed long ago' -f $ancient)
+        ) | Set-Content -LiteralPath $script:CbsPath -Encoding UTF8
+
+        # A SetupAPI-shaped log: error lines carry no timestamp of their own and must
+        # inherit the most recent section header above them.
+        $script:SetupPath = Join-Path $script:FixtureDir 'setupapi.dev.log'
+        @(
+            ('>>>  [Device Install]')
+            ('>>>  Section start {0:yyyy/MM/dd HH:mm:ss}.123' -f $recent)
+            ('     inf: opened the driver store')
+            ('!!!  inf: Failed to open registry key')
+            ('<<<  Section end')
+        ) | Set-Content -LiteralPath $script:SetupPath -Encoding UTF8
+
+        $script:CbsTarget = @(@{
+            Name = 'CBSFIX'; Path = $script:CbsPath; Pattern = ',\s*Error\s'
+            TimePattern = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})'; TimeFormat = 'yyyy-MM-dd HH:mm:ss'
+            Area = 'test'; Hint = 'test'
+        })
+        $script:SetupTarget = @(@{
+            Name = 'SETUPFIX'; Path = $script:SetupPath; Pattern = '^\s*!!!'
+            SectionTimePattern = 'Section start (\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})'
+            TimeFormat = 'yyyy/MM/dd HH:mm:ss'; Area = 'test'; Hint = 'test'
+        })
+    }
+
+    It 'matches only error-shaped lines and dates each from its own timestamp' {
+        InModuleScope LogVerdict -Parameters @{ t = $script:CbsTarget } {
+            param($t)
+            $rec = @(Get-LVTextLogRecord -DaysBack 30 -Target $t)
+            $rec.Count | Should -Be 2 -Because 'the Info line must not match and the 400-day-old error is outside the window'
+            @($rec | Where-Object { $_.Message -like '*Initializing*' }).Count | Should -Be 0
+            ($rec | Select-Object -ExpandProperty TimeCreated -Unique).Count | Should -Be 2 -Because 'each line keeps its own time rather than the file mtime'
+            @($rec | Where-Object Undated).Count | Should -Be 0
+        }
+    }
+
+    It 'filters by line date, not by file mtime' {
+        InModuleScope LogVerdict -Parameters @{ t = $script:CbsTarget } {
+            param($t)
+            # The fixture was written moments ago, so an mtime-based filter would keep
+            # everything. Only a line-level filter can drop the 9-day-old entry.
+            $rec = @(Get-LVTextLogRecord -DaysBack 5 -Target $t)
+            $rec.Count | Should -Be 1
+        }
+    }
+
+    It 'carries a section-header timestamp forward onto undated error lines' {
+        InModuleScope LogVerdict -Parameters @{ t = $script:SetupTarget } {
+            param($t)
+            $rec = @(Get-LVTextLogRecord -DaysBack 30 -Target $t)
+            $rec.Count | Should -Be 1
+            $rec[0].TimeCreated | Should -Not -BeNullOrEmpty
+            $rec[0].Undated | Should -BeFalse
+        }
+    }
+
+    It 'marks a line undated rather than inventing a time when nothing can be parsed' {
+        InModuleScope LogVerdict -Parameters @{ dir = $script:FixtureDir } {
+            param($dir)
+            $p = Join-Path $dir 'nodates.log'
+            @('!!!  inf: something failed', '!!!  inf: something else failed') |
+                Set-Content -LiteralPath $p -Encoding UTF8
+            $target = @(@{ Name='NODATE'; Path=$p; Pattern='^\s*!!!'; Area='t'; Hint='t' })
+            $rec = @(Get-LVTextLogRecord -DaysBack 30 -Target $target)
+            $rec.Count | Should -Be 2
+            @($rec | Where-Object Undated).Count | Should -Be 2
+            $rec[0].TimeCreated | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'caps matches per file and says so' {
+        InModuleScope LogVerdict -Parameters @{ dir = $script:FixtureDir } {
+            param($dir)
+            $p = Join-Path $dir 'huge.log'
+            1..50 | ForEach-Object { '!!!  inf: failure {0}' -f $_ } | Set-Content -LiteralPath $p -Encoding UTF8
+            $target = @(@{ Name='HUGE'; Path=$p; Pattern='^\s*!!!'; Area='t'; Hint='t' })
+            $rec = @(Get-LVTextLogRecord -DaysBack 30 -MaxMatchesPerFile 10 -Target $target)
+            $rec.Count | Should -Be 10 -Because 'the cap must bound the result'
+        }
+    }
+
+    It 'reports a missing file instead of failing the scan' {
+        InModuleScope LogVerdict -Parameters @{ dir = $script:FixtureDir } {
+            param($dir)
+            $target = @(@{ Name='GONE'; Path=(Join-Path $dir 'does-not-exist.log'); Pattern='.'; Area='t'; Hint='t' })
+            $rec = @(Get-LVTextLogRecord -DaysBack 30 -Target $target)
+            $rec.Count | Should -Be 0
+        }
+    }
+}
+
+Describe 'Event collection failure handling' {
+    It 'treats an empty channel as empty, not as an error' {
+        InModuleScope LogVerdict {
+            Mock Get-WinEvent {
+                $e = [System.Management.Automation.ErrorRecord]::new(
+                    [Exception]::new('localized: no events'), 'NoMatchingEventsFound,Microsoft.PowerShell.Commands.GetWinEventCommand',
+                    [System.Management.Automation.ErrorCategory]::ObjectNotFound, $null)
+                throw $e
+            }
+            $rec = @(Get-LVEventRecord -Channel @('Fake') -DaysBack 30)
+            $rec.Count | Should -Be 0
+            $script:LVDeniedChannel.Count | Should -Be 0
+        }
+    }
+
+    It 'records a denied channel as denied' {
+        InModuleScope LogVerdict {
+            Mock Get-WinEvent {
+                $e = [System.Management.Automation.ErrorRecord]::new(
+                    [UnauthorizedAccessException]::new('localized: denied'),
+                    'System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.GetWinEventCommand',
+                    [System.Management.Automation.ErrorCategory]::PermissionDenied, $null)
+                throw $e
+            }
+            $rec = @(Get-LVEventRecord -Channel @('Fake') -DaysBack 30)
+            $rec.Count | Should -Be 0
+            $script:LVDeniedChannel | Should -Contain 'Fake'
+        }
+    }
+
+    It 'flags a channel that hit the record cap instead of truncating silently' {
+        InModuleScope LogVerdict {
+            Mock Get-WinEvent {
+                1..5 | ForEach-Object {
+                    [pscustomobject]@{
+                        ProviderName = 'Fake'; Id = 1; Level = 2; LevelDisplayName = 'Error'
+                        TimeCreated = (Get-Date); MachineName = 'T'; RecordId = $_; Message = "m$_"
+                    }
+                }
+            }
+            $rec = @(Get-LVEventRecord -Channel @('Fake') -DaysBack 30 -MaxPerChannel 5)
+            $rec.Count | Should -Be 5
+            $script:LVTruncatedChannel | Should -Contain 'Fake'
+        }
+    }
+
+    It 'substitutes a placeholder when a provider has no message template' {
+        InModuleScope LogVerdict {
+            Mock Get-WinEvent {
+                [pscustomobject]@{
+                    ProviderName = 'Orphaned'; Id = 7; Level = 2; LevelDisplayName = 'Error'
+                    TimeCreated = (Get-Date); MachineName = 'T'; RecordId = 1; Message = $null
+                }
+            }
+            $rec = @(Get-LVEventRecord -Channel @('Fake') -DaysBack 30 -MaxPerChannel 100)
+            $rec[0].Message | Should -Match 'no message template'
+        }
+    }
+}
+
 Describe 'Verdict resolution' {
     BeforeAll {
         $script:TestDb = [pscustomobject]@{
