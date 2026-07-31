@@ -44,7 +44,9 @@ param(
     [switch]$SkipTextLogs,
     [switch]$IncludeBenign,
     [string]$OutputDir,
-    [switch]$NoReport
+    [switch]$NoReport,
+    [switch]$Pause,
+    [switch]$NoPause
 )
 
 $ErrorActionPreference = 'Stop'
@@ -56,6 +58,33 @@ if (-not (Test-Path -LiteralPath $modulePath)) {
 }
 
 Import-Module $modulePath -Force -ErrorAction Stop
+
+function Test-LVLaunchedInteractively {
+    <#
+        .SYNOPSIS
+        Whether this process owns the console window it is printing to.
+
+        .DESCRIPTION
+        A double-clicked executable gets a console window of its own, which Windows
+        destroys the instant the process exits. The tool then appears never to have run
+        at all, even though it worked and wrote its reports.
+
+        The check is deliberately conservative in the other direction: pausing inside a
+        script, a scheduled task or a CI job would hang it forever. So it requires BOTH
+        that output is attached to a real console AND that the parent is Explorer.
+    #>
+    if ([Console]::IsOutputRedirected -or [Console]::IsInputRedirected) { return $false }
+
+    try {
+        $parentId = (Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $PID) -ErrorAction Stop).ParentProcessId
+        if (-not $parentId) { return $false }
+        return ((Get-Process -Id $parentId -ErrorAction Stop).ProcessName -eq 'explorer')
+    } catch {
+        # Parent may already be gone, or CIM may be unavailable. Not knowing is a
+        # reason to keep going, never a reason to block on a keypress.
+        return $false
+    }
+}
 
 try {
     $scanArgs = @{
@@ -78,12 +107,29 @@ try {
         if ($OutputDir) { $exportArgs['OutputDir'] = $OutputDir }
         $out = Export-LogVerdictReport @exportArgs
         Write-Host ''
-        Write-Host ('Reports: {0}' -f $out.OutputDir) -ForegroundColor Cyan
+        Write-Host '  Full report saved to:' -ForegroundColor Cyan
+        Write-Host ('    {0}' -f $out.OutputDir) -ForegroundColor White
+        Write-Host '  Open LogVerdict-Report.html in that folder for the readable version.' -ForegroundColor DarkGray
     }
 } catch {
     Write-Host ('[x] Scan failed: {0}' -f $_.Exception.Message) -ForegroundColor Red
     Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
+    if (-not $NoPause -and (Test-LVLaunchedInteractively)) {
+        Write-Host ''
+        Write-Host 'Press Enter to close...' -ForegroundColor Yellow
+        $null = Read-Host
+    }
     exit 4
+}
+
+# A double-clicked console app loses its window the instant it exits, so the whole
+# run looks like it never happened. Hold the window open when this process owns it -
+# but never when output is redirected or the parent is not Explorer, because pausing
+# inside a script or a scheduled task would hang it forever.
+if ($Pause -or (-not $NoPause -and (Test-LVLaunchedInteractively))) {
+    Write-Host ''
+    Write-Host 'Press Enter to close...' -ForegroundColor Yellow
+    $null = Read-Host
 }
 
 exit $result.ExitCode

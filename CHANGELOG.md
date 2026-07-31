@@ -4,6 +4,18 @@ All notable changes to LogVerdict are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-07-31
+
+### Fixed
+
+- **Double-clicking `LogVerdict.exe` looked like it never ran.** It did run - in about two seconds - but a console application loses its window the instant it exits, so the scan finished, wrote its reports to the Desktop, and vanished before any of it could be read. The executable now holds the window open with "Press Enter to close..." when it owns the console.
+- The pause is deliberately conservative: it requires both that the parent process is Explorer and that output is not redirected, so a scheduled task, a script or a CI job can never be left waiting on a keypress. `-Pause` forces it on, `-NoPause` forces it off, and a regression test runs the entry script with redirected streams and fails on timeout.
+- The report location is now printed as a labelled block at the end of the run rather than a single line, so it is readable at a glance before the window closes.
+
+### Changed
+
+- The build extracts the entry script's parameter block instead of carrying a hand-typed copy. The duplicate would have silently dropped `-Pause` from the compiled binary, which is the exact class of drift that produced this bug.
+
 ## [0.3.0] - 2026-07-31
 
 ### Added
@@ -68,6 +80,7 @@ Initial release. The deterministic core: collect, reduce, resolve, report. No la
 - **Exit codes** 0-4 by worst verdict, for use in scripts and remediation pipelines.
 - Pester 5 suite covering template masking, reduction, rule specificity, escalation, unknown handling and report rendering.
 
+[0.3.1]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.3.1
 [0.3.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.3.0
 [0.2.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.2.0
 [0.1.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.1.0

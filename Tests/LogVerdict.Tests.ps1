@@ -18,6 +18,36 @@ Describe 'Module surface' {
     }
 }
 
+Describe 'Entry script launch behaviour' {
+    It 'never blocks for input when output is redirected' {
+        # The interactive pause exists so a double-clicked .exe does not vanish before
+        # its output can be read. Getting the condition wrong in the other direction is
+        # far worse: a scheduled task or CI job would hang forever on a keypress that
+        # never comes. This runs the real entry script with redirected streams and
+        # fails on timeout rather than waiting.
+        $entry = Join-Path (Split-Path $PSScriptRoot -Parent) 'Invoke-LogVerdict.ps1'
+        $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $stdout = Join-Path $TestDrive 'entry-out.txt'
+
+        $proc = Start-Process -FilePath $psExe `
+            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $entry, '-DaysBack', '1', '-NoReport') `
+            -PassThru -RedirectStandardOutput $stdout -NoNewWindow
+
+        $exited = $proc.WaitForExit(120000)
+        if (-not $exited) { $proc.Kill() }
+        $exited | Should -BeTrue -Because 'a redirected run must never wait for a keypress'
+
+        (Get-Content -LiteralPath $stdout -Raw) | Should -Not -Match 'Press Enter to close'
+    }
+
+    It 'exposes the pause switches on the entry script' {
+        $entry = Join-Path (Split-Path $PSScriptRoot -Parent) 'Invoke-LogVerdict.ps1'
+        $text = Get-Content -LiteralPath $entry -Raw
+        $text | Should -Match '\[switch\]\$Pause'
+        $text | Should -Match '\[switch\]\$NoPause'
+    }
+}
+
 Describe 'Verdict database' {
     It 'ships valid' {
         Test-LogVerdictDatabase -Quiet | Should -BeTrue
@@ -790,7 +820,7 @@ Describe 'Verdict resolution' {
 Describe 'Report rendering' {
     BeforeAll {
         $script:FakeResult = [pscustomobject]@{
-            Tool = 'LogVerdict'; Version = '0.3.0'; MachineName = 'TESTPC'
+            Tool = 'LogVerdict'; Version = '0.3.1'; MachineName = 'TESTPC'
             ScanTime = (Get-Date '2026-07-31 12:00:00'); Duration = [timespan]::FromSeconds(3)
             DaysBack = 30; Elevated = $false; Channels = @('System', 'Application')
             Reduction = [pscustomobject]@{
