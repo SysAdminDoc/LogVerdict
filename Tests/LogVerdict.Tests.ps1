@@ -756,7 +756,7 @@ Describe 'Verdict resolution' {
 Describe 'Report rendering' {
     BeforeAll {
         $script:FakeResult = [pscustomobject]@{
-            Tool = 'LogVerdict'; Version = '0.1.0'; MachineName = 'TESTPC'
+            Tool = 'LogVerdict'; Version = '0.2.0'; MachineName = 'TESTPC'
             ScanTime = (Get-Date '2026-07-31 12:00:00'); Duration = [timespan]::FromSeconds(3)
             DaysBack = 30; Elevated = $false; Channels = @('System', 'Application')
             Reduction = [pscustomobject]@{
