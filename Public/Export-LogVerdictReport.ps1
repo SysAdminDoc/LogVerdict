@@ -40,25 +40,25 @@ function Export-LogVerdictReport {
 
         if ($wantAll -or $Format -contains 'Text') {
             $p = Join-Path $OutputDir 'LogVerdict-Report.txt'
-            ConvertTo-LVTextReport -Result $Result | Set-Content -LiteralPath $p -Encoding UTF8
+            Write-LVTextFile -Path $p -Content (ConvertTo-LVTextReport -Result $Result)
             $written.Add($p) | Out-Null
         }
 
         if ($wantAll -or $Format -contains 'Json') {
             $p = Join-Path $OutputDir 'LogVerdict-Report.json'
             # Depth 6 covers signature -> samples[] without dragging in the whole graph.
-            $Result | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $p -Encoding UTF8
+            Write-LVTextFile -Path $p -Content ($Result | ConvertTo-Json -Depth 6)
             $written.Add($p) | Out-Null
         }
 
         if ($wantAll -or $Format -contains 'Html') {
             $p = Join-Path $OutputDir 'LogVerdict-Report.html'
-            ConvertTo-LVHtmlReport -Result $Result | Set-Content -LiteralPath $p -Encoding UTF8
+            Write-LVTextFile -Path $p -Content (ConvertTo-LVHtmlReport -Result $Result)
             $written.Add($p) | Out-Null
         }
 
         $logPath = Join-Path $OutputDir 'LogVerdict-Run.log'
-        Get-LVLogTranscript | Set-Content -LiteralPath $logPath -Encoding UTF8
+        Write-LVTextFile -Path $logPath -Content ((Get-LVLogTranscript) -join [Environment]::NewLine)
         $written.Add($logPath) | Out-Null
 
         foreach ($w in $written) {

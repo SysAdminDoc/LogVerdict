@@ -352,6 +352,33 @@ Describe 'Report rendering' {
         }
     }
 
+    It 'writes every report without a UTF-8 BOM' {
+        # Set-Content -Encoding UTF8 emits a BOM on PS 5.1 but not on PS 7, so this
+        # regresses invisibly if only pwsh is exercised. A BOM makes the JSON report
+        # unreadable to strict parsers (Python json.load raises "Unexpected UTF-8 BOM"),
+        # and that file is the machine-readable contract.
+        $out = Join-Path $TestDrive 'reports'
+        Export-LogVerdictReport -Result $script:FakeResult -OutputDir $out | Out-Null
+
+        $files = Get-ChildItem -LiteralPath $out -File
+        @($files).Count | Should -BeGreaterThan 0
+        foreach ($f in $files) {
+            $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+            $hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+            $hasBom | Should -BeFalse -Because "$($f.Name) must start with its first content byte"
+        }
+    }
+
+    It 'writes JSON that round-trips back to the same findings' {
+        $out = Join-Path $TestDrive 'reports-json'
+        Export-LogVerdictReport -Result $script:FakeResult -OutputDir $out -Format Json | Out-Null
+        $json = Get-Content -LiteralPath (Join-Path $out 'LogVerdict-Report.json') -Raw
+        $json.Substring(0, 1) | Should -Be '{'
+        $parsed = $json | ConvertFrom-Json
+        $parsed.Findings[0].Verdict | Should -Be 'actionable'
+        $parsed.Reduction.SignatureCount | Should -Be 71
+    }
+
     It 'produces a self-contained page with no external requests' {
         InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
             param($r)

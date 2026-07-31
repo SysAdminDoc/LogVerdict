@@ -53,6 +53,27 @@ function ConvertTo-LVArrayOutput {
     return , $Value
 }
 
+function Write-LVTextFile {
+    <#
+        .SYNOPSIS
+        Write UTF-8 text with no byte order mark.
+
+        .DESCRIPTION
+        `Set-Content -Encoding UTF8` emits a BOM under Windows PowerShell 5.1 (PS 7
+        does not, so the bug is invisible if you only test on pwsh). A BOM makes the
+        JSON report unreadable to strict parsers - Python's json.load raises
+        "Unexpected UTF-8 BOM" - and the JSON report is the machine-readable contract
+        this tool offers, so it has to be clean.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Content
+    )
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+}
+
 function Get-LVLogTranscript {
     return ConvertTo-LVArrayOutput -Value @($script:LVLogLines.ToArray())
 }
