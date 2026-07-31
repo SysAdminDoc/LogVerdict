@@ -2,6 +2,50 @@
 # Deliberately deterministic. Everything a reader sees here is either a curated
 # human-written explanation or an honest admission that the signature is unrecognized.
 
+function Assert-LVSchemaVersion {
+    <#
+        .SYNOPSIS
+        Refuse to read a verdict database this module does not understand.
+
+        .DESCRIPTION
+        Loading a newer schema on a best-effort basis would mean ruling on signatures
+        using only the fields this code happens to recognize, and reporting the result
+        with the same confidence as a fully understood rule. Failing loudly is the only
+        honest option for a tool whose output people act on.
+    #>
+    param(
+        [Parameter(Mandatory)]$Database,
+        [string]$Path
+    )
+
+    $version = $Database.schemaVersion
+    if ($null -eq $version) {
+        throw ("Verdict database '{0}' declares no schemaVersion. Expected {1}-{2}." -f $Path, $script:LVSchemaVersionMin, $script:LVSchemaVersionMax)
+    }
+    $v = [int]$version
+    if ($v -lt $script:LVSchemaVersionMin -or $v -gt $script:LVSchemaVersionMax) {
+        throw ("Verdict database '{0}' uses schemaVersion {1}, but this build of LogVerdict supports {2}-{3}. Upgrade LogVerdict to read it." -f `
+            $Path, $v, $script:LVSchemaVersionMin, $script:LVSchemaVersionMax)
+    }
+}
+
+function Test-LVRuleActive {
+    <#
+        .SYNOPSIS
+        Whether a rule is eligible to produce a verdict.
+
+        .DESCRIPTION
+        Deprecated and unsupported rules stay in the database so their ids remain
+        resolvable and their history is not lost, but they must never rule on a
+        signature. A rule with no status predates the status field and is treated as
+        active, which keeps schema v1 databases working.
+    #>
+    param([Parameter(Mandatory)]$Rule)
+
+    if (-not $Rule.status) { return $true }
+    return ($script:LVActiveRuleStatus -contains $Rule.status)
+}
+
 function Get-LVRuleSpecificity {
     <#
         .SYNOPSIS
@@ -60,7 +104,9 @@ function Resolve-LVVerdict {
         [Parameter(Mandatory)]$Database
     )
 
-    $rules = @($Database.rules | Sort-Object -Property @{ Expression = { Get-LVRuleSpecificity -Rule $_ } } -Descending)
+    $rules = @($Database.rules |
+        Where-Object { Test-LVRuleActive -Rule $_ } |
+        Sort-Object -Property @{ Expression = { Get-LVRuleSpecificity -Rule $_ } } -Descending)
     $results = New-Object System.Collections.Generic.List[object]
 
     foreach ($sig in $Signature) {
@@ -78,6 +124,10 @@ function Resolve-LVVerdict {
             $sig | Add-Member -NotePropertyName 'Action'     -NotePropertyValue 'Read the sample message. If you identify it, add a rule to Data/verdicts.json so the next scan explains it.' -Force
             $sig | Add-Member -NotePropertyName 'Confidence' -NotePropertyValue 'none' -Force
             $sig | Add-Member -NotePropertyName 'Reference'  -NotePropertyValue $null -Force
+            $sig | Add-Member -NotePropertyName 'References' -NotePropertyValue @() -Force
+            $sig | Add-Member -NotePropertyName 'Status'     -NotePropertyValue $null -Force
+            $sig | Add-Member -NotePropertyName 'Verified'   -NotePropertyValue $null -Force
+            $sig | Add-Member -NotePropertyName 'FalsePositives' -NotePropertyValue @() -Force
             $results.Add($sig) | Out-Null
             continue
         }
@@ -100,8 +150,18 @@ function Resolve-LVVerdict {
         $sig | Add-Member -NotePropertyName 'Plain'      -NotePropertyValue $hit.plain -Force
         $sig | Add-Member -NotePropertyName 'Why'        -NotePropertyValue $why -Force
         $sig | Add-Member -NotePropertyName 'Action'     -NotePropertyValue $hit.action -Force
+        # Schema v2 carries a references list; v1 carried a single reference. Accept
+        # both so a local database written against the old shape keeps working.
+        $refs = @()
+        if ($hit.references) { $refs = @($hit.references) }
+        elseif ($hit.reference) { $refs = @($hit.reference) }
+
         $sig | Add-Member -NotePropertyName 'Confidence' -NotePropertyValue $hit.confidence -Force
-        $sig | Add-Member -NotePropertyName 'Reference'  -NotePropertyValue $hit.reference -Force
+        $sig | Add-Member -NotePropertyName 'Reference'  -NotePropertyValue (@($refs) | Select-Object -First 1) -Force
+        $sig | Add-Member -NotePropertyName 'References' -NotePropertyValue @($refs) -Force
+        $sig | Add-Member -NotePropertyName 'Status'     -NotePropertyValue $hit.status -Force
+        $sig | Add-Member -NotePropertyName 'Verified'   -NotePropertyValue $hit.verified -Force
+        $sig | Add-Member -NotePropertyName 'FalsePositives' -NotePropertyValue @($hit.falsepositives) -Force
         $results.Add($sig) | Out-Null
     }
 

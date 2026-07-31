@@ -12,6 +12,22 @@ $script:LVVerdictRank = @{
     'critical'      = 5
 }
 
+# Verdict database schema versions this module understands. Loading a newer database
+# than the code knows about is a hard failure, not a best effort: silently mis-reading
+# rules would produce confident rulings from fields the code never looked at.
+$script:LVSchemaVersionMin = 1
+$script:LVSchemaVersionMax = 2
+
+# Rule lifecycle, aligned with the Sigma specification's 'status' vocabulary.
+# Only these statuses are ever applied to a signature; deprecated and unsupported
+# rules stay in the database for traceability but never produce a verdict.
+$script:LVRuleStatus = @('stable', 'test', 'experimental', 'deprecated', 'unsupported')
+$script:LVActiveRuleStatus = @('stable', 'test', 'experimental')
+
+# A ruling that asserts "Microsoft says ignore this" is only as good as the day it was
+# checked. Rules older than this without re-verification are reported as stale.
+$script:LVVerificationMaxAgeMonths = 24
+
 $script:LVLogLines = New-Object System.Collections.Generic.List[string]
 
 function Write-LVLog {

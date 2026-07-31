@@ -32,6 +32,50 @@ Describe 'Verdict database' {
         ($ids | Select-Object -Unique).Count | Should -Be $ids.Count
     }
 
+    It 'ships every rule with a status and a verification date' {
+        foreach ($rule in (Get-LogVerdictDatabase).rules) {
+            $rule.status | Should -Not -BeNullOrEmpty -Because "rule $($rule.id) must declare its lifecycle"
+            $rule.verified | Should -Match '^\d{4}-\d{2}-\d{2}$' -Because "rule $($rule.id) must record when its guidance was last checked"
+        }
+    }
+
+    It 'refuses a schema version this build does not understand' {
+        $future = Join-Path $TestDrive 'future.json'
+        '{ "schemaVersion": 99, "name": "future", "updated": "2026-07-31", "rules": [] }' |
+            Set-Content -LiteralPath $future -Encoding UTF8
+        { Get-LogVerdictDatabase -Path $future } | Should -Throw -ExpectedMessage '*schemaVersion 99*'
+    }
+
+    It 'refuses a database that declares no schema version' {
+        $noVer = Join-Path $TestDrive 'nover.json'
+        '{ "name": "old", "updated": "2026-07-31", "rules": [] }' |
+            Set-Content -LiteralPath $noVer -Encoding UTF8
+        { Get-LogVerdictDatabase -Path $noVer } | Should -Throw -ExpectedMessage '*no schemaVersion*'
+    }
+
+    It 'flags a rule whose verification has gone stale' {
+        $stale = Join-Path $TestDrive 'stale.json'
+        @'
+{ "schemaVersion": 2, "name": "stale", "updated": "2026-07-31", "rules": [
+  { "id": "S-1", "status": "stable", "verified": "2019-01-01",
+    "match": { "source": "event" }, "verdict": "benign",
+    "title": "t", "plain": "p", "why": "w", "action": "a", "confidence": "high" } ] }
+'@ | Set-Content -LiteralPath $stale -Encoding UTF8
+        $problems = Test-LogVerdictDatabase -Path $stale
+        @($problems | Where-Object { $_.Problem -like '*older than*' }).Count | Should -Be 1
+    }
+
+    It 'rejects a rule using an unknown status' {
+        $bad = Join-Path $TestDrive 'badstatus.json'
+        @'
+{ "schemaVersion": 2, "name": "bad", "updated": "2026-07-31", "rules": [
+  { "id": "B-1", "status": "kinda-fine", "verified": "2026-07-31",
+    "match": { "source": "event" }, "verdict": "benign",
+    "title": "t", "plain": "p", "why": "w", "action": "a", "confidence": "high" } ] }
+'@ | Set-Content -LiteralPath $bad -Encoding UTF8
+        Test-LogVerdictDatabase -Path $bad -Quiet | Should -BeFalse
+    }
+
     It 'rejects a rule using an invalid verdict' {
         $bad = Join-Path $TestDrive 'bad.json'
         @'
@@ -386,6 +430,50 @@ Describe 'Verdict resolution' {
             }
             (Resolve-LVVerdict -Signature @($quiet) -Database $db)[0].Verdict | Should -Be 'investigate'
             (Resolve-LVVerdict -Signature @($loud)  -Database $db)[0].Verdict | Should -Be 'actionable'
+        }
+    }
+
+    It 'never applies a deprecated or unsupported rule' -ForEach @(
+        @{ Status = 'deprecated' }
+        @{ Status = 'unsupported' }
+    ) {
+        InModuleScope LogVerdict -Parameters @{ status = $Status } {
+            param($status)
+            # Retired rules stay in the database so their ids remain resolvable and
+            # their history survives, but they must never rule on a signature.
+            $db = [pscustomobject]@{ schemaVersion = 2; rules = @(
+                [pscustomobject]@{
+                    id = 'RETIRED-1'; status = $status; verified = '2026-07-31'
+                    match = [pscustomobject]@{ source = 'event'; provider = 'Acme'; eventId = 1 }
+                    verdict = 'critical'; title = 't'; plain = 'p'; why = 'w'; action = 'a'; confidence = 'high'
+                }) }
+            $sig = [pscustomobject]@{
+                Key='Acme/1'; Source='event'; Channel='System'; Provider='Acme'; Id=1
+                Count=1; PerDay=0.1; SampleMessage='m'; FirstSeen=(Get-Date); LastSeen=(Get-Date)
+            }
+            $out = Resolve-LVVerdict -Signature @($sig) -Database $db
+            $out[0].Verdict | Should -Be 'unknown'
+            $out[0].RuleId | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'still applies rules from a schema v1 database with no status field' {
+        InModuleScope LogVerdict {
+            $db = [pscustomobject]@{ schemaVersion = 1; rules = @(
+                [pscustomobject]@{
+                    id = 'OLD-1'
+                    match = [pscustomobject]@{ source = 'event'; provider = 'Acme'; eventId = 1 }
+                    verdict = 'investigate'; title = 't'; plain = 'p'; why = 'w'; action = 'a'
+                    confidence = 'high'; reference = 'https://example.invalid/old'
+                }) }
+            $sig = [pscustomobject]@{
+                Key='Acme/1'; Source='event'; Channel='System'; Provider='Acme'; Id=1
+                Count=1; PerDay=0.1; SampleMessage='m'; FirstSeen=(Get-Date); LastSeen=(Get-Date)
+            }
+            $out = Resolve-LVVerdict -Signature @($sig) -Database $db
+            $out[0].RuleId | Should -Be 'OLD-1'
+            # The v1 singular 'reference' must still surface through the v2 list.
+            $out[0].References | Should -Contain 'https://example.invalid/old'
         }
     }
 

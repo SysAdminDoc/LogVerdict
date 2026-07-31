@@ -20,6 +20,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **Verdict database schema v2**, aligned with the Sigma specification's rule metadata model. Every rule now carries `status` (`stable` / `test` / `experimental` / `deprecated` / `unsupported`), a `verified` date, a `references` list replacing the single `reference`, and a `falsepositives` list naming the conditions under which the ruling is wrong. 24 of the 36 shipped rules document their false positives.
+- Deprecated and unsupported rules stay in the database for traceability but are never applied to a signature. Schema v1 databases with no `status` continue to work, and their singular `reference` still surfaces through the v2 list.
+- `Test-LogVerdictDatabase` enforces the status vocabulary and fails any rule whose `verified` date is more than 24 months old, because guidance ages across Windows releases.
+- Loading a database whose `schemaVersion` this build does not understand now fails loudly instead of silently ruling on fields the code never read.
+- Reports show each rule's verification date and its known false positives, so a reader can tell when a ruling does not apply to them.
 - Scan results carry `ChannelStatus`, `DeniedChannels`, `TruncatedChannels`, `MetadataUnreadableCount` and `CoverageNotes`.
 - All three report writers render a "what this scan could not see" section, so findings always travel with the coverage behind them.
 

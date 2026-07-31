@@ -150,7 +150,10 @@ function ConvertTo-LVTextReport {
         Add-LVLine $sb ('[{0}] {1}' -f $f.Verdict.ToUpper(), $f.Title)
         Add-LVLine $sb ('  Signature   : {0}' -f $f.Key)
         Add-LVLine $sb ('  Occurrences : {0} ({1}/day) between {2} and {3}' -f $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen))
-        Add-LVLine $sb ('  Rule        : {0} (confidence: {1})' -f $f.RuleId, $f.Confidence)
+        Add-LVLine $sb ('  Rule        : {0} (confidence: {1}{2})' -f $f.RuleId, $f.Confidence, $(if ($f.Verified) { ', verified ' + $f.Verified } else { '' }))
+        foreach ($fp in @($f.FalsePositives)) {
+            Add-LVLine $sb ('  Not this if : {0}' -f $fp)
+        }
         Add-LVLine $sb ('  Means       : {0}' -f $f.Plain)
         Add-LVLine $sb ('  Matters     : {0}' -f $f.Why)
         Add-LVLine $sb ('  Do this     : {0}' -f $f.Action)
@@ -211,6 +214,8 @@ background:var(--s0);vertical-align:2px}
 .row .lbl{color:var(--over);min-width:96px;flex-shrink:0;font-size:12px;
 text-transform:uppercase;letter-spacing:.6px;padding-top:2px}
 .act{color:#a6e3a1}
+ul.fp{margin:0;padding-left:18px}
+ul.fp li{margin:2px 0}
 pre.ev{background:var(--crust);border:1px solid var(--s0);border-radius:6px;padding:10px 12px;
 margin:12px 0 0;font:12px/1.5 Consolas,monospace;color:var(--sub);
 white-space:pre-wrap;word-break:break-word;max-height:180px;overflow:auto}
@@ -250,10 +255,14 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
 
         Add-LVLine $sb ('<div class="f" style="border-left-color:{0}">' -f $hex)
         Add-LVLine $sb ('<h2><span class="badge" style="color:{0}">{1}</span>{2}</h2>' -f $hex, $f.Verdict, (ConvertTo-LVHtmlEncoded $f.Title))
-        Add-LVLine $sb ('<div class="meta">{0} &middot; {1} occurrence(s) &middot; {2}/day &middot; {3} to {4} &middot; rule {5} ({6})</div>' -f (ConvertTo-LVHtmlEncoded $f.Key), $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen), $f.RuleId, $f.Confidence)
+        Add-LVLine $sb ('<div class="meta">{0} &middot; {1} occurrence(s) &middot; {2}/day &middot; {3} to {4} &middot; rule {5} ({6}{7})</div>' -f (ConvertTo-LVHtmlEncoded $f.Key), $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen), $f.RuleId, $f.Confidence, $(if ($f.Verified) { ', verified ' + $f.Verified } else { '' }))
         Add-LVLine $sb ('<div class="row"><div class="lbl">Means</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.Plain))
         Add-LVLine $sb ('<div class="row"><div class="lbl">Matters</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.Why))
         Add-LVLine $sb ('<div class="row"><div class="lbl">Do this</div><div class="act">{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.Action))
+        if (@($f.FalsePositives).Count -gt 0) {
+            $fpItems = ((@($f.FalsePositives) | ForEach-Object { '<li>' + (ConvertTo-LVHtmlEncoded $_) + '</li>' }) -join '')
+            Add-LVLine $sb ('<div class="row"><div class="lbl">Not this if</div><div><ul class="fp">{0}</ul></div></div>' -f $fpItems)
+        }
         if ($f.Reference) {
             $ref = ConvertTo-LVHtmlEncoded $f.Reference
             Add-LVLine $sb ('<div class="row"><div class="lbl">Reference</div><div><a href="{0}">{1}</a></div></div>' -f $ref, $ref)

@@ -31,6 +31,7 @@ function Get-LogVerdictDatabase {
     }
 
     $db = Get-Content -LiteralPath $basePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-LVSchemaVersion -Database $db -Path $basePath
     $rules = New-Object System.Collections.Generic.List[object]
 
     # Local overrides load first so they win ties against the shipped rules.
@@ -45,6 +46,7 @@ function Get-LogVerdictDatabase {
             continue
         }
         $addl = Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json
+        Assert-LVSchemaVersion -Database $addl -Path $p
         foreach ($r in $addl.rules) { $rules.Add($r) | Out-Null }
         Write-LVLog -Level ok -Message ("Merged {0} rule(s) from {1}" -f @($addl.rules).Count, (Split-Path $p -Leaf))
     }

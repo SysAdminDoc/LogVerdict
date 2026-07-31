@@ -27,6 +27,13 @@ function Test-LogVerdictDatabase {
 
     $required = @('id', 'verdict', 'title', 'plain', 'why', 'action', 'confidence')
     $validVerdicts = @($script:LVVerdictRank.Keys)
+    $schemaVersion = [int]$db.schemaVersion
+
+    # Provenance is only required from the schema version that introduced it, so a
+    # hand-written v1 local database keeps validating.
+    if ($schemaVersion -ge 2) { $required += @('status', 'verified') }
+
+    $staleBefore = (Get-Date).AddMonths(-1 * $script:LVVerificationMaxAgeMonths)
 
     foreach ($rule in $db.rules) {
         $id = $rule.id
@@ -56,6 +63,30 @@ function Test-LogVerdictDatabase {
             } catch {
                 $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("messagePattern is not a valid regex: {0}" -f $_.Exception.Message) }) | Out-Null
             }
+        }
+
+        if ($rule.status -and $script:LVRuleStatus -notcontains $rule.status) {
+            $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("unknown status '{0}'; valid: {1}" -f $rule.status, ($script:LVRuleStatus -join ', ')) }) | Out-Null
+        }
+
+        if ($rule.verified) {
+            $verifiedOn = [datetime]::MinValue
+            $parsed = [datetime]::TryParseExact(
+                [string]$rule.verified, 'yyyy-MM-dd',
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::None, [ref]$verifiedOn)
+
+            if (-not $parsed) {
+                $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("verified '{0}' is not an ISO date (yyyy-MM-dd)" -f $rule.verified) }) | Out-Null
+            } elseif ($verifiedOn -lt $staleBefore -and $rule.status -ne 'deprecated') {
+                # Guidance ages. A rule asserting what Microsoft recommends can quietly
+                # become wrong across Windows releases, so re-verification is enforced.
+                $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("last verified {0}, older than {1} months; re-verify or mark deprecated" -f $rule.verified, $script:LVVerificationMaxAgeMonths) }) | Out-Null
+            }
+        }
+
+        if ($null -ne $rule.falsepositives -and $rule.falsepositives -isnot [array] -and $rule.falsepositives -isnot [System.Collections.IEnumerable]) {
+            $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'falsepositives must be a list' }) | Out-Null
         }
 
         if ($rule.escalate) {
