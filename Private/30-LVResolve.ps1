@@ -150,7 +150,15 @@ function Resolve-LVVerdict {
         Sort-Object -Property @{ Expression = { Get-LVRuleSpecificity -Rule $_ } } -Descending)
     $results = New-Object System.Collections.Generic.List[object]
 
-    foreach ($sig in $Signature) {
+    foreach ($original in $Signature) {
+        # Copy before annotating. Add-Member -Force on the caller's object means
+        # resolving the same signatures against a second database leaves stale verdict
+        # properties from the first pass on objects the caller still holds.
+        $sig = [pscustomobject]@{}
+        foreach ($prop in $original.PSObject.Properties) {
+            $sig | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+        }
+
         $hit = $null
         foreach ($rule in $rules) {
             if (Test-LVRuleMatch -Rule $rule -Signature $sig) { $hit = $rule; break }

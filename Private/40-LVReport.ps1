@@ -186,7 +186,11 @@ function ConvertTo-LVHtmlReport {
     Add-LVLine $sb '<style>'
     Add-LVLine $sb @'
 :root{--base:#1e1e2e;--mantle:#181825;--crust:#11111b;--s0:#313244;--s1:#45475a;
---text:#cdd6f4;--sub:#a6adc8;--over:#6c7086;--blue:#89b4fa;--mauve:#cba6f7}
+--text:#cdd6f4;--sub:#a6adc8;--over:#9399b2;--blue:#89b4fa;--mauve:#cba6f7}
+/* --over carries the signature key, counts, dates and rule id at 11-13px, so it
+   is content, not decoration, and must clear WCAG AA 4.5:1 for small text.
+   Measured against the two surfaces it sits on: 6.22:1 on --mantle #181825,
+   5.81:1 on --base #1e1e2e. The previous #6c7086 measured 3.59 and 3.36. */
 *{box-sizing:border-box}
 body{margin:0;background:var(--base);color:var(--text);
 font:15px/1.6 "Segoe UI",system-ui,-apple-system,sans-serif}

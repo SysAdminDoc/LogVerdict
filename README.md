@@ -36,7 +36,7 @@ Collect  ->  Reduce  ->  Resolve  ->  Report
 ```
 
 1. **Collect** - read-only. Nothing on the machine is modified beyond the report folder.
-2. **Reduce** - event records group by `Provider + EventID`. Text-log lines group by a masked template (GUIDs, paths, hex, numbers and timestamps replaced), so the same failure recurring with different parameters collapses to one entry. On a typical machine this is a **26:1 reduction**.
+2. **Reduce** - event records group by `Provider + EventID`. Text-log lines group by a masked template (GUIDs, paths, hex, numbers and timestamps replaced), so the same failure recurring with different parameters collapses to one entry. On a typical machine this is a **26:1 reduction**, rising to **311:1** across every populated channel.
 3. **Resolve** - each signature is matched against [`Data/verdicts.json`](Data/verdicts.json), a curated database of human-written rulings. Most-specific rule wins. Some rules escalate by rate: corrected hardware errors are noise at a trickle and a failing component at volume.
 4. **Report** - console, plain text, JSON, and a self-contained dark HTML page that opens anywhere with no network access.
 
@@ -127,7 +127,7 @@ Invoke-Pester -Path .\Tests
 
 ## Honest limitations
 
-- **Coverage is the roadmap.** 36 rules ship. A first scan will report plenty of `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
+- **Coverage is the roadmap.** 65 rules ship. A first scan will report plenty of `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
 - **Crash dumps are inventoried, not decoded.** Reading a minidump needs a debugger and symbols.
 - **A clean result is not proof of health.** An in-place upgrade or a cleared log resets the event channels, so the report states each channel's oldest surviving record and warns when that horizon falls inside the requested window.
 - Only the live machine is supported today. Offline analysis of a collected evidence bundle is planned.

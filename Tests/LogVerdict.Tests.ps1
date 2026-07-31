@@ -719,6 +719,32 @@ Describe 'Verdict resolution' {
         }
     }
 
+    It 'does not annotate the caller signature objects' {
+        InModuleScope LogVerdict {
+            # Add-Member -Force on the input would leave a first pass's verdict on
+            # objects the caller still holds, so a second resolve against a different
+            # database silently inherits stale properties.
+            $sig = [pscustomobject]@{
+                Key='Acme/1'; Source='event'; Channel='System'; Provider='Acme'; Id=1
+                Count=1; PerDay=0.1; SampleMessage='m'; FirstSeen=(Get-Date); LastSeen=(Get-Date)
+            }
+            $db = [pscustomobject]@{ schemaVersion = 2; rules = @(
+                [pscustomobject]@{
+                    id='PURE-1'; status='stable'; verified='2026-07-31'
+                    match=[pscustomobject]@{ source='event'; provider='Acme'; eventId=1 }
+                    verdict='critical'; title='t'; plain='p'; why='w'; action='a'; confidence='high'
+                }) }
+
+            $out = Resolve-LVVerdict -Signature @($sig) -Database $db
+            $out[0].Verdict | Should -Be 'critical'
+            $sig.PSObject.Properties.Name | Should -Not -Contain 'Verdict'
+
+            # An empty database must now yield unknown, not the previous run's verdict.
+            $empty = [pscustomobject]@{ schemaVersion = 2; rules = @() }
+            (Resolve-LVVerdict -Signature @($sig) -Database $empty)[0].Verdict | Should -Be 'unknown'
+        }
+    }
+
     It 'sorts an unknown above merely informational findings' {
         InModuleScope LogVerdict {
             (Get-LVVerdictRank -Verdict 'unknown') | Should -BeGreaterThan (Get-LVVerdictRank -Verdict 'informational')
