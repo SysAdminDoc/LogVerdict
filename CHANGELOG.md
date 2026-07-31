@@ -27,6 +27,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `Test-LogVerdictDatabase` enforces the status vocabulary and fails any rule whose `verified` date is more than 24 months old, because guidance ages across Windows releases.
 - Loading a database whose `schemaVersion` this build does not understand now fails loudly instead of silently ruling on fields the code never read.
 - Reports show each rule's verification date and its known false positives, so a reader can tell when a ruling does not apply to them.
+- Per-channel progress during probing and reading, so an `-AllChannels` sweep (128 channels, ~38s) no longer sits silent long enough to look hung. Suppressed for small scans.
 - Scan results carry `ChannelStatus`, `DeniedChannels`, `TruncatedChannels`, `MetadataUnreadableCount` and `CoverageNotes`.
 - All three report writers render a "what this scan could not see" section, so findings always travel with the coverage behind them.
 

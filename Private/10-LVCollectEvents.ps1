@@ -59,7 +59,17 @@ function Get-LVChannelStatus {
     param([string[]]$Channel = (Get-LVDefaultChannel))
 
     $status = @{}
+    $total = @($Channel).Count
+    $done = 0
     foreach ($ch in $Channel) {
+        $done++
+        # -AllChannels probes ~128 channels and takes tens of seconds. Without this the
+        # tool sits silent long enough to look hung.
+        if ($total -gt 8) {
+            Write-Progress -Id 1 -Activity 'LogVerdict: probing event channels' `
+                -Status ("{0} of {1}: {2}" -f $done, $total, $ch) `
+                -PercentComplete ([Math]::Min(100, [int](100 * $done / $total)))
+        }
         $entry = [pscustomobject]@{
             Channel = $ch
             Access  = 'readable'
@@ -79,6 +89,7 @@ function Get-LVChannelStatus {
         }
         $status[$ch] = $entry
     }
+    if ($total -gt 8) { Write-Progress -Id 1 -Activity 'LogVerdict: probing event channels' -Completed }
     return $status
 }
 
@@ -151,7 +162,16 @@ function Get-LVEventRecord {
     $denied = New-Object System.Collections.Generic.List[string]
     $truncated = New-Object System.Collections.Generic.List[string]
 
+    $total = @($Channel).Count
+    $done = 0
     foreach ($ch in $Channel) {
+        $done++
+        if ($total -gt 8) {
+            Write-Progress -Id 2 -Activity 'LogVerdict: reading event channels' `
+                -Status ("{0} of {1}: {2} ({3} records so far)" -f $done, $total, $ch, $records.Count) `
+                -PercentComplete ([Math]::Min(100, [int](100 * $done / $total)))
+        }
+
         # A denied channel answers the FilterHashtable query with "no events found",
         # so trust the -LogName probe instead of asking and believing the answer.
         if ($ChannelStatus -and $ChannelStatus.ContainsKey($ch)) {
@@ -204,6 +224,8 @@ function Get-LVEventRecord {
             }) | Out-Null
         }
     }
+
+    if ($total -gt 8) { Write-Progress -Id 2 -Activity 'LogVerdict: reading event channels' -Completed }
 
     $script:LVDeniedChannel = @($denied.ToArray())
     $script:LVTruncatedChannel = @($truncated.ToArray())
