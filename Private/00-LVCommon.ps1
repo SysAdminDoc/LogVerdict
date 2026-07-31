@@ -28,6 +28,11 @@ $script:LVActiveRuleStatus = @('stable', 'test', 'experimental')
 # checked. Rules older than this without re-verification are reported as stale.
 $script:LVVerificationMaxAgeMonths = 24
 
+# The machine's UI language, captured once. Rules whose messagePattern is matched
+# against localized event text declare the locale they were written for, and are
+# skipped when it does not match rather than silently failing to fire.
+$script:LVUICulture = (Get-UICulture).Name
+
 $script:LVLogLines = New-Object System.Collections.Generic.List[string]
 
 function Write-LVLog {

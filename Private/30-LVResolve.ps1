@@ -83,12 +83,53 @@ function Test-LVRuleMatch {
     if ($null -ne $m.eventId -and [int]$m.eventId -ne [int]$Signature.Id) { return $false }
 
     if ($m.messagePattern) {
+        # Event messages are rendered from the provider's localized MUI resources, so an
+        # English pattern silently stops matching on a German or Japanese install. Text
+        # logs (CBS, DISM, SetupAPI) are written in invariant English by the component
+        # that produces them, so they need no such guard.
+        if (Test-LVLocaleSensitiveMatch -Rule $Rule) {
+            $assumed = $Rule.locale
+            if ($assumed -and -not (Test-LVLocaleMatch -Assumed $assumed)) { return $false }
+        }
+
         $haystack = $Signature.SampleMessage
         if (-not $haystack) { $haystack = '' }
         if ($haystack -notmatch $m.messagePattern) { return $false }
     }
 
     return $true
+}
+
+function Test-LVLocaleSensitiveMatch {
+    <#
+        .SYNOPSIS
+        Whether a rule's messagePattern is matched against localized text.
+    #>
+    param([Parameter(Mandatory)]$Rule)
+
+    if (-not $Rule.match.messagePattern) { return $false }
+    # Absent source means events, which is the localized case.
+    $source = $Rule.match.source
+    return (-not $source -or $source -eq 'event')
+}
+
+function Test-LVLocaleMatch {
+    <#
+        .SYNOPSIS
+        Whether the machine's UI language matches what a rule assumes.
+
+        .DESCRIPTION
+        Compared on the language part only: a rule written against 'en-US' message text
+        matches an 'en-GB' machine, because the provider's English resources are the
+        same strings.
+    #>
+    param([Parameter(Mandatory)][string]$Assumed)
+
+    $current = $script:LVUICulture
+    if (-not $current) { return $true }
+    $a = ($Assumed -split '-')[0]
+    $c = ($current -split '-')[0]
+    return ($a -eq $c)
 }
 
 function Resolve-LVVerdict {

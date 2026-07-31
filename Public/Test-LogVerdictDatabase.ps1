@@ -89,6 +89,16 @@ function Test-LogVerdictDatabase {
             $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'falsepositives must be a list' }) | Out-Null
         }
 
+        if ($rule.match -and $rule.match.messagePattern) {
+            $src = $rule.match.source
+            if ((-not $src -or $src -eq 'event') -and -not $rule.locale) {
+                # Event message text is localized, so a pattern written against English
+                # will silently stop matching on a non-English Windows. Declaring the
+                # locale makes the rule skip instead of quietly failing.
+                $problems.Add([pscustomobject]@{ RuleId = $id; Problem = "messagePattern matches localized event text but declares no 'locale'" }) | Out-Null
+            }
+        }
+
         if ($rule.escalate) {
             if ($null -eq $rule.escalate.perDay) {
                 $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'escalate block without perDay threshold' }) | Out-Null

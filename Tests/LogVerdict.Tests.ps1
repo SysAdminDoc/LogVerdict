@@ -644,6 +644,61 @@ Describe 'Verdict resolution' {
         }
     }
 
+    It 'skips a localized-message rule when the machine language does not match' {
+        InModuleScope LogVerdict {
+            # Event Message text comes from the provider's localized MUI resources, so
+            # an English pattern cannot match on a German install. Skipping makes the
+            # signature fall through to unknown, which is honest; matching anyway would
+            # be impossible and failing silently would be invisible.
+            $db = [pscustomobject]@{ schemaVersion = 2; rules = @(
+                [pscustomobject]@{
+                    id = 'LOC-1'; status = 'stable'; verified = '2026-07-31'; locale = 'en-US'
+                    match = [pscustomobject]@{ source = 'event'; provider = 'Acme'; messagePattern = 'disk is full' }
+                    verdict = 'actionable'; title = 't'; plain = 'p'; why = 'w'; action = 'a'; confidence = 'high'
+                }) }
+            $sig = [pscustomobject]@{
+                Key='Acme/1'; Source='event'; Channel='System'; Provider='Acme'; Id=1
+                Count=1; PerDay=0.1; SampleMessage='the disk is full'; FirstSeen=(Get-Date); LastSeen=(Get-Date)
+            }
+
+            $original = $script:LVUICulture
+            try {
+                $script:LVUICulture = 'en-GB'
+                # Same language, different region: the provider strings are identical.
+                (Resolve-LVVerdict -Signature @($sig) -Database $db)[0].RuleId | Should -Be 'LOC-1'
+
+                $script:LVUICulture = 'de-DE'
+                (Resolve-LVVerdict -Signature @($sig) -Database $db)[0].Verdict | Should -Be 'unknown'
+            } finally {
+                $script:LVUICulture = $original
+            }
+        }
+    }
+
+    It 'applies a text-log message rule regardless of machine language' {
+        InModuleScope LogVerdict {
+            # CBS, DISM and SetupAPI are written in invariant English by the component
+            # that produces them, so they must not be gated on the UI culture.
+            $db = [pscustomobject]@{ schemaVersion = 2; rules = @(
+                [pscustomobject]@{
+                    id = 'TXT-1'; status = 'stable'; verified = '2026-07-31'
+                    match = [pscustomobject]@{ source = 'textlog'; channel = 'CBS'; messagePattern = 'corrupt' }
+                    verdict = 'actionable'; title = 't'; plain = 'p'; why = 'w'; action = 'a'; confidence = 'high'
+                }) }
+            $sig = [pscustomobject]@{
+                Key='CBS/abc'; Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0
+                Count=1; PerDay=0.1; SampleMessage='store is corrupt'; FirstSeen=(Get-Date); LastSeen=(Get-Date)
+            }
+            $original = $script:LVUICulture
+            try {
+                $script:LVUICulture = 'ja-JP'
+                (Resolve-LVVerdict -Signature @($sig) -Database $db)[0].RuleId | Should -Be 'TXT-1'
+            } finally {
+                $script:LVUICulture = $original
+            }
+        }
+    }
+
     It 'sorts an unknown above merely informational findings' {
         InModuleScope LogVerdict {
             (Get-LVVerdictRank -Verdict 'unknown') | Should -BeGreaterThan (Get-LVVerdictRank -Verdict 'informational')
