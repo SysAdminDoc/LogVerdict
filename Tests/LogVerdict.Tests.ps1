@@ -12,9 +12,21 @@ Describe 'Module surface' {
             'Export-LogVerdictReport',
             'Get-LogVerdictDatabase',
             'Invoke-LogVerdictScan',
+            'Show-LogVerdictGui',
             'Show-LogVerdictReport',
             'Test-LogVerdictDatabase'
         )
+    }
+
+    It 'declares the same functions in the manifest as the module exports' {
+        # These two lists are edited by hand in separate files. A function present in
+        # one and not the other imports fine from a checkout and disappears from an
+        # installed module, which is the sort of gap that only shows up on someone
+        # else's machine.
+        $root = Split-Path $PSScriptRoot -Parent
+        $manifest = Import-PowerShellDataFile -Path (Join-Path $root 'LogVerdict.psd1')
+        $exported = (Get-Module LogVerdict).ExportedFunctions.Keys | Sort-Object
+        ($manifest.FunctionsToExport | Sort-Object) | Should -Be $exported
     }
 }
 
@@ -820,7 +832,7 @@ Describe 'Verdict resolution' {
 Describe 'Report rendering' {
     BeforeAll {
         $script:FakeResult = [pscustomobject]@{
-            Tool = 'LogVerdict'; Version = '0.3.1'; MachineName = 'TESTPC'
+            Tool = 'LogVerdict'; Version = '0.4.0'; MachineName = 'TESTPC'
             ScanTime = (Get-Date '2026-07-31 12:00:00'); Duration = [timespan]::FromSeconds(3)
             DaysBack = 30; Elevated = $false; Channels = @('System', 'Application')
             Reduction = [pscustomobject]@{
@@ -895,6 +907,235 @@ Describe 'Report rendering' {
             $html = ConvertTo-LVHtmlReport -Result $r
             $html | Should -Not -Match '<link[^>]+href="http'
             $html | Should -Not -Match '<script[^>]+src='
+        }
+    }
+}
+
+Describe 'GUI markup' {
+    It 'is well-formed XML' {
+        # XamlReader.Parse is stricter than it looks. XML forbids a double hyphen
+        # inside a comment, so a decorative section divider drawn with dashes throws
+        # at parse time and takes the whole window down with it.
+        InModuleScope LogVerdict {
+            { [xml](Get-LVGuiXaml) } | Should -Not -Throw
+        }
+    }
+
+    It 'declares every element the window code resolves' {
+        # Show-LogVerdictGui resolves this list through FindName and throws on the
+        # first miss. Catching a rename here means catching it before a build rather
+        # than when a user clicks something.
+        InModuleScope LogVerdict {
+            $xaml = Get-LVGuiXaml
+            $missing = @($script:LVGuiElement | Where-Object { $xaml -notmatch ('x:Name="{0}"' -f [regex]::Escape($_)) })
+            ($missing -join ', ') | Should -BeExactly ''
+        }
+    }
+
+    It 'binds only to properties the row objects actually carry' {
+        # A misspelled binding path fails silently in WPF - the cell simply renders
+        # empty - so the columns are checked against the row shape instead.
+        InModuleScope LogVerdict {
+            $sig = [pscustomobject]@{
+                Key = 'Contoso/7'; Source = 'event'; Channel = 'System'; Provider = 'Contoso'
+                Id = 7; Count = 3; PerDay = 1.5; LastSeen = (Get-Date); UndatedCount = 0
+                SampleMessage = 'x'; Verdict = 'actionable'; Title = 'T'; RuleId = 'LV-0001'
+            }
+            $row = @(ConvertTo-LVGuiRow -Finding @($sig))[0]
+            $names = $row.PSObject.Properties.Name
+
+            $xaml = Get-LVGuiXaml
+            $bound = [regex]::Matches($xaml, '\{Binding (\w+)\}') |
+                ForEach-Object { $_.Groups[1].Value } |
+                Sort-Object -Unique
+
+            @($bound).Count | Should -BeGreaterThan 0
+            foreach ($b in $bound) { $names | Should -Contain $b }
+        }
+    }
+
+    It 'gives every verdict a palette entry with dark ink on a light fill' {
+        InModuleScope LogVerdict {
+            foreach ($v in $script:LVVerdictRank.Keys) {
+                $style = Get-LVVerdictStyle -Verdict $v
+                $style.Label | Should -Not -BeNullOrEmpty
+                $style.Fill  | Should -Match '^#[0-9a-f]{6}$'
+                $style.Ink   | Should -Match '^#[0-9a-f]{6}$'
+            }
+        }
+    }
+
+    It 'sorts columns on a key rather than on the displayed text' {
+        # "3 days ago" and "CRITICAL" both sort alphabetically into nonsense, so every
+        # sortable header must map to a real, orderable row property.
+        InModuleScope LogVerdict {
+            $sig = [pscustomobject]@{
+                Key = 'Contoso/7'; Source = 'event'; Channel = 'System'; Provider = 'Contoso'
+                Id = 7; Count = 3; PerDay = 1.5; LastSeen = (Get-Date); UndatedCount = 0
+                SampleMessage = 'x'; Verdict = 'critical'; Title = 'T'; RuleId = $null
+            }
+            $row = @(ConvertTo-LVGuiRow -Finding @($sig))[0]
+            foreach ($key in $script:LVGuiSortKey.Values) {
+                $row.PSObject.Properties.Name | Should -Contain $key
+            }
+            $row.VerdictRank  | Should -BeOfType [int]
+            $row.LastSeenSort | Should -BeOfType [datetime]
+        }
+    }
+}
+
+Describe 'GUI row projection' {
+    It 'dates an undated signature to DateTime.MinValue rather than to now' {
+        # Undated text-log lines must sort to the bottom of a last-seen sort, not to
+        # the top as if they had just happened.
+        InModuleScope LogVerdict {
+            $sig = [pscustomobject]@{
+                Key = 'CBS/abc'; Source = 'text'; Channel = 'CBS'; Provider = $null
+                Id = $null; Count = 1; PerDay = 0.03; LastSeen = $null; UndatedCount = 1
+                SampleMessage = 'x'; Verdict = 'unknown'; Title = 'T'; RuleId = $null
+            }
+            $row = @(ConvertTo-LVGuiRow -Finding @($sig))[0]
+            $row.LastSeenText | Should -BeExactly 'undated'
+            $row.LastSeenSort | Should -Be ([datetime]::MinValue)
+        }
+    }
+
+    It 'pads the per-day rate to two places so the column lines up' {
+        InModuleScope LogVerdict {
+            $make = {
+                param($Rate)
+                [pscustomobject]@{
+                    Key = 'C/1'; Source = 'event'; Channel = 'System'; Provider = 'C'
+                    Id = 1; Count = 2; PerDay = $Rate; LastSeen = (Get-Date); UndatedCount = 0
+                    SampleMessage = 'x'; Verdict = 'unknown'; Title = 'T'; RuleId = $null
+                }
+            }
+            (@(ConvertTo-LVGuiRow -Finding @((& $make 0.7)))[0]).PerDayText | Should -BeExactly '0.70'
+            (@(ConvertTo-LVGuiRow -Finding @((& $make 10)))[0]).PerDayText  | Should -BeExactly '10.00'
+        }
+    }
+
+    It 'returns an empty array for no findings rather than a phantom item' {
+        InModuleScope LogVerdict {
+            @(ConvertTo-LVGuiRow -Finding @()).Count | Should -Be 0
+        }
+    }
+
+    It 'lower-cases the search haystack so filtering is case-insensitive' {
+        InModuleScope LogVerdict {
+            $sig = [pscustomobject]@{
+                Key = 'Contoso/7'; Source = 'event'; Channel = 'System'; Provider = 'Contoso'
+                Id = 7; Count = 1; PerDay = 1; LastSeen = (Get-Date); UndatedCount = 0
+                SampleMessage = 'A LOUD Message'; Verdict = 'unknown'; Title = 'Title'; RuleId = $null
+            }
+            $row = @(ConvertTo-LVGuiRow -Finding @($sig))[0]
+            $row.Haystack | Should -BeExactly $row.Haystack.ToLowerInvariant()
+            $row.Haystack | Should -Match 'contoso'
+        }
+    }
+}
+
+Describe 'GUI list binding safety' {
+    It 'never hands a bare string to an ItemsSource' {
+        # A string is IEnumerable. Assigning one directly to ItemsSource binds to its
+        # characters, and a rule caveat renders one letter per line - which is exactly
+        # what happened until it was caught on screen. Every assignment must cast.
+        $gui = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1'
+        $assignments = [regex]::Matches((Get-Content -LiteralPath $gui -Raw), '(?m)\.ItemsSource\s*=\s*(.+)$')
+        @($assignments).Count | Should -BeGreaterThan 0
+        foreach ($a in $assignments) {
+            $rhs = $a.Groups[1].Value.Trim()
+            # A CollectionView is already a real collection; anything else must be cast
+            # to an array type so a one-element result cannot arrive as a scalar string.
+            if ($rhs -ne '$view') {
+                $rhs | Should -Match '^\[string\[\]\]|^\[object\[\]\]'
+            }
+        }
+    }
+}
+
+Describe 'GUI entry script' {
+    It 'relaunches itself STA rather than failing on a multi-threaded apartment' {
+        $entry = Join-Path (Split-Path $PSScriptRoot -Parent) 'LogVerdict-GUI.ps1'
+        $text = Get-Content -LiteralPath $entry -Raw
+        $text | Should -Match "GetApartmentState\(\) -ne 'STA'"
+        $text | Should -Match "'-STA'"
+    }
+
+    It 'writes a crash log when the window cannot start' {
+        # A GUI that dies before painting has nowhere to show an error. Without this
+        # the failure mode is a window that simply never appears.
+        $entry = Join-Path (Split-Path $PSScriptRoot -Parent) 'LogVerdict-GUI.ps1'
+        $text = Get-Content -LiteralPath $entry -Raw
+        $text | Should -Match 'crash-'
+        $text | Should -Match 'MessageBox'
+    }
+
+    It 'exposes the module-import marker the build cuts on' {
+        # Tools\Build-LogVerdictExe.ps1 finds this exact line to split the entry script
+        # in two. Rewording it fails the build loudly - which is the intent - but this
+        # says why before anyone goes looking.
+        $entry = Join-Path (Split-Path $PSScriptRoot -Parent) 'LogVerdict-GUI.ps1'
+        (Get-Content -LiteralPath $entry -Raw) | Should -Match 'Import-Module \$modulePath -Force -ErrorAction Stop'
+    }
+}
+
+Describe 'GUI background scan' {
+    It 'streams log lines as level, timestamp and message' {
+        # The GUI splits on the pipe with a cap of 3 so a message carrying its own
+        # pipe characters survives intact.
+        InModuleScope LogVerdict {
+            $queue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
+            $script:LVLogSink = $queue
+            try {
+                Write-LVLog -Level warn -Message 'a | b | c'
+            } finally {
+                $script:LVLogSink = $null
+            }
+
+            $line = $null
+            $queue.TryDequeue([ref]$line) | Should -BeTrue
+            $parts = $line.Split(@('|'), 3, [System.StringSplitOptions]::None)
+            $parts[0] | Should -BeExactly 'warn'
+            $parts[1] | Should -Match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+            $parts[2] | Should -BeExactly 'a | b | c'
+        }
+    }
+
+    It 'leaves no sink behind for an ordinary console run' {
+        InModuleScope LogVerdict {
+            $script:LVLogSink | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'runs a real scan in a worker runspace and returns the result' {
+        # The window is only as good as this: if the runspace bootstrap cannot
+        # reconstitute LogVerdict, the GUI shows a spinner forever.
+        InModuleScope LogVerdict {
+            $queue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
+            $job = Start-LVScanJob -ScanArgs @{ DaysBack = 1; SkipTextLogs = $true } -LogSink $queue
+            $job.Mode | Should -BeExactly 'module'
+
+            $deadline = (Get-Date).AddSeconds(120)
+            while (-not $job.Async.IsCompleted -and (Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 200
+            }
+            $job.Async.IsCompleted | Should -BeTrue -Because 'a one-day scan must not take two minutes'
+
+            $result = Complete-LVScanJob -Job $job
+            $result.Tool | Should -BeExactly 'LogVerdict'
+            $result.PSObject.Properties['ExitCode'] | Should -Not -BeNullOrEmpty
+            $queue.Count | Should -BeGreaterThan 0 -Because 'the worker must stream progress back'
+        }
+    }
+
+    It 'tears a job down without throwing, twice' {
+        InModuleScope LogVerdict {
+            $queue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
+            $job = Start-LVScanJob -ScanArgs @{ DaysBack = 1; SkipTextLogs = $true } -LogSink $queue
+            { Stop-LVScanJob -Job $job -Confirm:$false } | Should -Not -Throw
+            { Stop-LVScanJob -Job $job -Confirm:$false } | Should -Not -Throw
+            { Stop-LVScanJob -Job $null -Confirm:$false } | Should -Not -Throw
         }
     }
 }

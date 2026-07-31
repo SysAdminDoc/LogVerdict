@@ -1,10 +1,14 @@
 # LogVerdict
 
-![Version](https://img.shields.io/badge/version-0.3.1-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207.x-5391FE)
+![Version](https://img.shields.io/badge/version-0.4.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207.x-5391FE)
 
 Scan a Windows PC's logs, collapse them into the handful of distinct things that actually happened, and rule on each one in plain English: **what it means, why it matters, and what to do about it.**
 
 Event Viewer shows you 1,855 red icons. LogVerdict shows you 71 signatures, tells you that 1,017 of them are one warning Microsoft documents as harmless, and puts the disk error you actually needed to see at the top.
+
+![The LogVerdict window](docs/screenshot-gui.png)
+
+There are two front ends over one engine: a window for reading, and a console tool for scripting. Neither can disagree with the other, because both call the same scan.
 
 ## Why
 
@@ -44,6 +48,24 @@ Collect  ->  Reduce  ->  Resolve  ->  Report
 
 ## Usage
 
+### The window
+
+`LogVerdict-GUI.exe` is the whole tool in one double-clickable file. It scans, ranks the findings worst-first, and explains the selected one in plain English beside the raw evidence it was ruled on.
+
+- **Verdict chips** on the left double as filters - click one to show or hide that class of finding.
+- **The search box** filters on title, provider, event id and message text at once.
+- **What this scan could not see** is always on screen. A finding list is only as trustworthy as the coverage behind it, so denied channels, truncated logs and a missing elevation say so rather than being quietly absent.
+- **Save report** writes the same text, JSON and HTML bundle the console tool produces.
+- The scan runs on a background thread, so the window stays responsive and can be cancelled mid-run.
+
+Elevation is optional and never forced. Without it the Security channel and some setup logs are unreadable; the window says so in a banner and offers to restart elevated.
+
+```
+LogVerdict-GUI.exe                    open the window
+LogVerdict-GUI.exe -AutoScan          scan immediately on open
+LogVerdict-GUI.exe -DaysBack 7        pre-fill a narrower window
+```
+
 ### The executable
 
 `LogVerdict.exe` is a single self-contained file with the verdict database compiled in. Copy it to the machine you are troubleshooting and run it - nothing is installed and there are no dependencies.
@@ -60,19 +82,23 @@ Double-clicked, it holds the console window open until you press Enter. Run from
 
 It is **unsigned by design** - this project does not code-sign. SmartScreen will warn on first run: choose **More info** then **Run anyway**.
 
-Drop a `verdicts.local.json` beside the .exe to add your own rules; they are merged automatically and win ties against the compiled-in ones. A full `Dataerdicts.json` beside the .exe replaces the compiled-in database entirely.
+Drop a `verdicts.local.json` beside either .exe to add your own rules; they are merged automatically and win ties against the compiled-in ones. A full `Data\verdicts.json` beside the .exe replaces the compiled-in database entirely.
 
-Build it yourself:
+Build them yourself:
 
 ```powershell
 Install-Module ps2exe -Scope CurrentUser
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Build-LogVerdictExe.ps1
-# -> dist\LogVerdict.exe
+# -> dist\LogVerdict.exe  and  dist\LogVerdict-GUI.exe
+# -Target Console or -Target Gui builds just one
 ```
 
 ### From source
 
 ```powershell
+# The window
+powershell -ExecutionPolicy Bypass -File .\LogVerdict-GUI.ps1
+
 # Simplest: run it.
 powershell -ExecutionPolicy Bypass -File .\Invoke-LogVerdict.ps1
 
@@ -95,7 +121,12 @@ Import-Module .\LogVerdict.psd1
 $r = Invoke-LogVerdictScan -DaysBack 30
 $r.Findings | Where-Object Verdict -eq 'actionable'
 $r | Export-LogVerdictReport -OutputDir C:\Temp\lv
+
+# Or open the window from the module
+Show-LogVerdictGui -DaysBack 7 -AutoScan
 ```
+
+WPF needs a single-threaded apartment. Windows PowerShell is STA by default; `pwsh` is not, so `LogVerdict-GUI.ps1` relaunches itself under `powershell.exe -STA`. Calling `Show-LogVerdictGui` directly from `pwsh` throws and tells you why.
 
 ### Exit codes
 

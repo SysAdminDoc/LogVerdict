@@ -35,6 +35,13 @@ $script:LVUICulture = (Get-UICulture).Name
 
 $script:LVLogLines = New-Object System.Collections.Generic.List[string]
 
+# Optional live feed of log lines, set by a caller that cannot see Write-Host output.
+# The GUI runs a scan in a background runspace, where Write-Host goes nowhere a user
+# can read; it hands in a concurrent queue here and drains it from the UI thread.
+# Declared here so the variable always exists and Write-LVLog never has to test for
+# its absence.
+$script:LVLogSink = $null
+
 function Write-LVLog {
     <#
         .SYNOPSIS
@@ -51,7 +58,27 @@ function Write-LVLog {
     $colors = @{ info = 'Gray'; ok = 'Green'; warn = 'Yellow'; error = 'Red'; step = 'Cyan'; }
 
     $line = '{0} {1}' -f $marks[$Level], $Message
-    $script:LVLogLines.Add(('{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $line))
+    $stamped = '{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $line
+    $script:LVLogLines.Add($stamped)
+
+    # Enqueue, never invoke a callback: the scan runs on a worker thread and touching
+    # a WPF control from there throws. A queue lets the UI thread pull on its own timer.
+    #
+    # Three pipe-separated fields, and the reader splits with a cap of 3 so a message
+    # containing its own pipes stays intact. The timestamp travels rather than being
+    # stamped on arrival, so a transcript rebuilt by the reader records when the line
+    # was written and not when the UI happened to drain it.
+    if ($null -ne $script:LVLogSink) {
+        try {
+            $payload = '{0}|{1:yyyy-MM-dd HH:mm:ss}|{2}' -f $Level, (Get-Date), $Message
+            $script:LVLogSink.Enqueue($payload)
+        } catch {
+            # A disposed queue must not take a scan down with it.
+            Write-Verbose ("Log sink dropped: {0}" -f $_.Exception.Message)
+            $script:LVLogSink = $null
+        }
+    }
+
     Write-Host $line -ForegroundColor $colors[$Level]
 }
 

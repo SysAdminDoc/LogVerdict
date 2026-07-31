@@ -1,6 +1,6 @@
 @{
     RootModule        = 'LogVerdict.psm1'
-    ModuleVersion     = '0.3.1'
+    ModuleVersion     = '0.4.0'
     GUID              = '54d8b998-b5ce-40ec-8981-5525e95d4216'
     Author            = 'SysAdminDoc'
     CompanyName       = 'SysAdminDoc'
@@ -13,7 +13,8 @@
         'Get-LogVerdictDatabase',
         'Test-LogVerdictDatabase',
         'Export-LogVerdictReport',
-        'Show-LogVerdictReport'
+        'Show-LogVerdictReport',
+        'Show-LogVerdictGui'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()

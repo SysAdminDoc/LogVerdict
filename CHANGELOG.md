@@ -4,6 +4,26 @@ All notable changes to LogVerdict are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-31
+
+### Added
+
+- **A window.** `LogVerdict-GUI.exe` is the whole tool in one double-clickable file: it scans, ranks findings worst-first, and explains the selected one in plain English beside the raw evidence it was ruled on. Also available as `Show-LogVerdictGui` from the module and `LogVerdict-GUI.ps1` from a checkout.
+- The window is a front end over `Invoke-LogVerdictScan`, not a second implementation of it, so the window and the console tool cannot disagree about a verdict.
+- Verdict chips on the left double as filters, and a search box filters on title, provider, event id and message text at once. Column headers sort on a real key rather than on the displayed text, so "3 days ago" and "CRITICAL" order correctly instead of alphabetically.
+- Coverage gaps are on screen next to the findings, not buried: denied channels, truncated logs, a horizon inside the requested window and a missing elevation all say so. The elevation banner offers to restart elevated rather than demanding it up front.
+- The scan runs in a background runspace with progress streamed to an activity log panel, so the window stays responsive and a running scan can be cancelled. `Save report` writes the same text, JSON and HTML bundle the console tool produces, with a run log matching what the panel showed.
+- `Tools\Build-LogVerdictExe.ps1` now builds both executables and takes `-Target Console|Gui|All`.
+
+### Fixed
+
+- `README.md` and `CHANGELOG.md` each contained a stray `0x0B` control byte where `Data\verdicts.json` was meant - a `\v` escape that had been interpreted rather than written literally.
+
+### Notes
+
+- The GUI is compiled `-noConsole -noOutput -noError`. `-noOutput` is not cosmetic: PS2EXE's `-noConsole` host renders every `Write-Host` as a modal dialog, and a scan logs constantly, so without it one run would fire a hundred message boxes.
+- The default window is 760 units tall rather than 840. At the 125% scaling Windows picks for most 1080p displays, 840 becomes 1050 real pixels against a work area of about 1032, which pushed the status bar behind the taskbar.
+
 ## [0.3.1] - 2026-07-31
 
 ### Fixed
@@ -22,7 +42,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - **`LogVerdict.exe` - a single, self-contained, unsigned console executable.** The verdict database is compiled in, so the one file is the whole product: copy it to a broken machine and run it. No install, no unpacking, no PowerShell module import, no dependencies.
 - `Tools\Build-LogVerdictExe.ps1` flattens the module into one script and compiles it with PS2EXE, gating on pure-ASCII and a real PowerShell 5.1 parse before it will produce a binary.
-- A `verdicts.local.json` placed beside the .exe is still merged and still wins ties, so a site can extend a compiled build without rebuilding it. A `Dataerdicts.json` beside the .exe overrides the compiled-in copy entirely.
+- A `verdicts.local.json` placed beside the .exe is still merged and still wins ties, so a site can extend a compiled build without rebuilding it. A `Data\verdicts.json` beside the .exe overrides the compiled-in copy entirely.
 
 ### Fixed
 
@@ -80,6 +100,7 @@ Initial release. The deterministic core: collect, reduce, resolve, report. No la
 - **Exit codes** 0-4 by worst verdict, for use in scripts and remediation pipelines.
 - Pester 5 suite covering template masking, reduction, rule specificity, escalation, unknown handling and report rendering.
 
+[0.4.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.4.0
 [0.3.1]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.3.1
 [0.3.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.3.0
 [0.2.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.2.0

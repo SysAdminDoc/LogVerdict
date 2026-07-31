@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Stop'
 
 $script:LVModuleRoot = $PSScriptRoot
-$script:LVVersion    = '0.3.1'
+$script:LVVersion    = '0.4.0'
 $script:LVDataDir    = Join-Path $PSScriptRoot 'Data'
 
 foreach ($scope in @('Private', 'Public')) {
@@ -24,5 +24,6 @@ Export-ModuleMember -Function @(
     'Get-LogVerdictDatabase',
     'Test-LogVerdictDatabase',
     'Export-LogVerdictReport',
-    'Show-LogVerdictReport'
+    'Show-LogVerdictReport',
+    'Show-LogVerdictGui'
 )
