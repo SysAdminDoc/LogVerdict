@@ -1,0 +1,372 @@
+{
+  "schemaVersion": 1,
+  "name": "LogVerdict core verdict database",
+  "updated": "2026-07-31",
+  "notes": "Rules are evaluated most-specific first. A signature matching no rule is reported as 'unknown' with its raw evidence - never with a guessed cause.",
+  "rules": [
+    {
+      "id": "LV-0001",
+      "match": { "source": "event", "provider": "Microsoft-Windows-DistributedCOM", "eventId": 10016 },
+      "verdict": "benign",
+      "title": "DCOM permission warning that Windows logs by design",
+      "plain": "A component asked to start a COM server using an account that does not hold Launch permission for it. Windows logs the attempt and then carries on using a different path. Nothing is broken.",
+      "why": "Microsoft documents these entries as expected on stock installs and advises against editing the DCOM permissions to silence them - the registry and DCOM config surgery commonly recommended online carries more risk than the warning does.",
+      "action": "Ignore. Do not edit DCOM permissions to make it stop.",
+      "confidence": "high",
+      "reference": "https://learn.microsoft.com/en-us/answers/questions/3157934/how-to-resolve-distributedcom-event-id-10016"
+    },
+    {
+      "id": "LV-0002",
+      "match": { "source": "event", "provider": "Microsoft-Windows-DistributedCOM", "eventId": 10010 },
+      "verdict": "informational",
+      "title": "A COM server did not register within the timeout",
+      "plain": "A program started a background COM component, and the component took longer than DCOM's timeout to check in. This is usually a slow-startup timing artifact rather than a fault.",
+      "why": "Extremely common on machines with heavy startup load or slow storage. Only meaningful if it lines up with a feature that visibly fails.",
+      "action": "Ignore unless it coincides with a specific application misbehaving.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0010",
+      "match": { "source": "event", "provider": "Microsoft-Windows-WHEA-Logger", "eventId": 17 },
+      "verdict": "investigate",
+      "title": "Hardware reported an error and corrected it itself",
+      "plain": "The hardware hit an error, caught it, and fixed it without data loss. Nothing failed this time. A steady trickle is normal on many systems; a rising rate is how failing memory, a failing PCIe link or an unstable overclock announces itself before it becomes a crash.",
+      "why": "Corrected errors are not harmless in aggregate - they are the early-warning channel for the uncorrected kind.",
+      "action": "Record the current rate. Compare against a scan a week from now. If it is climbing, identify the reporting component from the event detail, then test memory and reseat or move the affected card.",
+      "escalate": { "perDay": 25, "verdict": "actionable", "why": "A high sustained rate of corrected errors usually precedes an uncorrected one." },
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0011",
+      "match": { "source": "event", "provider": "Microsoft-Windows-WHEA-Logger", "eventId": 18 },
+      "verdict": "critical",
+      "title": "Hardware reported an error it could NOT correct",
+      "plain": "The hardware hit an error it was unable to fix. This is the class of fault that produces blue screens and silent data corruption.",
+      "why": "Uncorrected machine check errors are hardware faults, not software ones. No amount of driver reinstalling addresses them.",
+      "action": "Treat as a hardware fault. Test memory, check CPU and board temperatures and power delivery, remove any overclock, and plan replacement of the reporting component.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0020",
+      "match": { "source": "event", "provider": "Microsoft-Windows-Kernel-Power", "eventId": 41 },
+      "verdict": "actionable",
+      "title": "The PC lost power or froze rather than shutting down",
+      "plain": "Windows found on boot that the previous session ended without a clean shutdown. The machine either blue screened, froze solid, lost power, or was held down at the power button.",
+      "why": "This event records the aftermath, never the cause. The cause lives in the crash dump or in the events immediately preceding it.",
+      "action": "Correlate against BugCheck 1001 and any minidump written at the same timestamp. No dump and no BugCheck alongside it points at power delivery, thermal shutdown, or a hard hang rather than a software crash.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0021",
+      "match": { "source": "event", "provider": "Microsoft-Windows-WER-SystemErrorReporting", "eventId": 1001 },
+      "verdict": "actionable",
+      "title": "Blue screen recorded with its stop code",
+      "plain": "Windows crashed and wrote the bug check code into this event. The code and its four parameters identify which subsystem gave up.",
+      "why": "This is the single most informative record of a crash that is available without opening the dump in a debugger.",
+      "action": "Read the bug check code from the event detail. Pair it with the matching minidump under C:\\Windows\\Minidump for the faulting driver.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0022",
+      "match": { "source": "event", "provider": "EventLog", "eventId": 6008 },
+      "verdict": "investigate",
+      "title": "Previous shutdown was unexpected",
+      "plain": "Windows is reporting that the last session ended abnormally, and gives the time it stopped.",
+      "why": "Companion record to Kernel-Power 41. Useful mainly for pinning down exactly when the machine died.",
+      "action": "Use the timestamp to find what was happening in the seconds before it.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0030",
+      "match": { "source": "event", "provider": "disk", "eventId": 51 },
+      "verdict": "actionable",
+      "title": "Disk error during a paging operation",
+      "plain": "A read or write to the disk failed while Windows was paging memory. The storage device did not complete an operation the OS required.",
+      "why": "Paging errors mean the failure reached the point where Windows could not rely on the disk. Cabling, the controller, or the drive itself is at fault.",
+      "action": "Check the drive's SMART data, verify cabling and power, and back up before further troubleshooting.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0031",
+      "match": { "source": "event", "provider": "disk", "eventId": 157 },
+      "verdict": "investigate",
+      "title": "A disk was removed without warning",
+      "plain": "A disk disappeared from the system while Windows still considered it present. On a machine with removable or external drives this is often just an unplugged device. On a machine with only internal drives it means a drive dropped off the bus.",
+      "why": "Identical event, wildly different severity depending on which disk it names. Virtual disks and mounted images also produce it routinely.",
+      "action": "Read which disk number the event names. Internal fixed disk: treat as a cabling, power or controller fault and check SMART immediately. External, virtual or mounted image: expected.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0032",
+      "match": { "source": "event", "provider": "Ntfs", "eventId": 55 },
+      "verdict": "actionable",
+      "title": "File system corruption detected on a volume",
+      "plain": "NTFS found structural damage in the file system on one of the volumes.",
+      "why": "Left alone this compounds. It is also frequently a symptom of the storage faults above rather than an isolated software problem.",
+      "action": "Run chkdsk on the named volume. If it recurs after a clean pass, suspect the drive rather than the file system.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0040",
+      "match": { "source": "event", "provider": "Service Control Manager", "eventId": 7031 },
+      "verdict": "investigate",
+      "title": "A service crashed and was restarted",
+      "plain": "A Windows service terminated unexpectedly. The Service Control Manager restarted it according to its recovery policy.",
+      "why": "One occurrence is noise. The same service crashing repeatedly is a real fault, and the service name is the entire lead.",
+      "action": "Note which service is named. Look for an Application Error 1000 for the same executable at the same timestamp - that entry carries the faulting module.",
+      "escalate": { "perDay": 5, "verdict": "actionable", "why": "A service crashing several times a day is failing, not glitching." },
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0041",
+      "match": { "source": "event", "provider": "Service Control Manager", "eventId": 7034 },
+      "verdict": "investigate",
+      "title": "A service crashed with no restart configured",
+      "plain": "A service terminated unexpectedly and was not restarted, so whatever it provided has been unavailable since.",
+      "why": "More severe than 7031 because nothing recovered it.",
+      "action": "Identify the named service and whether the feature it backs is still working.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0042",
+      "match": { "source": "event", "provider": "Service Control Manager", "eventId": 7000 },
+      "verdict": "investigate",
+      "title": "A service failed to start",
+      "plain": "The Service Control Manager could not start a service. The event carries the underlying error.",
+      "why": "Common after an uninstall leaves a service registration behind, and after driver or permission changes.",
+      "action": "Check whether the named service is still supposed to exist. Orphaned registrations from removed software can be disabled.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0043",
+      "match": { "source": "event", "provider": "Service Control Manager", "eventId": 7009 },
+      "verdict": "informational",
+      "title": "A service took too long to respond at startup",
+      "plain": "A service did not report ready inside the startup timeout. It frequently starts successfully a moment later.",
+      "why": "Overwhelmingly a slow-boot artifact on loaded or spinning-disk systems.",
+      "action": "Ignore unless the named service is genuinely failing to run.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0050",
+      "match": { "source": "event", "provider": "Application Error", "eventId": 1000 },
+      "verdict": "investigate",
+      "title": "An application crashed",
+      "plain": "A user-mode program crashed. The event names the executable, its version, and the module that faulted.",
+      "why": "The faulting module is the whole diagnosis. If it is the program's own code the program is at fault; if it is a shared or driver-supplied DLL the problem is usually broader than the one app.",
+      "action": "Read the faulting module name from the event detail. Recurring crashes in the same module across different applications point at that component, not the applications.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0051",
+      "match": { "source": "event", "provider": "Application Hang", "eventId": 1002 },
+      "verdict": "investigate",
+      "title": "An application stopped responding",
+      "plain": "A program stopped pumping its window messages long enough for Windows to declare it hung.",
+      "why": "Often a symptom of something else blocking - slow storage, a stalled network call, or a hung file dialog.",
+      "action": "Check whether the hangs cluster around storage or network events at the same time.",
+      "confidence": "medium"
+    },
+    {
+      "id": "LV-0052",
+      "match": { "source": "event", "provider": ".NET Runtime", "eventId": 1026 },
+      "verdict": "investigate",
+      "title": "A .NET application crashed with an unhandled exception",
+      "plain": "A managed application threw an exception nobody caught, and the runtime terminated it. The event includes the exception type and a stack trace.",
+      "why": "The stack trace usually identifies the responsible assembly directly.",
+      "action": "Read the exception type and top stack frame from the event detail.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0060",
+      "match": { "source": "event", "provider": "Microsoft-Windows-Kernel-EventTracing", "eventId": 2 },
+      "verdict": "benign",
+      "title": "A trace session could not start",
+      "plain": "An Event Tracing for Windows session failed to start, usually because it was already running or its log file was locked.",
+      "why": "Telemetry and diagnostics plumbing failing to initialize. It does not affect anything a user or admin depends on.",
+      "action": "Ignore.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0061",
+      "match": { "source": "event", "provider": "Microsoft-Windows-Kernel-EventTracing", "eventId": 3 },
+      "verdict": "benign",
+      "title": "A trace session hit an error",
+      "plain": "An ETW session reported a problem writing or configuring itself.",
+      "why": "Same family as the above - diagnostics infrastructure, not a functional component.",
+      "action": "Ignore.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0062",
+      "match": { "source": "event", "provider": "Microsoft-Windows-RestartManager" },
+      "verdict": "benign",
+      "title": "Installer restart-manager bookkeeping",
+      "plain": "Restart Manager records which applications hold files an installer wants to replace, so it can close and reopen them.",
+      "why": "This is an installer doing its job correctly. It appears in bulk around any update or install.",
+      "action": "Ignore.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0063",
+      "match": { "source": "event", "provider": "VBScriptDeprecationAlert" },
+      "verdict": "informational",
+      "title": "Something on this PC still uses VBScript",
+      "plain": "Windows is warning that a deprecated scripting engine was invoked. VBScript is on its way out of Windows.",
+      "why": "Not a fault today, but it is a forward-looking compatibility signal: whatever triggered it will break in a future Windows release.",
+      "action": "Worth identifying the caller if this machine runs business-critical scripts or legacy line-of-business software.",
+      "confidence": "medium"
+    },
+    {
+      "id": "LV-0064",
+      "match": { "source": "event", "provider": "Microsoft-Windows-User Profiles General", "eventId": 1509 },
+      "verdict": "informational",
+      "title": "A file could not be copied during profile sync",
+      "plain": "Windows could not copy a file between the user profile and its roaming or backup location, usually because the file was locked by a running program.",
+      "why": "Routine on machines with roaming or synced profiles. Only matters if the files it names are ones the user actually needs.",
+      "action": "Ignore unless the named path is user data rather than cache or temporary state.",
+      "confidence": "medium"
+    },
+    {
+      "id": "LV-0070",
+      "match": { "source": "event", "provider": "Microsoft-Windows-Eventlog", "eventId": 104 },
+      "verdict": "investigate",
+      "title": "An event log was cleared",
+      "plain": "Someone or something cleared an event log. The record names the log and the account that did it.",
+      "why": "Legitimate during troubleshooting, and also the classic first move for hiding activity. It also explains why a scan of that channel afterwards looks suspiciously clean.",
+      "action": "Confirm it matches known maintenance. If not, treat the gap in coverage as deliberate.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0071",
+      "match": { "source": "event", "provider": "Microsoft-Windows-Kernel-PnP", "eventId": 219 },
+      "verdict": "investigate",
+      "title": "A driver failed to load for a device",
+      "plain": "Windows tried to load the driver for a device and could not.",
+      "why": "Leaves the device non-functional or running on a fallback driver. Usually follows a failed driver update or a Windows feature update.",
+      "action": "Find the device in Device Manager. Cross-check the SetupAPI findings in this report for the matching install failure.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0072",
+      "match": { "source": "event", "provider": "Microsoft-Windows-WindowsUpdateClient", "eventId": 20 },
+      "verdict": "actionable",
+      "title": "An update failed to install",
+      "plain": "Windows Update downloaded an update and the installation failed. The event carries the update name and the error code.",
+      "why": "Repeated failures on the same update usually mean component store damage rather than a problem with the update.",
+      "action": "Note the error code. If the same update fails repeatedly, check the CBS findings in this report and run DISM RestoreHealth followed by SFC.",
+      "escalate": { "perDay": 2, "verdict": "actionable", "why": "Repeat failures indicate servicing damage rather than a transient error." },
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0073",
+      "match": { "source": "event", "provider": "NETLOGON", "eventId": 5719 },
+      "verdict": "investigate",
+      "title": "No domain controller was available",
+      "plain": "The machine could not reach a domain controller when it needed one.",
+      "why": "Normal at boot on laptops that authenticate over VPN or Wi-Fi that connects later. A persistent problem on a wired desktop that is always on the corporate network.",
+      "action": "Check whether the timestamps cluster at boot. If they do and domain features work afterwards, this is startup ordering rather than a fault.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0074",
+      "match": { "source": "event", "provider": "Microsoft-Windows-GroupPolicy", "eventId": 1058 },
+      "verdict": "investigate",
+      "title": "Group Policy could not read a policy file",
+      "plain": "The machine could not read gpt.ini from the domain's SYSVOL share, so that policy did not apply.",
+      "why": "Means policy silently did not take effect - the machine is not configured the way the admin believes it is.",
+      "action": "Verify SYSVOL access and DFS replication health from this machine.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0075",
+      "match": { "source": "event", "provider": "Microsoft-Windows-Security-Kerberos", "eventId": 4 },
+      "verdict": "investigate",
+      "title": "Kerberos ticket could not be decrypted",
+      "plain": "A Kerberos ticket arrived that this machine could not decrypt. The usual cause is the same service principal name registered on two accounts, or a stale computer account password.",
+      "why": "Produces intermittent authentication failures that look random to users.",
+      "action": "Check for duplicate SPNs with setspn -X, and consider rejoining the machine to the domain if its account password is out of sync.",
+      "confidence": "medium"
+    },
+    {
+      "id": "LV-0080",
+      "match": { "source": "event", "provider": "Microsoft-Windows-DNS-Client", "eventId": 1014 },
+      "verdict": "informational",
+      "title": "A name lookup timed out",
+      "plain": "A DNS query got no answer in time.",
+      "why": "Routine on any machine that changes networks, sleeps, or uses a VPN. Only meaningful in volume against names that matter.",
+      "action": "Ignore unless the names it reports are ones this machine depends on.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0081",
+      "match": { "source": "event", "provider": "Microsoft-Windows-Time-Service" },
+      "verdict": "informational",
+      "title": "Time synchronization trouble",
+      "plain": "The Windows Time service could not reach or agree with its time source.",
+      "why": "Harmless in isolation. Serious if clock drift grows, because Kerberos rejects authentication once the skew passes five minutes.",
+      "action": "Check the current offset with w32tm /query /status. Ignore if the clock is accurate.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0082",
+      "match": { "source": "event", "provider": "Microsoft-Windows-Diagnostics-Performance", "eventId": 100 },
+      "verdict": "informational",
+      "title": "Boot performance measurement",
+      "plain": "Windows recorded how long this boot took and which phases were slow.",
+      "why": "Useful as a trend, and it names specific slow services or drivers when a boot degrades.",
+      "action": "Ignore unless boot time is a complaint, in which case the event detail names the culprits directly.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0090",
+      "match": { "source": "textlog", "channel": "CBS", "messagePattern": "(?i)(corrupt|cannot repair|hashes for file member|store corruption)" },
+      "verdict": "actionable",
+      "title": "Component store damage",
+      "plain": "The servicing stack found files in the Windows component store that do not match their expected hashes, or that it could not repair. This is the state that makes updates fail and SFC report unrepairable files.",
+      "why": "CBS.log is the only place this is recorded in detail, and it is the reason update failures often resist every other fix.",
+      "action": "Run DISM /Online /Cleanup-Image /RestoreHealth, then sfc /scannow, then re-check. If DISM cannot repair from Windows Update, supply a matching install image with the Source parameter.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0091",
+      "match": { "source": "textlog", "channel": "CBS" },
+      "verdict": "investigate",
+      "title": "Component servicing error",
+      "plain": "The servicing stack logged an error while installing, staging or verifying a component.",
+      "why": "CBS logs a great many transient errors during normal operation, so volume alone is not alarming. Persistent errors around one package are.",
+      "action": "Check whether the same package or component repeats across entries. Isolated errors during a successful update are expected.",
+      "confidence": "medium"
+    },
+    {
+      "id": "LV-0092",
+      "match": { "source": "textlog", "channel": "SetupAPI" },
+      "verdict": "investigate",
+      "title": "Driver or device installation problem",
+      "plain": "SetupAPI recorded a failure while installing a driver or enumerating a device. These lines are marked with a triple exclamation mark in the raw log.",
+      "why": "This log is the authoritative record of driver installs and it is the only place many driver failures are written down at all.",
+      "action": "Read the device or INF named in the line, then confirm the device's state in Device Manager.",
+      "confidence": "high"
+    },
+    {
+      "id": "LV-0093",
+      "match": { "source": "textlog", "channel": "DISM" },
+      "verdict": "investigate",
+      "title": "Image servicing error",
+      "plain": "DISM logged an error while servicing the Windows image.",
+      "why": "Frequently the downstream symptom of the component store damage recorded in CBS.",
+      "action": "Read alongside the CBS findings in this report - they usually describe the same underlying problem.",
+      "confidence": "medium"
+    },
+    {
+      "id": "LV-0094",
+      "match": { "source": "textlog", "channel": "NetSetup" },
+      "verdict": "investigate",
+      "title": "Domain join or machine rename problem",
+      "plain": "NetSetup recorded a failure during a domain join, unjoin or computer rename.",
+      "why": "This file survives in-place Windows upgrades, which wipe the event channels. It is often the only surviving record of what happened.",
+      "action": "Read the operation and error code from the line.",
+      "confidence": "high"
+    }
+  ]
+}

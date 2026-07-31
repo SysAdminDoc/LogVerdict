@@ -1,0 +1,27 @@
+# Agent working notes - never published
+CLAUDE.md
+CODEX_CHANGELOG.md
+.claude/
+RESEARCH.md
+ROADMAP.md
+
+# Backups and scratch
+*.bak
+*.tmp
+*~
+
+# Local, site-specific verdict rules
+Data/verdicts.local.json
+
+# Report output
+LogVerdict_*/
+*.report.html
+out/
+dist/
+build/
+
+# PowerShell / editor
+*.psproj
+.vscode/
+.idea/
+TestResults*.xml
