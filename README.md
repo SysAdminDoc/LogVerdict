@@ -113,7 +113,9 @@ Test-LogVerdictDatabase
 
 Windows 10/11. Windows PowerShell 5.1 (stock) or PowerShell 7.x. **No dependencies** - the whole point is that it runs on a broken machine with nothing installed.
 
-Runs without admin; elevation unlocks the Security channel and some text logs. A non-elevated run states exactly what it could not read rather than quietly reporting less.
+Runs without admin; elevation unlocks the Security channel and some text logs.
+
+Every scan probes each channel for readability before reading it, and reports what it could **not** see under "what this scan could not see": channels denied by ACL, channels whose metadata would not enumerate, channels truncated at the per-channel record cap, and requested channels that do not exist. This matters because `Get-WinEvent -FilterHashtable` reports a denied channel identically to an empty one - a scan that trusts that path would tell you a channel is clean when it was never allowed to open it.
 
 Tests need [Pester](https://pester.dev/) 5+:
 

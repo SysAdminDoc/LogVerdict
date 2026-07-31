@@ -59,9 +59,20 @@ function Invoke-LogVerdictScan {
         $channels = Get-LVDefaultChannel
     }
 
-    Write-LVLog -Level info -Message ('Reading {0} channel(s)...' -f @($channels).Count)
+    # Probe before reading. The FilterHashtable path cannot tell a denied channel from
+    # an empty one, so coverage has to be established with -LogName first or the scan
+    # silently reports "nothing wrong" for channels it was never allowed to open.
+    $script:LVChannelMetadataErrorCount = 0
+    $script:LVDeniedChannel = @()
+    $script:LVTruncatedChannel = @()
+
+    Write-LVLog -Level info -Message ('Probing {0} channel(s) for access and history...' -f @($channels).Count)
+    $channelStatus = Get-LVChannelStatus -Channel $channels
+
+    $readable = @($channelStatus.Values | Where-Object { $_.Access -eq 'readable' }).Count
+    Write-LVLog -Level info -Message ('Reading {0} readable channel(s)...' -f $readable)
     $records = New-Object System.Collections.Generic.List[object]
-    foreach ($r in (Get-LVEventRecord -Channel $channels -DaysBack $DaysBack)) { $records.Add($r) | Out-Null }
+    foreach ($r in (Get-LVEventRecord -Channel $channels -DaysBack $DaysBack -ChannelStatus $channelStatus)) { $records.Add($r) | Out-Null }
     Write-LVLog -Level ok -Message ('{0} event record(s)' -f $records.Count)
 
     if (-not $SkipTextLogs) {
@@ -90,7 +101,10 @@ function Invoke-LogVerdictScan {
 
     # Coverage honesty: an in-place upgrade or a cleared log resets a channel, which
     # makes a scan look clean for the wrong reason. Say so rather than imply health.
-    $horizon = Get-LVChannelHorizon -Channel $channels
+    $horizon = @{}
+    foreach ($entry in $channelStatus.Values) {
+        if ($entry.Oldest) { $horizon[$entry.Channel] = $entry.Oldest }
+    }
     $horizonWarning = $null
     $cutoff = $started.AddDays(-1 * [Math]::Abs($DaysBack))
     foreach ($key in $horizon.Keys) {
@@ -106,6 +120,27 @@ function Invoke-LogVerdictScan {
     if (-not $SkipTextLogs) { $crash = Get-LVCrashArtifact -DaysBack ([Math]::Max($DaysBack, 90)) }
     if (@($crash).Count -gt 0) {
         Write-LVLog -Level warn -Message ('{0} crash artifact(s) on disk (minidumps / WER reports) - collected, not decoded' -f @($crash).Count)
+    }
+
+    # Everything the scan could NOT see, stated plainly. A finding list is only as
+    # trustworthy as the coverage behind it, so the gaps travel with the results.
+    $coverageNotes = New-Object System.Collections.Generic.List[string]
+    if (@($script:LVDeniedChannel).Count -gt 0) {
+        $coverageNotes.Add(('Access was denied to {0} channel(s) and they were not scanned: {1}. Re-run elevated.' -f @($script:LVDeniedChannel).Count, (@($script:LVDeniedChannel) -join ', '))) | Out-Null
+    }
+    if ($script:LVChannelMetadataErrorCount -gt 0) {
+        $coverageNotes.Add(('{0} channel(s) would not report their metadata and were never enumerated. Elevation may reveal more.' -f $script:LVChannelMetadataErrorCount)) | Out-Null
+    }
+    $missing = @($channelStatus.Values | Where-Object { $_.Access -eq 'missing' } | Select-Object -ExpandProperty Channel)
+    if ($missing.Count -gt 0) {
+        $coverageNotes.Add(('{0} requested channel(s) do not exist on this machine and were skipped: {1}. Check the spelling.' -f $missing.Count, ($missing -join ', '))) | Out-Null
+        Write-LVLog -Level warn -Message ('Requested channel(s) not present on this machine: {0}' -f ($missing -join ', '))
+    }
+    if (@($script:LVTruncatedChannel).Count -gt 0) {
+        $coverageNotes.Add(('These channel(s) hit the per-channel record cap and are truncated: {0}. Counts and rates for them are lower bounds.' -f (@($script:LVTruncatedChannel) -join ', '))) | Out-Null
+    }
+    if (-not $elevated) {
+        $coverageNotes.Add('Scan ran without elevation. The Security channel and some text logs require administrator rights.') | Out-Null
     }
 
     # Precomputed here so callers (including the entry script) never need a private helper.
@@ -130,6 +165,11 @@ function Invoke-LogVerdictScan {
         DaysBack       = $DaysBack
         Elevated       = $elevated
         Channels       = @($channels)
+        ChannelStatus  = $channelStatus
+        DeniedChannels = @($script:LVDeniedChannel)
+        TruncatedChannels = @($script:LVTruncatedChannel)
+        MetadataUnreadableCount = [int]$script:LVChannelMetadataErrorCount
+        CoverageNotes  = @($coverageNotes)
         Reduction      = $stat
         Findings       = @($findings)
         CrashArtifacts = @($crash)

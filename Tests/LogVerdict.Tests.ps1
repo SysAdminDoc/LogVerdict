@@ -43,6 +43,72 @@ Describe 'Verdict database' {
     }
 }
 
+Describe 'Channel access classification' {
+    # Declared in the Describe body, not BeforeAll: Pester expands -ForEach during
+    # discovery, which runs before any BeforeAll block executes.
+    # Real FullyQualifiedErrorId values observed from Get-WinEvent on Windows 11.
+    # The Message beside each is localized; the FQEID is not, which is the whole
+    # reason classification keys on the id.
+    $fqidCases = @(
+        @{ Fqid = 'System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.GetWinEventCommand'; Expected = 'denied' }
+        @{ Fqid = 'NoMatchingEventsFound,Microsoft.PowerShell.Commands.GetWinEventCommand';              Expected = 'empty' }
+        @{ Fqid = 'NoMatchingLogsFound,Microsoft.PowerShell.Commands.GetWinEventCommand';                Expected = 'missing' }
+        @{ Fqid = 'LogInfoUnavailable,Microsoft.PowerShell.Commands.GetWinEventCommand';                 Expected = 'denied' }
+        @{ Fqid = 'SomethingElse,Microsoft.PowerShell.Commands.GetWinEventCommand';                      Expected = 'other' }
+    )
+
+    It 'classifies <Fqid> as <Expected>' -ForEach $fqidCases {
+        InModuleScope LogVerdict -Parameters @{ fqid = $Fqid; expected = $Expected } {
+            param($fqid, $expected)
+            $err = [pscustomobject]@{ FullyQualifiedErrorId = $fqid }
+            Get-LVErrorKind -ErrorRecord $err | Should -Be $expected
+        }
+    }
+
+    It 'never branches on localized exception text' {
+        # A German or Japanese Windows renders these strings from localized resources,
+        # so any comparison against Message silently changes behaviour by locale.
+        # Tokenized rather than regexed over the raw file so the prose in this file's
+        # own comments explaining the trap does not trip the check.
+        $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Private/10-LVCollectEvents.ps1'
+        $parseErrors = $null
+        $tokens = [System.Management.Automation.PSParser]::Tokenize((Get-Content $path -Raw), [ref]$parseErrors)
+        @($parseErrors).Count | Should -Be 0
+
+        $literals = @($tokens | Where-Object { $_.Type -eq 'String' } | ForEach-Object { $_.Content })
+        foreach ($needle in @('No events were found', 'Access is denied', 'unauthorized operation')) {
+            @($literals | Where-Object { $_ -like "*$needle*" }).Count |
+                Should -Be 0 -Because "'$needle' is localized and must not appear in a string literal used for control flow"
+        }
+    }
+
+    It 'reports a denied channel as denied rather than as empty' {
+        InModuleScope LogVerdict {
+            # Security is ACL-restricted; unelevated this must classify as denied.
+            # Elevated it is readable. Either answer is correct - what must never
+            # happen is it being reported as empty, which is what the
+            # -FilterHashtable path would claim.
+            $status = Get-LVChannelStatus -Channel @('Security')
+            $status['Security'].Access | Should -BeIn @('readable', 'denied')
+        }
+    }
+
+    It 'classifies a nonexistent channel as missing' {
+        InModuleScope LogVerdict {
+            $status = Get-LVChannelStatus -Channel @('LogVerdict-No-Such-Channel')
+            $status['LogVerdict-No-Such-Channel'].Access | Should -Be 'missing'
+        }
+    }
+
+    It 'always probes the restricted channels so they cannot vanish from a sweep' {
+        InModuleScope LogVerdict {
+            # Get-WinEvent -ListLog omits channels it cannot stat, so unelevated
+            # Security disappears entirely. It must be unioned back in.
+            Get-LVPopulatedChannel | Should -Contain 'Security'
+        }
+    }
+}
+
 Describe 'Template masking' {
     It 'masks the variable parts so repeats collapse' {
         InModuleScope LogVerdict {

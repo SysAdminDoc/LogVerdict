@@ -61,6 +61,11 @@ function Write-LVConsoleReport {
     Write-Host ('  Elevated        : {0}' -f $Result.Elevated)
     Write-Host ''
 
+    foreach ($note in @($Result.CoverageNotes)) {
+        Write-Host ('  NOT SCANNED     : {0}' -f $note) -ForegroundColor Yellow
+    }
+    if (@($Result.CoverageNotes).Count -gt 0) { Write-Host '' }
+
     $tally = $Result.Findings | Group-Object -Property Verdict
     foreach ($name in @('critical', 'actionable', 'investigate', 'unknown', 'informational', 'benign')) {
         $g = $tally | Where-Object { $_.Name -eq $name }
@@ -106,6 +111,14 @@ function ConvertTo-LVTextReport {
     Add-LVLine $sb ('Verdict DB    : {0}, {1} rule(s), updated {2}' -f $Result.DatabaseName, $Result.RuleCount, $Result.DatabaseDate)
     Add-LVLine $sb ('Worst verdict : {0}' -f $Result.WorstVerdict)
     Add-LVLine $sb
+
+    if (@($Result.CoverageNotes).Count -gt 0) {
+        Add-LVLine $sb 'COVERAGE - what this scan could NOT see:'
+        foreach ($note in @($Result.CoverageNotes)) {
+            Add-LVLine $sb ('  - {0}' -f $note)
+        }
+        Add-LVLine $sb
+    }
 
     foreach ($h in $Result.Horizon.Keys) {
         Add-LVLine $sb ('Oldest record in {0}: {1:yyyy-MM-dd}' -f $h, $Result.Horizon[$h])
@@ -169,6 +182,8 @@ h1 span{color:var(--mauve)}
 .stat .v{font-size:22px;font-weight:600;margin-top:4px}
 .warn{background:#3a2b33;border:1px solid #f38ba8;border-left-width:4px;border-radius:8px;
 padding:12px 16px;margin-bottom:24px;color:#f5c2d3;font-size:14px}
+.warn ul{margin:8px 0 0;padding-left:20px}
+.warn li{margin:4px 0}
 .f{background:var(--mantle);border:1px solid var(--s0);border-left:4px solid var(--over);
 border-radius:10px;padding:16px 18px;margin-bottom:14px}
 .f h2{font-size:17px;margin:0 0 2px;font-weight:600}
@@ -204,6 +219,14 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
 
     if ($Result.HorizonWarning) {
         Add-LVLine $sb ('<div class="warn"><strong>Coverage warning.</strong> {0}</div>' -f (ConvertTo-LVHtmlEncoded $Result.HorizonWarning))
+    }
+
+    if (@($Result.CoverageNotes).Count -gt 0) {
+        Add-LVLine $sb '<div class="warn"><strong>What this scan could not see.</strong><ul>'
+        foreach ($note in @($Result.CoverageNotes)) {
+            Add-LVLine $sb ('<li>{0}</li>' -f (ConvertTo-LVHtmlEncoded $note))
+        }
+        Add-LVLine $sb '</ul></div>'
     }
 
     foreach ($f in $Result.Findings) {

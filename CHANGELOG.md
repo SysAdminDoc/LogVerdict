@@ -4,6 +4,22 @@ All notable changes to LogVerdict are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Denied event channels are no longer reported as empty.** `Get-WinEvent -FilterHashtable` answers a permission denial with `NoMatchingEventsFound`, identical to a genuinely empty channel, so a scan that trusted it would report "nothing wrong" for channels it was never allowed to open. Every channel is now probed with `-LogName` first and classified `readable` / `denied` / `empty` / `missing`.
+- **Channel classification no longer depends on the console language.** Control flow keyed on the English exception strings "No events were found" and "Access is denied", which are rendered from localized resources and therefore change on a non-English Windows. Classification now uses `FullyQualifiedErrorId`, which is locale-stable.
+- `Get-WinEvent -ListLog` silently omits channels whose metadata it cannot read, which unelevated includes `Security`. Those omissions are now counted and reported, and the restricted channels are probed explicitly so they cannot vanish from a sweep.
+- Event collection no longer truncates silently at the per-channel record cap; affected channels are named and flagged as lower bounds.
+- `-Channel a,b,c` now works when the entry script is launched via `powershell.exe -File`, which hands the whole list over as a single string instead of binding it to the array parameter.
+- Requested channels that do not exist on the machine are reported rather than silently skipped.
+
+### Added
+
+- Scan results carry `ChannelStatus`, `DeniedChannels`, `TruncatedChannels`, `MetadataUnreadableCount` and `CoverageNotes`.
+- All three report writers render a "what this scan could not see" section, so findings always travel with the coverage behind them.
+
 ## [0.1.0] - 2026-07-31
 
 Initial release. The deterministic core: collect, reduce, resolve, report. No language model involved.

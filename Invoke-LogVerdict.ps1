@@ -64,7 +64,11 @@ try {
         SkipTextLogs  = $SkipTextLogs
         AllChannels   = $AllChannels
     }
-    if ($Channel) { $scanArgs['Channel'] = $Channel }
+    if ($Channel) {
+        # powershell.exe -File hands "-Channel System,Application" over as ONE string
+        # rather than binding it to the [string[]] parameter, so split it back out.
+        $scanArgs['Channel'] = @($Channel | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' } | ForEach-Object { $_.Trim() })
+    }
 
     $result = Invoke-LogVerdictScan @scanArgs
     Show-LogVerdictReport -Result $result
