@@ -82,6 +82,30 @@ function ConvertTo-LVArrayOutput {
     return $Value
 }
 
+function Get-LVHostDirectory {
+    <#
+        .SYNOPSIS
+        The directory the tool is running from, module or compiled executable.
+
+        .DESCRIPTION
+        $PSScriptRoot is empty inside a ps2exe-compiled binary, so the single-file build
+        would otherwise lose track of where it lives and stop honouring a
+        verdicts.local.json sitting next to the .exe. Falls back to the host process
+        path, which is the .exe in a compiled build.
+    #>
+    if ($script:LVModuleRoot) { return $script:LVModuleRoot }
+    try {
+        $proc = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+        if ($proc) { return (Split-Path -Parent $proc) }
+    } catch {
+        # Reading MainModule can be refused by a host or a security product. That is
+        # not worth failing a scan over, so fall back to the working directory - but
+        # say so, because it changes where verdicts.local.json is looked for.
+        Write-Verbose ("Could not resolve the host executable path ({0}); using the working directory." -f $_.Exception.Message)
+    }
+    return (Get-Location).Path
+}
+
 function Write-LVTextFile {
     <#
         .SYNOPSIS

@@ -18,7 +18,7 @@ LogVerdict_*/
 *.report.html
 out/
 dist/
-build/
+obj/
 
 # PowerShell / editor
 *.psproj

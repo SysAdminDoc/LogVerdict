@@ -1,6 +1,6 @@
 # LogVerdict
 
-![Version](https://img.shields.io/badge/version-0.2.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207.x-5391FE)
+![Version](https://img.shields.io/badge/version-0.3.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207.x-5391FE)
 
 Scan a Windows PC's logs, collapse them into the handful of distinct things that actually happened, and rule on each one in plain English: **what it means, why it matters, and what to do about it.**
 
@@ -43,6 +43,32 @@ Collect  ->  Reduce  ->  Resolve  ->  Report
 **No language model is involved.** Every explanation is a curated rule written by a human. A signature with no matching rule is reported as `unknown` with its raw evidence and **no guess at a cause** - because a confidently wrong fix is worse than no fix.
 
 ## Usage
+
+### The executable
+
+`LogVerdict.exe` is a single self-contained file with the verdict database compiled in. Copy it to the machine you are troubleshooting and run it - nothing is installed and there are no dependencies.
+
+```
+LogVerdict.exe                                  scan the last 30 days
+LogVerdict.exe -DaysBack 7 -AllChannels         narrower window, every populated channel
+LogVerdict.exe -IncludeBenign                   show the signatures ruled harmless too
+LogVerdict.exe -NoReport                        console only, write nothing
+LogVerdict.exe -OutputDir C:\Temp\lv             choose where reports land
+```
+
+It is **unsigned by design** - this project does not code-sign. SmartScreen will warn on first run: choose **More info** then **Run anyway**.
+
+Drop a `verdicts.local.json` beside the .exe to add your own rules; they are merged automatically and win ties against the compiled-in ones. A full `Dataerdicts.json` beside the .exe replaces the compiled-in database entirely.
+
+Build it yourself:
+
+```powershell
+Install-Module ps2exe -Scope CurrentUser
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Build-LogVerdictExe.ps1
+# -> dist\LogVerdict.exe
+```
+
+### From source
 
 ```powershell
 # Simplest: run it.

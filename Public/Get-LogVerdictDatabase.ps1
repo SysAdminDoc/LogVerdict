@@ -26,19 +26,36 @@ function Get-LogVerdictDatabase {
     $basePath = $Path
     if (-not $basePath) { $basePath = Join-Path $script:LVDataDir 'verdicts.json' }
 
-    if (-not (Test-Path -LiteralPath $basePath)) {
+    if (Test-Path -LiteralPath $basePath) {
+        $db = Get-Content -LiteralPath $basePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $sourceLabel = $basePath
+    } elseif (-not $Path -and $script:LVEmbeddedVerdictsJson) {
+        # Single-file build: the database is compiled into the executable. A real
+        # verdicts.json beside the .exe still wins, so a site can ship its own.
+        $db = $script:LVEmbeddedVerdictsJson | ConvertFrom-Json
+        $sourceLabel = '(embedded)'
+    } else {
         throw ("Verdict database not found at '{0}'." -f $basePath)
     }
 
-    $db = Get-Content -LiteralPath $basePath -Raw -Encoding UTF8 | ConvertFrom-Json
-    Assert-LVSchemaVersion -Database $db -Path $basePath
+    Assert-LVSchemaVersion -Database $db -Path $sourceLabel
     $rules = New-Object System.Collections.Generic.List[object]
 
     # Local overrides load first so they win ties against the shipped rules.
     $extra = @()
     if ($AdditionalPath) { $extra += $AdditionalPath }
-    $conventionalLocal = Join-Path $script:LVDataDir 'verdicts.local.json'
-    if (-not $Path -and (Test-Path -LiteralPath $conventionalLocal)) { $extra += $conventionalLocal }
+    if (-not $Path) {
+        # Both locations are honoured so a compiled single-file build can still be
+        # extended: Data\ beside the module, and verdicts.local.json beside the .exe.
+        foreach ($candidate in @(
+            (Join-Path $script:LVDataDir 'verdicts.local.json'),
+            (Join-Path (Get-LVHostDirectory) 'verdicts.local.json')
+        )) {
+            if ((Test-Path -LiteralPath $candidate) -and ($extra -notcontains $candidate)) {
+                $extra += $candidate
+            }
+        }
+    }
 
     foreach ($p in $extra) {
         if (-not (Test-Path -LiteralPath $p)) {
@@ -52,6 +69,16 @@ function Get-LogVerdictDatabase {
     }
 
     foreach ($r in $db.rules) { $rules.Add($r) | Out-Null }
+
+    # Explicit tie-break ordinal. Sort-Object is NOT a stable sort in Windows
+    # PowerShell 5.1 and has no -Stable switch, so two rules of equal specificity
+    # would otherwise resolve in arbitrary order - which silently breaks the promise
+    # that a local rule beats the shipped rule it is meant to override.
+    $ordinal = 0
+    foreach ($r in $rules) {
+        $r | Add-Member -NotePropertyName 'lvOrdinal' -NotePropertyValue $ordinal -Force
+        $ordinal++
+    }
 
     return [pscustomobject]@{
         schemaVersion = $db.schemaVersion

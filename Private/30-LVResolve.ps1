@@ -145,9 +145,14 @@ function Resolve-LVVerdict {
         [Parameter(Mandatory)]$Database
     )
 
+    # Specificity first, then load order. The second key is what makes local rules
+    # beat shipped ones at equal specificity - PowerShell 5.1's Sort-Object is not
+    # stable, so without an explicit tie-break the winner is arbitrary.
     $rules = @($Database.rules |
         Where-Object { Test-LVRuleActive -Rule $_ } |
-        Sort-Object -Property @{ Expression = { Get-LVRuleSpecificity -Rule $_ } } -Descending)
+        Sort-Object -Property `
+            @{ Expression = { Get-LVRuleSpecificity -Rule $_ }; Descending = $true }, `
+            @{ Expression = { [int]$_.lvOrdinal }; Descending = $false })
     $results = New-Object System.Collections.Generic.List[object]
 
     foreach ($original in $Signature) {

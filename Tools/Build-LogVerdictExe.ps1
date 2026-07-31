@@ -1,0 +1,196 @@
+<#
+    .SYNOPSIS
+    Build LogVerdict.exe - a single, unsigned, self-contained console executable.
+
+    .DESCRIPTION
+    Flattens the module into one script and compiles it with PS2EXE.
+
+    Everything the tool needs is compiled in, including the verdict database, so the
+    .exe is the whole product: copy it to a broken machine and run it. Nothing is
+    installed, nothing is unpacked, and no PowerShell module import is involved.
+
+    A verdicts.local.json placed beside the .exe is still merged, and still wins ties
+    against the compiled-in rules, so a site can extend the build without rebuilding.
+
+    The build is deliberately unsigned. SmartScreen will warn on first run; the answer
+    is "More info" then "Run anyway".
+
+    .PARAMETER OutputDir
+    Where the .exe lands. Defaults to dist\ beside the repository.
+
+    .PARAMETER KeepIntermediate
+    Keep the generated standalone .ps1 for inspection instead of deleting it.
+
+    .EXAMPLE
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Build-LogVerdictExe.ps1
+
+    .NOTES
+    The intermediate directory is obj\, deliberately NOT build\. Windows paths are
+    case-insensitive, so a build\ intermediate collides with this script's own Tools\
+    predecessor Build\ - and the clean step then deletes the build script itself.
+    That happened once; hence the name and this note.
+#>
+[CmdletBinding()]
+param(
+    [string]$OutputDir,
+    [switch]$KeepIntermediate
+)
+
+$ErrorActionPreference = 'Stop'
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+if (-not $OutputDir) { $OutputDir = Join-Path $repoRoot 'dist' }
+$objDir  = Join-Path $repoRoot 'obj'
+$exePath = Join-Path $OutputDir 'LogVerdict.exe'
+
+function Write-Step { param([string]$Message) Write-Host ("[build] {0}" -f $Message) -ForegroundColor Cyan }
+function Write-Ok   { param([string]$Message) Write-Host ("[  ok ] {0}" -f $Message) -ForegroundColor Green }
+function Write-Bad  { param([string]$Message) Write-Host ("[fail ] {0}" -f $Message) -ForegroundColor Red }
+
+# --- Clean -------------------------------------------------------------------
+# Previous artifacts go first so a failed build cannot leave a stale exe looking
+# like a fresh one. Both paths are asserted to be inside the repo and to not be a
+# source directory, because this step deletes recursively.
+Write-Step 'Cleaning previous build output'
+foreach ($dir in @($OutputDir, $objDir)) {
+    $leaf = Split-Path -Leaf $dir
+    if ($leaf -in @('Tools', 'Private', 'Public', 'Data', 'Tests')) {
+        throw ("Refusing to clean '{0}': that is a source directory." -f $dir)
+    }
+    if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+}
+
+# --- Preconditions -----------------------------------------------------------
+if (-not (Get-Module -ListAvailable ps2exe)) {
+    throw 'PS2EXE is not installed. Run: Install-Module ps2exe -Scope CurrentUser'
+}
+
+$manifest = Import-PowerShellDataFile -Path (Join-Path $repoRoot 'LogVerdict.psd1')
+$version = $manifest.ModuleVersion
+Write-Ok ("Building LogVerdict v{0}" -f $version)
+
+# --- Flatten -----------------------------------------------------------------
+# Load order matters and matches LogVerdict.psm1: numeric-prefixed Private files
+# first, then Public. Dot-sourcing is replaced by textual inclusion because a
+# compiled binary has no files to dot-source.
+Write-Step 'Flattening module sources'
+
+$sourceFiles = @()
+foreach ($scope in @('Private', 'Public')) {
+    $sourceFiles += Get-ChildItem -LiteralPath (Join-Path $repoRoot $scope) -Filter '*.ps1' | Sort-Object Name
+}
+Write-Ok ("{0} source file(s)" -f $sourceFiles.Count)
+
+$verdictsPath = Join-Path $repoRoot 'Data\verdicts.json'
+$verdictsRaw = Get-Content -LiteralPath $verdictsPath -Raw -Encoding UTF8
+$ruleCount = @(($verdictsRaw | ConvertFrom-Json).rules).Count
+
+# Base64 rather than a here-string: the database is arbitrary text and must not be
+# able to terminate its own literal or pick up PowerShell escape semantics.
+$verdictsB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($verdictsRaw))
+Write-Ok ("Embedding verdict database: {0} rules, {1:N0} KB" -f $ruleCount, ($verdictsRaw.Length / 1KB))
+
+$entryScript = Join-Path $repoRoot 'Invoke-LogVerdict.ps1'
+$entryText = Get-Content -LiteralPath $entryScript -Raw
+
+# Strip the entry script's comment-based help, param block and module import: the
+# bundle declares its own param block (which must be the first statement) and has
+# no module to import.
+$importMarker = 'Import-Module $modulePath -Force -ErrorAction Stop'
+$idx = $entryText.IndexOf($importMarker)
+if ($idx -lt 0) { throw 'Entry script layout changed: could not find the module import to strip.' }
+$entryBody = $entryText.Substring($idx + $importMarker.Length)
+
+$sb = New-Object System.Text.StringBuilder
+$null = $sb.AppendLine(@"
+<#
+    LogVerdict $version - standalone build
+    GENERATED by Tools\Build-LogVerdictExe.ps1. Do not edit; edit the module instead.
+#>
+[CmdletBinding()]
+param(
+    [int]`$DaysBack = 30,
+    [string[]]`$Channel,
+    [switch]`$AllChannels,
+    [switch]`$SkipTextLogs,
+    [switch]`$IncludeBenign,
+    [string]`$OutputDir,
+    [switch]`$NoReport
+)
+
+`$ErrorActionPreference = 'Stop'
+
+`$script:LVVersion = '$version'
+`$script:LVModuleRoot = `$null
+"@)
+
+# Data dir points beside the executable, so dropping a real Data\verdicts.json next
+# to the .exe overrides the compiled-in copy without a rebuild.
+$null = $sb.AppendLine(@'
+$script:LVDataDir = $null
+try {
+    $hostPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    if ($hostPath) { $script:LVDataDir = Join-Path (Split-Path -Parent $hostPath) 'Data' }
+} catch {
+    $script:LVDataDir = Join-Path (Get-Location).Path 'Data'
+}
+if (-not $script:LVDataDir) { $script:LVDataDir = Join-Path (Get-Location).Path 'Data' }
+'@)
+
+$null = $sb.AppendLine('$script:LVEmbeddedVerdictsJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(''' + $verdictsB64 + '''))')
+$null = $sb.AppendLine('')
+
+foreach ($file in $sourceFiles) {
+    $null = $sb.AppendLine(('#region {0}' -f $file.Name))
+    $null = $sb.AppendLine((Get-Content -LiteralPath $file.FullName -Raw))
+    $null = $sb.AppendLine('#endregion')
+    $null = $sb.AppendLine('')
+}
+
+$null = $sb.AppendLine('#region entry')
+$null = $sb.AppendLine($entryBody)
+$null = $sb.AppendLine('#endregion')
+
+$standalone = Join-Path $objDir 'LogVerdict.Standalone.ps1'
+[System.IO.File]::WriteAllText($standalone, $sb.ToString(), (New-Object System.Text.UTF8Encoding($false)))
+Write-Ok ("Standalone script: {0:N0} KB" -f ((Get-Item $standalone).Length / 1KB))
+
+# --- Gate: the bundle must be pure ASCII and must parse under 5.1 -------------
+Write-Step 'Validating the generated script'
+$nonAscii = ([System.IO.File]::ReadAllBytes($standalone) | Where-Object { $_ -gt 127 }).Count
+if ($nonAscii -gt 0) { throw ("Generated script contains {0} non-ASCII byte(s); PS 5.1 will mis-parse it." -f $nonAscii) }
+
+$parseErrors = $null
+[void][System.Management.Automation.PSParser]::Tokenize((Get-Content -LiteralPath $standalone -Raw), [ref]$parseErrors)
+if (@($parseErrors).Count -gt 0) {
+    foreach ($e in (@($parseErrors) | Select-Object -First 5)) {
+        Write-Bad ("line {0}: {1}" -f $e.Token.StartLine, $e.Message)
+    }
+    throw 'Generated script does not parse.'
+}
+Write-Ok 'Pure ASCII, parses clean'
+
+# --- Compile -----------------------------------------------------------------
+# Unsigned by design. -noConsole is deliberately NOT used: this is a CLI that prints
+# a report and returns a meaningful exit code, both of which need a console.
+Write-Step 'Compiling with PS2EXE'
+Import-Module ps2exe -Force
+
+Invoke-ps2exe -inputFile $standalone -outputFile $exePath `
+    -title 'LogVerdict' `
+    -description 'Scans a Windows PC log corpus and rules on it in plain English' `
+    -company 'SysAdminDoc' `
+    -product 'LogVerdict' `
+    -copyright '(c) 2026 SysAdminDoc. MIT License.' `
+    -version $version `
+    -x64 | Out-Null
+
+if (-not (Test-Path -LiteralPath $exePath)) { throw 'PS2EXE produced no output.' }
+
+if (-not $KeepIntermediate) { Remove-Item -LiteralPath $objDir -Recurse -Force }
+
+$exe = Get-Item -LiteralPath $exePath
+Write-Ok ("{0} ({1:N0} KB)" -f $exe.FullName, ($exe.Length / 1KB))
+Write-Host ''
+Write-Host 'Unsigned by design. SmartScreen: More info -> Run anyway.' -ForegroundColor Yellow

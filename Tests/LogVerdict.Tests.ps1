@@ -578,6 +578,40 @@ Describe 'Verdict resolution' {
         }
     }
 
+    It 'lets a local rule beat a shipped rule of equal specificity' {
+        InModuleScope LogVerdict {
+            # Sort-Object is not stable in Windows PowerShell 5.1 and has no -Stable
+            # switch, so equal-specificity rules resolved arbitrarily and the documented
+            # "local rules win ties" behaviour held only by luck.
+            $mk = {
+                param($id, $verdict, $ordinal)
+                [pscustomobject]@{
+                    id = $id; status = 'stable'; verified = '2026-07-31'; lvOrdinal = $ordinal
+                    match = [pscustomobject]@{ source = 'event'; provider = 'Acme'; eventId = 1 }
+                    verdict = $verdict; title = $id; plain = 'p'; why = 'w'; action = 'a'; confidence = 'high'
+                }
+            }
+            # Local rules are loaded first, so they carry the lower ordinal.
+            $db = [pscustomobject]@{ schemaVersion = 2; rules = @(
+                (& $mk 'SITE-1' 'critical' 0),
+                (& $mk 'LV-0001' 'benign'  1)) }
+
+            $sig = [pscustomobject]@{
+                Key='Acme/1'; Source='event'; Channel='System'; Provider='Acme'; Id=1
+                Count=1; PerDay=0.1; SampleMessage='m'; FirstSeen=(Get-Date); LastSeen=(Get-Date)
+            }
+            $out = Resolve-LVVerdict -Signature @($sig) -Database $db
+            $out[0].RuleId | Should -Be 'SITE-1'
+            $out[0].Verdict | Should -Be 'critical'
+        }
+    }
+
+    It 'assigns every loaded rule an ordinal for tie-breaking' {
+        $rules = @((Get-LogVerdictDatabase).rules)
+        $rules[0].lvOrdinal | Should -Be 0
+        @($rules | Where-Object { $null -eq $_.lvOrdinal }).Count | Should -Be 0
+    }
+
     It 'falls back to the catch-all when the specific rule does not apply' {
         InModuleScope LogVerdict -Parameters @{ db = $script:TestDb } {
             param($db)
@@ -756,7 +790,7 @@ Describe 'Verdict resolution' {
 Describe 'Report rendering' {
     BeforeAll {
         $script:FakeResult = [pscustomobject]@{
-            Tool = 'LogVerdict'; Version = '0.2.0'; MachineName = 'TESTPC'
+            Tool = 'LogVerdict'; Version = '0.3.0'; MachineName = 'TESTPC'
             ScanTime = (Get-Date '2026-07-31 12:00:00'); Duration = [timespan]::FromSeconds(3)
             DaysBack = 30; Elevated = $false; Channels = @('System', 'Application')
             Reduction = [pscustomobject]@{

@@ -4,6 +4,18 @@ All notable changes to LogVerdict are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-31
+
+### Added
+
+- **`LogVerdict.exe` - a single, self-contained, unsigned console executable.** The verdict database is compiled in, so the one file is the whole product: copy it to a broken machine and run it. No install, no unpacking, no PowerShell module import, no dependencies.
+- `Tools\Build-LogVerdictExe.ps1` flattens the module into one script and compiles it with PS2EXE, gating on pure-ASCII and a real PowerShell 5.1 parse before it will produce a binary.
+- A `verdicts.local.json` placed beside the .exe is still merged and still wins ties, so a site can extend a compiled build without rebuilding it. A `Dataerdicts.json` beside the .exe overrides the compiled-in copy entirely.
+
+### Fixed
+
+- **Local rules did not reliably win ties against shipped rules**, despite the README promising they would. `Sort-Object` is not a stable sort in Windows PowerShell 5.1 and has no `-Stable` switch, so two rules of equal specificity resolved in arbitrary order. Rules now carry an explicit load ordinal used as the tie-break. Found while verifying the executable.
+
 ## [0.2.0] - 2026-07-31
 
 ### Fixed
@@ -56,5 +68,6 @@ Initial release. The deterministic core: collect, reduce, resolve, report. No la
 - **Exit codes** 0-4 by worst verdict, for use in scripts and remediation pipelines.
 - Pester 5 suite covering template masking, reduction, rule specificity, escalation, unknown handling and report rendering.
 
+[0.3.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.3.0
 [0.2.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.2.0
 [0.1.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.1.0
