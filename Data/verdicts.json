@@ -710,6 +710,586 @@
       "confidence": "high",
       "references": [],
       "falsepositives": []
+    },
+    {
+      "id": "LV-0100",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-Hyper-V-VmSwitch",
+        "eventId": 285
+      },
+      "verdict": "benign",
+      "title": "The virtual switch logged a slow internal operation",
+      "plain": "The Hyper-V virtual network switch timed one of its own internal operations and found it took longer than its target. Nothing failed and no traffic was lost.",
+      "why": "This is a performance trace the switch emits about itself, not a fault. It appears in enormous volume on any machine running Hyper-V, WSL2, Docker Desktop or Windows Sandbox, and is often the single loudest signature on such a machine.",
+      "action": "Ignore. If virtual network throughput is genuinely poor, measure it directly rather than counting these.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Any machine running WSL2, Docker Desktop, Windows Sandbox or Hyper-V produces these continuously while healthy."
+      ]
+    },
+    {
+      "id": "LV-0101",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-Hyper-V-VmSwitch",
+        "eventId": 148
+      },
+      "verdict": "benign",
+      "title": "Virtual switch bookkeeping for a virtual network adapter",
+      "plain": "The virtual switch recorded an internal request relating to a virtual network adapter. It is a trace of normal operation, not an error.",
+      "why": "Emitted routinely on machines with virtual switches. High counts track how busy virtualized networking is, not how broken it is.",
+      "action": "Ignore.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Normal on every machine with Hyper-V or WSL2 networking."
+      ]
+    },
+    {
+      "id": "LV-0102",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-StateRepository",
+        "eventId": 104
+      },
+      "verdict": "benign",
+      "title": "The app state database was briefly locked",
+      "plain": "Windows keeps a small database describing installed Store apps. Two components tried to use it at once, one was told the database was locked, and it retried. This is ordinary contention.",
+      "why": "The retry is part of the design. It appears in very high volume on healthy machines and almost never corresponds to anything a user notices.",
+      "action": "Ignore. Only pursue if Store apps genuinely fail to launch or install.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "High counts are normal on machines with many Store apps or frequent app updates."
+      ]
+    },
+    {
+      "id": "LV-0103",
+      "status": "test",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-StateRepository",
+        "eventId": 100
+      },
+      "verdict": "investigate",
+      "title": "The app state database reported an internal error",
+      "plain": "The Store app state database reported a misuse or internal consistency error rather than simple lock contention.",
+      "why": "Unlike the lock-contention warnings, this can precede Store apps failing to launch, update or install.",
+      "action": "If Store apps are misbehaving, re-registering the app packages rebuilds this state. If nothing is visibly wrong, note it and move on.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "Isolated occurrences with no app symptoms are usually harmless."
+      ]
+    },
+    {
+      "id": "LV-0104",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-Security-LessPrivilegedAppContainer",
+        "eventId": 1
+      },
+      "verdict": "benign",
+      "title": "A sandboxed app was refused something it is not allowed",
+      "plain": "An app running inside a restricted container asked for a resource its sandbox does not permit, and Windows refused. The sandbox worked exactly as intended.",
+      "why": "This is the security boundary doing its job and reporting it. It is an audit record of a denial by design, not evidence of an attack or a broken app.",
+      "action": "Ignore.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Emitted constantly on any machine running Store or packaged apps."
+      ]
+    },
+    {
+      "id": "LV-0105",
+      "status": "test",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-KnownFolders",
+        "eventId": 1002
+      },
+      "verdict": "investigate",
+      "title": "Windows could not verify one of the standard user folders",
+      "plain": "Windows checked one of the standard shell folders (Desktop, Documents and so on) and was refused access, usually with error 0x80070005 - access denied.",
+      "why": "Occasional denials during profile setup or folder redirection are normal. Persistent ones can mean the folder permissions are genuinely wrong, which breaks Save dialogs and folder redirection.",
+      "action": "Read the path named in the event. If it is a real user folder, compare its NTFS permissions and ownership against a working profile.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "Common and harmless during first sign-in, profile creation and OneDrive folder moves."
+      ]
+    },
+    {
+      "id": "LV-0106",
+      "status": "test",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-KnownFolders",
+        "eventId": 1000
+      },
+      "verdict": "investigate",
+      "title": "Windows could not create one of the standard user folders",
+      "plain": "Windows tried to create a standard shell folder and was denied, usually with 0x80070005 - access denied.",
+      "why": "Same family as the verification failure, but at creation time. Repeated failures for a folder a user needs surface as missing or unusable locations in Explorer.",
+      "action": "Read the path from the event and check whether it exists with sane permissions.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "Routine for per-app folders under ProgramData that a non-admin process is not allowed to create."
+      ]
+    },
+    {
+      "id": "LV-0107",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-AppXDeployment-Server",
+        "eventId": 493
+      },
+      "verdict": "benign",
+      "title": "Leftover app files could not be deleted yet",
+      "plain": "After removing or updating a Store app, Windows could not delete some files because something still had them open. They are moved to a Deleted folder and cleaned up later.",
+      "why": "Deferred cleanup is the designed behaviour. The disk space is reclaimed on a later pass.",
+      "action": "Ignore.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Normal after any Store app update or removal."
+      ]
+    },
+    {
+      "id": "LV-0108",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-UniversalTelemetryClient",
+        "eventId": 29
+      },
+      "verdict": "benign",
+      "title": "Telemetry upload could not reach Microsoft",
+      "plain": "The Windows telemetry client could not complete a connection during its last reporting period.",
+      "why": "Expected on machines that are offline, behind a proxy, on metered connections, or that have telemetry restricted by policy. It says nothing about the health of the machine itself.",
+      "action": "Ignore. If telemetry is deliberately blocked by policy or firewall, this is the expected result.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Guaranteed on any machine where telemetry endpoints are blocked by policy, firewall or hosts file."
+      ]
+    },
+    {
+      "id": "LV-0109",
+      "status": "test",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-CloudStore"
+      },
+      "verdict": "benign",
+      "title": "Settings sync component reported an error",
+      "plain": "The component that syncs Windows settings and Start menu layout between devices logged an internal error, commonly 0x80040154 - class not registered.",
+      "why": "CloudStore is noisy by nature and its failures are usually confined to settings roaming. It appears in bulk on machines not signed into a Microsoft account.",
+      "action": "Ignore unless Start menu layout or settings roaming is visibly broken.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "Expected in volume on machines with no Microsoft account or with settings sync disabled."
+      ]
+    },
+    {
+      "id": "LV-0110",
+      "status": "test",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-WMI-Activity",
+        "eventId": 5858
+      },
+      "verdict": "informational",
+      "title": "A WMI query failed",
+      "plain": "Something queried WMI and the query failed. The event names the client process, the namespace, the query and the result code.",
+      "why": "Individually these are usually a poorly written query or a class that does not exist on this edition of Windows. In volume from one process, that process is repeatedly asking for something it will never get.",
+      "action": "Group by ClientProcess in the event detail. A single process dominating the count is the thing to fix.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "Monitoring agents and inventory tools generate these routinely by probing for optional classes."
+      ]
+    },
+    {
+      "id": "LV-0111",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-PowerShell",
+        "eventId": 4104
+      },
+      "verdict": "informational",
+      "title": "PowerShell script block logging is recording executed code",
+      "plain": "Script block logging is enabled, so Windows writes the text of every PowerShell script block that runs into the event log.",
+      "why": "This is a security auditing feature working as configured, not a fault. It matters for two reasons: it is a large share of log volume, and the recorded script text can contain secrets that were passed inline.",
+      "action": "Nothing to fix. Treat the recorded script text as sensitive. Note that running LogVerdict itself generates these entries.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Every PowerShell-based management tool, including LogVerdict, adds to this count."
+      ]
+    },
+    {
+      "id": "LV-0112",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "PowerShellCore",
+        "eventId": 4104
+      },
+      "verdict": "informational",
+      "title": "PowerShell 7 script block logging is recording executed code",
+      "plain": "The same script block logging as Windows PowerShell, emitted by PowerShell 7 into its own channel.",
+      "why": "Expected when script block logging is enabled by policy. The captured text can include base64-encoded commands, which look alarming but are how many legitimate tools pass scripts.",
+      "action": "Nothing to fix. An encoded command is not evidence of wrongdoing on its own; decode it if the origin is unclear.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Encoded commands are routine for scheduled tasks, installers and management tooling."
+      ]
+    },
+    {
+      "id": "LV-0113",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-TerminalServices-ClientActiveXCore",
+        "eventId": 1033
+      },
+      "verdict": "informational",
+      "title": "A Remote Desktop session disconnected",
+      "plain": "The Remote Desktop client recorded a disconnection and its reason code.",
+      "why": "Normal at the end of every RDP session. Meaningful only if sessions are dropping unexpectedly mid-work.",
+      "action": "Ignore unless users report RDP sessions dropping. If they do, the error code distinguishes a network drop from a server-side disconnect.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Logged on every normal session close, including deliberate sign-out."
+      ]
+    },
+    {
+      "id": "LV-0114",
+      "status": "test",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-StorDiag",
+        "eventId": 507
+      },
+      "verdict": "investigate",
+      "title": "A storage command failed",
+      "plain": "The storage diagnostic component recorded a failed SCSI request to a drive.",
+      "why": "Storage commands do fail benignly, particularly against removable media and virtual disks. A sustained rate against a fixed internal disk is a different matter and belongs with the other disk findings in this report.",
+      "action": "Correlate with any disk or Ntfs findings above. If those are present too, treat the drive as suspect and check its SMART data.",
+      "escalate": {
+        "perDay": 20,
+        "verdict": "actionable",
+        "why": "A sustained rate of failed storage commands points at failing media rather than incidental errors."
+      },
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "Removable drives, card readers and virtual disks produce these routinely."
+      ]
+    },
+    {
+      "id": "LV-0115",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-Store",
+        "eventId": 8002
+      },
+      "verdict": "benign",
+      "title": "Microsoft Store internal timer bookkeeping",
+      "plain": "The Store app tried to cancel an internal timer that was no longer in its table.",
+      "why": "Purely internal housekeeping inside the Store app. It has no user-visible effect.",
+      "action": "Ignore.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Emitted in volume whenever the Store app is running."
+      ]
+    },
+    {
+      "id": "LV-0116",
+      "status": "test",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-Crypto-DPAPI",
+        "eventId": 8198
+      },
+      "verdict": "investigate",
+      "title": "Windows could not decrypt some stored protected data",
+      "plain": "DPAPI - the service that protects saved passwords, certificates and app secrets - failed to unprotect a blob. \"MAC check failed\" means the data did not match the key used to decrypt it.",
+      "why": "Usually the data was encrypted under a different user profile, a since-changed password, or a profile restored from backup. Users experience it as saved credentials that silently stop working.",
+      "action": "If users report saved passwords or certificates disappearing, this is the mechanism. Re-saving the affected credentials is the practical fix; the old data is not recoverable.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "Expected after a profile restore, a domain migration, or an administrative password reset."
+      ]
+    },
+    {
+      "id": "LV-0117",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-CodeIntegrity",
+        "eventId": 3033
+      },
+      "verdict": "investigate",
+      "title": "Windows blocked a program from loading unsigned or mismatched code",
+      "plain": "Code Integrity refused to let a process load a file because it did not meet the signing policy in force.",
+      "why": "This is a security control working. It matters because it also breaks legitimate software: the blocked component simply does not load, and the application may then fail in confusing ways.",
+      "action": "Read the blocked file path from the event. If it belongs to software you trust and that software is misbehaving, the vendor shipped an unsigned or incorrectly signed component.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Browsers and games with self-updating components trigger this routinely without any real problem."
+      ]
+    },
+    {
+      "id": "LV-0118",
+      "status": "test",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-Security-Mitigations"
+      },
+      "verdict": "informational",
+      "title": "An exploit mitigation stopped a process doing something unsafe",
+      "plain": "A Windows exploit mitigation - such as arbitrary code guard or hardware-enforced shadow stacks - blocked an operation in a running process. The event names the process.",
+      "why": "Mitigations fire on legitimate software too, especially browsers, games and anything using just-in-time compilation. A block is not evidence of an attack, but a process blocked repeatedly may be crashing or degraded.",
+      "action": "Read the process name. If that application is unstable, its mitigation policy is a likely cause and can be tuned in Exploit Protection settings.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "Browsers, Steam, Electron apps and JIT-based runtimes trigger these during entirely normal operation."
+      ]
+    },
+    {
+      "id": "LV-0119",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-User Device Registration",
+        "eventId": 360
+      },
+      "verdict": "benign",
+      "title": "Windows Hello for Business was not set up, by design",
+      "plain": "Windows checked whether it should start Windows Hello for Business provisioning, decided not to, and recorded why.",
+      "why": "This is a decision record, not a failure. On a machine that is not Entra joined or has no Hello policy, declining to provision is correct.",
+      "action": "Ignore unless Windows Hello for Business is supposed to be deployed here, in which case the event states which prerequisite was not met.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Expected on every machine that is not Entra joined or hybrid joined."
+      ]
+    },
+    {
+      "id": "LV-0120",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-PushNotifications-Platform"
+      },
+      "verdict": "benign",
+      "title": "Push notification service could not be reached",
+      "plain": "The Windows push notification client could not reach its service, commonly with 0x800704CF - the network location cannot be reached.",
+      "why": "Expected whenever the machine is offline, on a restricted network, or has notification endpoints blocked. It affects toast notifications only.",
+      "action": "Ignore unless Store app notifications are expected to work and do not.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Guaranteed on offline machines and networks that block Microsoft notification endpoints."
+      ]
+    },
+    {
+      "id": "LV-0121",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-Kernel-EventTracing",
+        "eventId": 1
+      },
+      "verdict": "benign",
+      "title": "A trace log filled up and started overwriting",
+      "plain": "A real-time event tracing session reached the maximum size of its backing file, so new events overwrite the oldest ones.",
+      "why": "This is a ring buffer behaving like a ring buffer. It matters only if you were relying on that specific trace for an investigation, because the oldest data is now gone.",
+      "action": "Ignore. If you need longer trace history for a specific investigation, increase that session buffer size before reproducing the problem.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Normal steady-state behaviour for long-running trace sessions such as the Defender API logger."
+      ]
+    },
+    {
+      "id": "LV-0122",
+      "status": "test",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-Bits-Client",
+        "eventId": 61
+      },
+      "verdict": "informational",
+      "title": "A background download stopped before finishing",
+      "plain": "The Background Intelligent Transfer Service abandoned a transfer job. BITS is what Windows Update and many installers use to download in the background.",
+      "why": "Individually harmless, because BITS retries. Persistent failures for the same URL mean whatever depends on that download never completes, which is a common hidden cause of updates that never install.",
+      "action": "Read the URL from the event. If it is a Windows Update endpoint and update failures also appear in this report, they are the same problem.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "Expected on metered, intermittent or captive-portal networks."
+      ]
+    },
+    {
+      "id": "LV-0123",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-AppXDeployment",
+        "eventId": 302
+      },
+      "verdict": "benign",
+      "title": "An app deployment call arrived during shutdown",
+      "plain": "A component tried to start the app deployment service and got 0x8007045B, which means the system is shutting down.",
+      "why": "A race at shutdown between a component wanting to do app work and the system stopping services. It resolves itself on the next boot.",
+      "action": "Ignore.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Expected around shutdown and restart."
+      ]
+    },
+    {
+      "id": "LV-0124",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-Install-Agent"
+      },
+      "verdict": "benign",
+      "title": "App install agent could not read a settings cache",
+      "plain": "The install agent could not read a configuration value from its local cache of Microsoft-hosted settings, so it used the default.",
+      "why": "Falling back to a default is the designed behaviour. It has no effect on whether apps install.",
+      "action": "Ignore.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Common on machines with restricted network access to Microsoft settings endpoints."
+      ]
+    },
+    {
+      "id": "LV-0125",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-StorageManagement",
+        "eventId": 5
+      },
+      "verdict": "benign",
+      "title": "A storage reliability query was not supported",
+      "plain": "A storage management call failed, commonly a request for a drive reliability counter that the device does not implement.",
+      "why": "Many consumer NVMe and USB devices do not expose the reliability counters Windows asks for. The failure is the device declining to answer, not a fault.",
+      "action": "Ignore. To read drive health, use the vendor tool or SMART data directly.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Normal for USB enclosures, card readers and many consumer NVMe drives."
+      ]
+    },
+    {
+      "id": "LV-0126",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-DeviceSetupManager",
+        "eventId": 122
+      },
+      "verdict": "informational",
+      "title": "Windows searched for a driver and did not find a better one",
+      "plain": "Device Setup Manager looked for a driver for a device and recorded the outcome of the search.",
+      "why": "Routine background driver maintenance. Only interesting when a device is genuinely non-functional, in which case it shows Windows has nothing better to offer.",
+      "action": "Ignore unless a device is not working, in which case the driver has to come from the vendor.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Emitted routinely during normal driver maintenance for working devices."
+      ]
+    },
+    {
+      "id": "LV-0127",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-AppxPackagingOM",
+        "eventId": 216
+      },
+      "verdict": "benign",
+      "title": "An app package manifest uses an outdated schema",
+      "plain": "A Store app package declares a namespace or element that the current packaging schema no longer applies.",
+      "why": "A developer-facing compatibility notice about how the app was built. It does not stop the app working.",
+      "action": "Ignore. There is nothing an administrator can act on.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Normal for apps built against older Windows SDKs."
+      ]
+    },
+    {
+      "id": "LV-0128",
+      "status": "test",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-WMI-Activity"
+      },
+      "verdict": "informational",
+      "title": "WMI activity error",
+      "plain": "The WMI activity channel recorded a failure that does not match a more specific rule.",
+      "why": "WMI errors are dominated by tools probing for classes that do not exist on this machine. The client process named in the event detail is the useful part.",
+      "action": "Identify the client process from the event. If one process dominates the count, it is misconfigured or probing for something unavailable.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "Inventory and monitoring agents generate these continuously while healthy."
+      ]
     }
   ]
 }
