@@ -295,6 +295,11 @@ function Show-LogVerdictGui {
             $style = Get-LVVerdictStyle -Verdict $v
             $chip = $chipControl[$v]
             $chip.Content = & $chipContent $style.Label $counts[$v]
+            # The chip's visible content is a panel of two text blocks, which gives a
+            # screen reader nothing useful and never says what the control does. The
+            # toggle state itself is exposed separately by the toggle pattern.
+            [System.Windows.Automation.AutomationProperties]::SetName(
+                $chip, ('Show {0} findings, {1} found' -f $style.Label.ToLowerInvariant(), $counts[$v]))
             # A verdict with nothing in it is dimmed but still clickable, so the reader
             # can see that the category was considered and came back empty.
             $chip.Opacity = $(if ($counts[$v] -eq 0) { 0.45 } else { 1.0 })
@@ -358,6 +363,10 @@ function Show-LogVerdictGui {
         # The verdict is stashed on the control so one handler serves all six chips;
         # capturing $verdict in the closure would leave every handler on the last value.
         $chip.DataContext = $verdict
+        # Named before the first scan too: the chips are visible from launch, and an
+        # unnamed toggle announces as a bare "button".
+        [System.Windows.Automation.AutomationProperties]::SetName(
+            $chip, ('Show {0} findings' -f (Get-LVVerdictStyle -Verdict $verdict).Label.ToLowerInvariant()))
         $handler = {
             param($Chip)
             $state.Chips[[string]$Chip.DataContext] = [bool]$Chip.IsChecked

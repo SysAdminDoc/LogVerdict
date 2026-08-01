@@ -304,6 +304,10 @@ function Get-LVGuiXaml {
     <!-- Findings list. Stock ListViewItem paints a blue selection and a white
          background on hover; both are replaced here. -->
     <Style x:Key="FindingRow" TargetType="ListViewItem">
+      <!-- Without this a screen reader reads the row's object graph aloud, hex colour
+           codes and search haystack included. AutomationName is a plain sentence built
+           in ConvertTo-LVGuiRow. -->
+      <Setter Property="AutomationProperties.Name" Value="{Binding AutomationName}"/>
       <Setter Property="Foreground" Value="{StaticResource Subtext1}"/>
       <Setter Property="Padding" Value="0"/>
       <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -448,9 +452,15 @@ function Get-LVGuiXaml {
 
             <TextBlock Text="SCAN" Style="{StaticResource PanelLabel}"/>
 
-            <TextBlock Text="Look back this many days" Foreground="{StaticResource Subtext0}"
+            <TextBlock x:Name="LblDays" Text="Look back this many days" Foreground="{StaticResource Subtext0}"
                        FontSize="12" Margin="0,0,0,6"/>
-            <TextBox x:Name="TxtDays" Text="30" Margin="0,0,0,12"/>
+            <!-- Both, deliberately. LabeledBy records the relationship to the visible
+                 caption; Name guarantees the announcement, because the LabeledBy
+                 fallback only fires when the peer is reached through a connected tree
+                 and returns nothing for a peer created directly against the element. -->
+            <TextBox x:Name="TxtDays" Text="30" Margin="0,0,0,12"
+                     AutomationProperties.LabeledBy="{Binding ElementName=LblDays}"
+                     AutomationProperties.Name="Look back this many days"/>
 
             <CheckBox x:Name="ChkAllChannels" Content="Sweep every event channel"/>
             <CheckBox x:Name="ChkSkipText" Content="Skip CBS / DISM / setup logs"/>
@@ -533,7 +543,10 @@ function Get-LVGuiXaml {
             <ColumnDefinition Width="*"/>
             <ColumnDefinition Width="Auto"/>
           </Grid.ColumnDefinitions>
-          <TextBox x:Name="TxtSearch" Grid.Column="0"/>
+          <!-- Name, not LabeledBy: the only caption is the placeholder, which vanishes
+               as soon as the box has text, and a name that disappears is worse than none. -->
+          <TextBox x:Name="TxtSearch" Grid.Column="0"
+                   AutomationProperties.Name="Filter findings by title, provider, event id or message"/>
           <TextBlock x:Name="TxtSearchHint" Grid.Column="0" IsHitTestVisible="False"
                      Margin="10,0,0,0" VerticalAlignment="Center"
                      Foreground="{StaticResource Overlay0}" FontSize="12.5"
@@ -544,6 +557,7 @@ function Get-LVGuiXaml {
 
         <ListView x:Name="LvFindings" Grid.Row="1" Background="Transparent" BorderThickness="0"
                   Margin="16,0,16,14"
+                  AutomationProperties.Name="Findings, worst first"
                   ItemContainerStyle="{StaticResource FindingRow}"
                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
           <ListView.View>
@@ -688,6 +702,7 @@ function Get-LVGuiXaml {
               <Border Background="{StaticResource Crust}" CornerRadius="6" Padding="12,10"
                       BorderBrush="{StaticResource Surface0}" BorderThickness="1">
                 <TextBox x:Name="TxtSample" IsReadOnly="True" TextWrapping="Wrap"
+                         AutomationProperties.Name="Raw evidence for the selected finding"
                          Background="Transparent" BorderThickness="0" Padding="0"
                          FontFamily="Consolas" FontSize="11.5"
                          Foreground="{StaticResource Subtext0}"
@@ -738,6 +753,7 @@ function Get-LVGuiXaml {
         </Grid>
 
         <TextBox x:Name="TxtLog" Grid.Row="1" Margin="20,0,20,12" IsReadOnly="True"
+                 AutomationProperties.Name="Scan activity log"
                  Background="Transparent" BorderThickness="0" Padding="0"
                  FontFamily="Consolas" FontSize="11.5" Foreground="{StaticResource Subtext0}"
                  VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"

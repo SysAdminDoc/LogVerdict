@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Accessibility
+
+- **The window was unusable with a screen reader.** Every findings row was announced as the underlying object graph - hex colour codes and the whole search haystack read aloud - because nothing supplied an accessible name. Rows now announce as a sentence: "ACTIONABLE. An update failed to install. Seen 12 time(s), 0.55 per day, last 2 days ago. Source Microsoft-Windows-WindowsUpdateClient 20."
+- The look-back and filter boxes, the six verdict chips, the findings list, the evidence pane and the activity log all carry accessible names. The chips also state their count, so the summary is available without reading the sidebar.
+- Verdict is now spoken as well as coloured, so the severity of a finding no longer depends on seeing it.
+
 ### Fixed
 
 - **The signature masker was destroying the diagnosis on CBS, DISM and Windows Update.** Error codes were masked away, so `0x800f081f` (no repair source), `0x80073712` (component store corrupt) and `0x800f0922` (system partition full) - three different problems with three different fixes - were reported as a single finding. Short error codes are now preserved inside the placeholder and normalized to lower case; long hex is still masked as an address.

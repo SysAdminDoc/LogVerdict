@@ -1217,3 +1217,56 @@ Describe 'GUI background scan' {
         }
     }
 }
+
+Describe 'GUI accessibility' {
+    It 'gives every input and the findings list an accessible name' {
+        # Automation peers can be created without showing a window, so this asserts what
+        # a screen reader would actually announce rather than that an attribute exists.
+        # Requires STA; powershell.exe is STA by default, pwsh is not.
+        if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
+            Set-ItResult -Skipped -Because 'automation peers need a single-threaded apartment'
+            return
+        }
+        InModuleScope LogVerdict {
+            Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml, UIAutomationTypes
+            $window = [Windows.Markup.XamlReader]::Parse((Get-LVGuiXaml))
+            # LabeledBy is an ElementName binding, which stays unresolved until a layout
+            # pass runs. A shown window gets one for free; an offscreen one needs asking.
+            $window.Measure([System.Windows.Size]::new(1340, 760))
+            $window.Arrange((New-Object System.Windows.Rect(0, 0, 1340, 760)))
+            $window.UpdateLayout()
+
+            foreach ($name in @('TxtDays', 'TxtSearch', 'LvFindings', 'TxtSample', 'TxtLog')) {
+                $element = $window.FindName($name)
+                $element | Should -Not -BeNullOrEmpty -Because "$name must exist"
+                $peer = [System.Windows.Automation.Peers.UIElementAutomationPeer]::CreatePeerForElement($element)
+                $peer | Should -Not -BeNullOrEmpty -Because "$name must expose an automation peer"
+                $peer.GetName() | Should -Not -BeNullOrEmpty -Because "$name announces as an unlabelled control without a name"
+            }
+        }
+    }
+
+    It 'binds the findings row name to a spoken sentence, not the object graph' {
+        InModuleScope LogVerdict {
+            (Get-LVGuiXaml) | Should -Match 'AutomationProperties\.Name" Value="\{Binding AutomationName\}"'
+        }
+    }
+
+    It 'builds a row name that reads as a sentence and leaks no styling' {
+        InModuleScope LogVerdict {
+            $sig = [pscustomobject]@{
+                Key = 'Contoso/7'; Source = 'event'; Channel = 'System'; Provider = 'Contoso'
+                Id = 7; Count = 12; PerDay = 0.55; LastSeen = (Get-Date).AddDays(-2); UndatedCount = 0
+                SampleMessage = 'boom'; Verdict = 'actionable'; Title = 'An update failed to install'
+                RuleId = 'LV-0001'
+            }
+            $row = @(ConvertTo-LVGuiRow -Finding @($sig))[0]
+            $row.AutomationName | Should -Match '^ACTIONABLE\. An update failed to install\.'
+            $row.AutomationName | Should -Match 'Seen 12 time'
+            $row.AutomationName | Should -Match 'Contoso 7'
+            # The defect this replaces: hex colours and the search haystack read aloud.
+            $row.AutomationName | Should -Not -Match '#'
+            $row.AutomationName | Should -Not -Match 'VerdictFill'
+        }
+    }
+}

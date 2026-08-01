@@ -119,6 +119,14 @@ function ConvertTo-LVGuiRow {
         $lastSeenSort = [datetime]::MinValue
         if ($null -ne $f.LastSeen) { $lastSeenSort = $f.LastSeen }
 
+        # What a screen reader says for this row. Without it WPF falls back to the
+        # object's own ToString, which reads out every property including hex colour
+        # codes and the whole search haystack. Colour carries meaning in the verdict
+        # column, so the verdict is spoken rather than merely shown.
+        $spokenWhen = Format-LVGuiWhen -When $f.LastSeen
+        $automationName = '{0}. {1}. Seen {2} time(s), {3:0.00} per day, last {4}. Source {5}.' -f `
+            $style.Label, $f.Title, $f.Count, $f.PerDay, $spokenWhen, $origin
+
         [pscustomobject]@{
             Verdict      = $f.Verdict
             VerdictLabel = $style.Label
@@ -134,9 +142,10 @@ function ConvertTo-LVGuiRow {
             PerDayText   = '{0:0.00}' -f $f.PerDay
             LastSeenText = Format-LVGuiWhen -When $f.LastSeen
             LastSeenSort = $lastSeenSort
-            Origin       = $origin
-            Haystack     = $haystack
-            Finding      = $f
+            Origin         = $origin
+            Haystack       = $haystack
+            AutomationName = $automationName
+            Finding        = $f
         }
     }
 
