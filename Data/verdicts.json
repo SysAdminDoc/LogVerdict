@@ -1,7 +1,7 @@
 {
   "schemaVersion": 5,
   "name": "LogVerdict core verdict database",
-  "updated": "2026-07-31",
+  "updated": "2026-08-01",
   "notes": "Rules are evaluated most-specific first. A signature matching no rule is reported as 'unknown' with its raw evidence - never with a guessed cause. Each rule carries a 'verified' date because guidance ages, and a 'status' controlling whether it is used: stable and test rules match, experimental rules match, deprecated and unsupported rules are retained for traceability but never applied.",
   "rules": [
     {
@@ -1805,6 +1805,2483 @@
       "falsepositives": [
         "Third-party installers and updaters write to Reliability Monitor routinely while working correctly."
       ]
+    },
+    {
+      "id": "LV-0150",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Microsoft-Windows-HAL",
+        "eventId": 20
+      },
+      "verdict": "informational",
+      "title": "Firmware could not expose the hardware alarm clock",
+      "plain": "Windows asked firmware for the ACPI time-and-alarm device and the firmware reported that the method is not supported.",
+      "why": "Windows can keep ordinary system time without this optional alarm-clock path. It matters when firmware wake alarms fail or the event begins after a firmware change, not merely because the event is labelled as an error.",
+      "action": "If scheduled firmware wake does not work, install the latest BIOS or UEFI update and retest. Otherwise record it and move on.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-hardware/drivers/bringup/acpi-defined-devices"
+      ],
+      "falsepositives": [
+        "Common on firmware that does not implement the optional ACPI time-and-alarm device."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-hardware/drivers/bringup/acpi-defined-devices",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0151",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Microsoft-Windows-HAL",
+        "eventId": 21
+      },
+      "verdict": "informational",
+      "title": "Firmware would not set the hardware alarm clock",
+      "plain": "Windows tried to program the ACPI time-and-alarm device and firmware reported that the method is not supported.",
+      "why": "This does not mean the Windows clock is wrong. It affects the optional firmware alarm mechanism used by some wake schedules.",
+      "action": "Update system firmware if wake timers fail. If wake behavior is normal, no repair is required.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-hardware/drivers/bringup/acpi-defined-devices"
+      ],
+      "falsepositives": [
+        "Expected when firmware advertises the device but leaves its alarm method unsupported."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-hardware/drivers/bringup/acpi-defined-devices",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0152",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "Microsoft-Windows-Perflib",
+        "eventId": 1014
+      },
+      "verdict": "informational",
+      "title": "One service could not return performance counters",
+      "plain": "Performance Monitor asked the named service for counter data and that service or its RPC endpoint did not answer.",
+      "why": "The service itself can keep working; only its measurements are missing from that collection. Repetition matters when monitoring depends on those counters.",
+      "action": "Read the service and error in the message. Confirm that service is running, then rebuild its counters only if monitoring remains incomplete.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/manually-rebuild-performance-counters"
+      ],
+      "falsepositives": [
+        "A service stopping or restarting while counters are sampled produces a one-off event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/manually-rebuild-performance-counters",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0153",
+      "status": "test",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Microsoft-Windows-WLAN-AutoConfig",
+        "eventId": 10002
+      },
+      "verdict": "investigate",
+      "title": "A Wi-Fi driver extension stopped",
+      "plain": "The vendor module named in the event stopped inside the Windows WLAN AutoConfig path.",
+      "why": "A single stop during shutdown or driver replacement is harmless. Repeated stops alongside Wi-Fi drops point at the adapter driver or vendor extension, not DNS or the router.",
+      "action": "Update the wireless adapter package from the PC or adapter vendor. If drops continue, remove obsolete vendor Wi-Fi utilities and reinstall the driver cleanly.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/2602760/wlan-extensibility-module-has-stopped"
+      ],
+      "falsepositives": [
+        "Expected once while a wireless driver is upgraded or the adapter is disabled."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/2602760/wlan-extensibility-module-has-stopped",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0154",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Tcpip",
+        "eventId": 4227
+      },
+      "verdict": "actionable",
+      "title": "Outbound connections exhausted the usable TCP ports",
+      "plain": "Windows could not safely reuse a recently used local endpoint, so a new outbound connection failed.",
+      "why": "A process is opening and closing connections faster than the ephemeral port pool can recover. Domain sign-in, RDP, shares, and unrelated applications can all fail once the pool is exhausted.",
+      "action": "Run netstat -anobq or group Get-NetTCPConnection by OwningProcess, identify the process holding the most TIME_WAIT or BOUND entries, and fix its connection leak. A restart is temporary relief only.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/tcp-ip-port-exhaustion-troubleshooting"
+      ],
+      "falsepositives": [
+        "A short load test can briefly produce this without a persistent leak."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/tcp-ip-port-exhaustion-troubleshooting",
+          "licence": "CC-BY-4.0",
+          "author": "Microsoft",
+          "retrieved": "2026-08-01",
+          "modified": true
+        }
+      ]
+    },
+    {
+      "id": "LV-0155",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Tcpip",
+        "eventId": 4231
+      },
+      "verdict": "actionable",
+      "title": "The dynamic TCP port pool is exhausted",
+      "plain": "Windows had no ephemeral port available for a new outbound connection.",
+      "why": "This is system-wide resource exhaustion. Many unrelated network operations fail because one or more processes consumed the shared port pool.",
+      "action": "Use netstat -anobq or Get-NetTCPConnection to find the owning process with the largest connection count, then update, reconfigure, or restart that process and correct its leak.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/tcp-ip-port-exhaustion-troubleshooting"
+      ],
+      "falsepositives": [
+        "An intentional extreme connection test can consume the pool until old connections expire."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/tcp-ip-port-exhaustion-troubleshooting",
+          "licence": "CC-BY-4.0",
+          "author": "Microsoft",
+          "retrieved": "2026-08-01",
+          "modified": true
+        }
+      ]
+    },
+    {
+      "id": "LV-0156",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "Microsoft-Windows-CAPI2",
+        "eventId": 513
+      },
+      "verdict": "investigate",
+      "title": "The VSS System Writer could not inventory a service",
+      "plain": "Cryptographic Services could not include one service binary while the System Writer assembled backup metadata.",
+      "why": "The event can omit part of the System Writer backup set. Microsoft documents a specific harmless permissions case, but the detail line must match before applying that workaround.",
+      "action": "Read the failing service or file and system error. If it is the documented Mslldp access case, apply only that permission fix; otherwise repair the named service or path before retrying the backup.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/event-id-513-vss-windows-server"
+      ],
+      "falsepositives": [
+        "The documented Mslldp permission case does not prevent the VSS backup from completing."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/event-id-513-vss-windows-server",
+          "licence": "CC-BY-4.0",
+          "author": "Microsoft",
+          "retrieved": "2026-08-01",
+          "modified": true
+        }
+      ]
+    },
+    {
+      "id": "LV-0157",
+      "status": "test",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "Microsoft-Windows-System-Restore",
+        "eventId": 8303
+      },
+      "verdict": "investigate",
+      "title": "System Restore could not scope one shadow copy",
+      "plain": "System Restore found a shadow copy but could not map it into the restore-point scope.",
+      "why": "The named shadow copy may be unusable even while newer restore points work. A recurring stream can mean stale snapshot metadata.",
+      "action": "Check that System Restore is enabled and create a new restore point. If that succeeds, the old snapshot can age out; if it fails, inspect VSS and shadow-storage errors in this report.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/3213311/event-8303-warning-system-restore"
+      ],
+      "falsepositives": [
+        "A stale restore point can log this while new restore points are healthy."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/3213311/event-8303-warning-system-restore",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0158",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Microsoft-Windows-TPM-WMI",
+        "eventId": 1800
+      },
+      "verdict": "informational",
+      "title": "A restart must happen before the Secure Boot update",
+      "plain": "Windows deferred a Secure Boot certificate or policy update because another boot-level change happened in this startup cycle.",
+      "why": "Microsoft documents this as a safety deferral. The update is expected to continue after a clean restart.",
+      "action": "Restart Windows normally, then check whether the event returns. Investigate only if it repeats after multiple clean restarts.",
+      "confidence": "high",
+      "references": [
+        "https://support.microsoft.com/en-us/topic/secure-boot-db-and-dbx-variable-update-events-37e47cf8-608b-4a87-8175-bdead630eb69"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://support.microsoft.com/en-us/topic/secure-boot-db-and-dbx-variable-update-events-37e47cf8-608b-4a87-8175-bdead630eb69",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0159",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Microsoft-Windows-TPM-WMI",
+        "eventId": 1801
+      },
+      "verdict": "actionable",
+      "title": "New Secure Boot certificates have not reached firmware",
+      "plain": "Windows has the replacement Secure Boot certificates, but firmware has not applied them.",
+      "why": "The computer keeps booting, but it remains on the older trust lists and does not yet receive the intended Secure Boot protection.",
+      "action": "Install current firmware from the device vendor, complete all pending restarts, and follow Microsoft Secure Boot certificate-update guidance. Do not clear the TPM.",
+      "confidence": "high",
+      "references": [
+        "https://support.microsoft.com/en-us/topic/secure-boot-db-and-dbx-variable-update-events-37e47cf8-608b-4a87-8175-bdead630eb69"
+      ],
+      "falsepositives": [
+        "The event can remain until a staged rollout authorizes the device, even after firmware is current."
+      ],
+      "sources": [
+        {
+          "uri": "https://support.microsoft.com/en-us/topic/secure-boot-db-and-dbx-variable-update-events-37e47cf8-608b-4a87-8175-bdead630eb69",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0160",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "VSS",
+        "eventId": 13
+      },
+      "verdict": "investigate",
+      "title": "Volume Shadow Copy could not start a required COM service",
+      "plain": "VSS tried to start the COM component named in the event and Windows refused or was already shutting down.",
+      "why": "During shutdown this is bookkeeping. At backup time it can prevent a consistent snapshot and make the associated backup incomplete.",
+      "action": "Match the timestamp to a shutdown or backup. Ignore shutdown-only instances; otherwise run vssadmin list writers and repair the named COM or VSS service before retrying the backup.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service"
+      ],
+      "falsepositives": [
+        "Expected when the event occurs during a normal shutdown."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0161",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Volsnap",
+        "eventId": 24
+      },
+      "verdict": "actionable",
+      "title": "Shadow-copy storage is out of space",
+      "plain": "The volume could not grow its shadow-copy storage area, so existing snapshots are now at risk.",
+      "why": "Restore points and snapshot-based backups depend on that storage. The next write burst can delete them.",
+      "action": "Free space or increase shadow storage with vssadmin resize shadowstorage, then create and verify a fresh restore point or backup.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0162",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Volsnap",
+        "eventId": 25
+      },
+      "verdict": "actionable",
+      "title": "Shadow copies were deleted when their storage could not grow",
+      "plain": "Windows deleted the volume shadow copies because their copy-on-write area could not expand in time.",
+      "why": "Those restore points or backup snapshots are gone. High write load, too little free space, or shadow storage placed on another busy snapshot volume can cause it.",
+      "action": "Free space, move or enlarge shadow storage, and avoid placing it on a volume that is itself being shadowed. Then create a new verified snapshot.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0163",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Volsnap",
+        "eventId": 35
+      },
+      "verdict": "actionable",
+      "title": "A shadow-copy operation was aborted",
+      "plain": "The shadow-copy storage failed to grow and Windows aborted the snapshot.",
+      "why": "The associated restore point or backup is not usable even if its calling application reports only a generic failure.",
+      "action": "Check free space and shadow-storage allocation, correct the constraint, then rerun and verify the backup or restore point.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0164",
+      "status": "test",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "Microsoft-Windows-CertificateServicesClient-CertEnroll",
+        "eventId": 87
+      },
+      "verdict": "investigate",
+      "title": "Device-attestation certificate enrollment was rejected",
+      "plain": "Windows submitted an AIK or SCEP certificate request and the enrollment endpoint rejected the request described in the message.",
+      "why": "This usually affects device attestation rather than ordinary application TLS. Firmware, TPM capabilities, throttling, and unsupported key algorithms are common causes.",
+      "action": "Read the HTTP status and server reason. Install current BIOS and TPM firmware, retry after a 429 response, and escalate persistent managed-device failures to the enrollment administrator.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/5955297/how-to-fix-scep-certificate-enrollment-failed"
+      ],
+      "falsepositives": [
+        "A transient service throttle can recover without local changes."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/5955297/how-to-fix-scep-certificate-enrollment-failed",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0165",
+      "status": "test",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "Microsoft-Windows-CertificateServicesClient-AutoEnrollment",
+        "eventId": 64
+      },
+      "verdict": "investigate",
+      "title": "A machine certificate is expiring or expired",
+      "plain": "Certificate autoenrollment found the machine certificate named by thumbprint near or beyond its expiry date.",
+      "why": "The impact depends on what uses that certificate. Authentication, Wi-Fi, VPN, TLS, or management can fail after expiry, while an abandoned certificate matters to nothing.",
+      "action": "Locate the thumbprint in certlm.msc or Cert:\\LocalMachine, identify its template and consumer, then renew it or remove the obsolete enrollment assignment.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/2556415/event-id-64-certificate-cannot-be-renewed"
+      ],
+      "falsepositives": [
+        "Expired certificates left by removed software can be unused."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/2556415/event-id-64-certificate-cannot-be-renewed",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0166",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Schannel",
+        "eventId": 36884
+      },
+      "verdict": "investigate",
+      "title": "TLS stopped a connection whose certificate name did not match",
+      "plain": "The remote certificate was issued for a different host name, so Schannel refused to treat the server as the one the client requested.",
+      "why": "The refusal protects against misrouting and interception. It can also expose a proxy, stale certificate, DNS mistake, or application connecting by the wrong alias.",
+      "action": "Read the expected server and client process in the event. Fix the server certificate or the application URL; never disable certificate-name validation globally.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/ldaps-connection-fails-with-event-id-36884"
+      ],
+      "falsepositives": [
+        "Inspection proxies deliberately substitute a certificate, but their root and host coverage still must be configured correctly."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/ldaps-connection-fails-with-event-id-36884",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0167",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Schannel",
+        "eventId": 36876
+      },
+      "verdict": "investigate",
+      "title": "TLS rejected a remote certificate",
+      "plain": "Windows could not validate the certificate presented by the remote server and ended the TLS connection.",
+      "why": "The HRESULT in the event distinguishes an expired, revoked, untrusted, or unreachable-revocation certificate. Bypassing validation would turn a safe failure into an unsafe connection.",
+      "action": "Decode the HRESULT, inspect the named client process and server chain, and repair trust, time, or revocation connectivity. Do not disable validation.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-server/security/tls/tls-registry-settings"
+      ],
+      "falsepositives": [
+        "An offline revocation server can cause a valid certificate to fail closed."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-server/security/tls/tls-registry-settings",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0168",
+      "status": "test",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Microsoft-Windows-DNS-Client",
+        "eventId": 1012
+      },
+      "verdict": "investigate",
+      "title": "Windows could not read the local hosts file",
+      "plain": "The DNS client could not open or parse the local hosts file, so mappings stored there were unavailable.",
+      "why": "Normal DNS can still work. Applications that rely on hosts-file overrides can resolve the wrong address or fail.",
+      "action": "Check C:\\Windows\\System32\\drivers\\etc\\hosts exists, is a plain text file, and can be read by SYSTEM and NETWORK SERVICE. Restore the default file if its contents are corrupt.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/5556064/dns-clint-event1012-there-was-an-error-while-attem"
+      ],
+      "falsepositives": [
+        "No impact when the hosts file contains no active mappings."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/5556064/dns-clint-event1012-there-was-an-error-while-attem",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0169",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "winsrvext",
+        "eventId": 100
+      },
+      "verdict": "informational",
+      "title": "An application delayed shutdown",
+      "plain": "Windows waited for the named process longer than the normal shutdown notification interval.",
+      "why": "This is not a crash and Windows continued shutdown. A repeated delay identifies an application that is slow to save state or stop background work.",
+      "action": "Ignore a one-off. If the same process appears on most shutdowns, update it and close it before shutdown to confirm the cause.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/win32/shutdown/shutting-down"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/win32/shutdown/shutting-down",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0170",
+      "status": "test",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "Microsoft-Windows-Security-SPP",
+        "eventId": 8233
+      },
+      "verdict": "investigate",
+      "title": "Volume activation could not reach or accept a KMS service",
+      "plain": "The Software Protection Platform tried a volume-license activation and the attempt failed with the reason in the event.",
+      "why": "Error 0xC004F074 usually means no usable Key Management Service was reached. It matters only for the product and SKU named in the event; another Windows licence can remain activated.",
+      "action": "Confirm which product the AppId and SkuId represent, then verify its KMS host, DNS record, network reachability, and entitlement.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/3737697/event-8233-security-spp"
+      ],
+      "falsepositives": [
+        "A stale Office or trial SKU can fail while Windows itself remains activated."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/3737697/event-8233-security-spp",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0171",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "Microsoft-Windows-Security-SPP",
+        "eventId": 1014
+      },
+      "verdict": "investigate",
+      "title": "A product licence could not be acquired",
+      "plain": "Windows licensing could not acquire the entitlement identified by the SKU and HRESULT in the event.",
+      "why": "The affected edition or application can enter notification or reduced-function mode even while other installed products remain activated.",
+      "action": "Identify the SKU, decode the HRESULT, and check its product key, account entitlement, KMS service, and network access.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/licensing-and-activation/troubleshoot-activation-error-codes"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/licensing-and-activation/troubleshoot-activation-error-codes",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0172",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "Microsoft-Windows-Security-SPP",
+        "eventId": 8200
+      },
+      "verdict": "investigate",
+      "title": "Windows recorded the licence-acquisition failure details",
+      "plain": "The Software Protection Platform logged the HRESULT from a failed licence acquisition.",
+      "why": "This is often the detail record paired with another activation event. The code and nearby product event identify the actual affected licence.",
+      "action": "Read the adjacent Software Protection Platform event for the SKU, then decode and resolve the HRESULT rather than reinstalling Windows blindly.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/licensing-and-activation/troubleshoot-activation-error-codes"
+      ],
+      "falsepositives": [
+        "Often duplicates the evidence in event 1014 rather than describing a second failure."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/licensing-and-activation/troubleshoot-activation-error-codes",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0173",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Microsoft-Windows-WinRM",
+        "eventId": 10149
+      },
+      "verdict": "informational",
+      "title": "WinRM has no listener",
+      "plain": "The WinRM service is not accepting WS-Management requests because no active listener is configured.",
+      "why": "That is the default on many client PCs and is harmless unless remote administration, event forwarding, or a management product expects WinRM.",
+      "action": "If remoting is required, inspect winrm enumerate winrm/config/listener and run winrm quickconfig from an elevated shell under the site policy. Otherwise ignore.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/win32/winrm/installation-and-configuration-for-windows-remote-management"
+      ],
+      "falsepositives": [
+        "Expected on a standalone client where remote management is deliberately disabled."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/win32/winrm/installation-and-configuration-for-windows-remote-management",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0174",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "Microsoft-Windows-User Profiles Service",
+        "eventId": 1500
+      },
+      "verdict": "actionable",
+      "title": "Windows could not load the user profile",
+      "plain": "The User Profile Service could not open the requested profile, so the sign-in failed or moved to a fallback path.",
+      "why": "The detail text names the real cause: locked files, permissions, storage, or network profile access. Repeated attempts can compound profile damage.",
+      "action": "Preserve user data, read the DETAIL line, and fix that lock, access, disk, or network problem before another sign-in. Do not delete the profile as a first step.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/user-profiles-may-fail-load"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/user-profiles-may-fail-load",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0175",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "Microsoft-Windows-User Profiles Service",
+        "eventId": 1511
+      },
+      "verdict": "actionable",
+      "title": "Windows signed the user into a temporary profile",
+      "plain": "The normal local profile was unavailable, so Windows created a temporary session instead.",
+      "why": "Files and settings saved in that temporary profile are discarded at sign-out. The original profile should be repaired before the user continues working.",
+      "action": "Tell the user not to store work in the temporary session. Back up the original profile, inspect adjacent profile-service events, and repair the underlying access or registry problem.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/user-profiles-may-fail-load"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/user-profiles-may-fail-load",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0176",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "Microsoft-Windows-User Profiles Service",
+        "eventId": 1533
+      },
+      "verdict": "investigate",
+      "title": "Windows could not remove a profile directory",
+      "plain": "Profile cleanup could not delete the directory named in the event because a file was locked or access was denied.",
+      "why": "The user can often keep working, but stale or partially removed profiles consume space and can interfere with profile recreation.",
+      "action": "Identify the process holding the directory, stop it safely, then retry profile removal through System Properties or the supported management tool.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/user-profiles-may-fail-load"
+      ],
+      "falsepositives": [
+        "Expected while a profile is still loaded by a service or user session."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/user-profiles-may-fail-load",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0177",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "MsiInstaller",
+        "eventId": 1039
+      },
+      "verdict": "investigate",
+      "title": "An installer tried to change a protected registry key",
+      "plain": "Windows Installer blocked the named product from changing a protected Windows registry location.",
+      "why": "The product can finish with a missing registration step or roll back. The protected key should not be made writable just to silence the event.",
+      "action": "Check the product install result and vendor log. Update the package or run its supported repair; do not weaken permissions on the protected Windows key.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/win32/msi/windows-installer-portal"
+      ],
+      "falsepositives": [
+        "An optional registration attempt can be blocked while the main product installs successfully."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/win32/msi/windows-installer-portal",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0178",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Service Control Manager",
+        "eventId": 7030
+      },
+      "verdict": "investigate",
+      "title": "A legacy interactive service cannot show its interface",
+      "plain": "The service declares that it interacts with the desktop, but modern Windows isolates services from user sessions.",
+      "why": "The service may still do background work, but any UI-dependent part cannot work and the design is obsolete.",
+      "action": "Update or replace the software. If it is required, ask the vendor for a service plus user-agent build rather than enabling interactive services.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/win32/services/interactive-services"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/win32/services/interactive-services",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0179",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Service Control Manager",
+        "eventId": 7024
+      },
+      "verdict": "investigate",
+      "title": "A service stopped with its own error code",
+      "plain": "The named service terminated and returned the service-specific code shown in the event.",
+      "why": "Windows cannot translate that vendor code reliably. The service log and vendor documentation, not the generic event ID, determine the cause.",
+      "action": "Read the service name and code, inspect its own log at the same time, and repair or update that service. Repeated failures justify disabling an unneeded service.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/win32/services/service-control-manager"
+      ],
+      "falsepositives": [
+        "Expected when an installer intentionally replaces and restarts its service."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/win32/services/service-control-manager",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0180",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Microsoft-Windows-TPM-WMI",
+        "eventId": 1040
+      },
+      "verdict": "actionable",
+      "title": "Device attestation found a critical measured-boot failure",
+      "plain": "The pre-attestation health checks found a failed measured-boot component and expect the device to fail attestation.",
+      "why": "Managed access or compliance can fail even while Windows boots normally. The JSON path in the event names the exact check.",
+      "action": "Open the referenced MeasuredBoot JSON, preserve it for the administrator, then update firmware and security components or remediate the named check. Do not clear the TPM without recovery keys.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/hardware-security/tpm/how-windows-uses-the-tpm"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/hardware-security/tpm/how-windows-uses-the-tpm",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0181",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "Microsoft-Windows-Winlogon",
+        "eventId": 6004
+      },
+      "verdict": "investigate",
+      "title": "A Winlogon notification subscriber failed",
+      "plain": "The named sign-in or sign-out subscriber failed while Winlogon delivered a critical session notification.",
+      "why": "A one-off during servicing can recover. Repetition can leave profile, policy, or installer work incomplete around sign-in and shutdown.",
+      "action": "Match the subscriber name to its Windows component or product, then check adjacent servicing and application events. Repair that component if the event repeats.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/win32/secauthn/winlogon-notification-package-reference"
+      ],
+      "falsepositives": [
+        "Can occur once while Windows servicing replaces the subscriber."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/win32/secauthn/winlogon-notification-package-reference",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0182",
+      "status": "test",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "SideBySide",
+        "eventId": 33
+      },
+      "verdict": "actionable",
+      "title": "An application is missing the assembly version it requested",
+      "plain": "Windows could not build the application activation context because the dependent assembly named in the event is absent or mismatched.",
+      "why": "That executable or component cannot load correctly. Installing every Visual C++ package blindly can hide the real architecture and version named in its manifest.",
+      "action": "Run sxstrace for the failing program, then repair the application or install the exact vendor-supported runtime and architecture named by the trace.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/2750584/sidebyside-error-33"
+      ],
+      "falsepositives": [
+        "An unused plugin can log this while the main application continues to work."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/2750584/sidebyside-error-33",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0183",
+      "status": "test",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Microsoft-Windows-WinREAgent",
+        "eventId": 4502
+      },
+      "verdict": "actionable",
+      "title": "Windows Recovery Environment servicing failed",
+      "plain": "An update could not service the Windows Recovery Environment image.",
+      "why": "Normal Windows can keep running, but Reset, startup repair, and recovery updates depend on a valid WinRE image and recovery partition.",
+      "action": "Run reagentc /info. If WinRE is disabled or has no valid location, repair the recovery partition or image, re-enable it, and retry the update.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/4138751/event-4502-winreagent-after-windows-update"
+      ],
+      "falsepositives": [
+        "Some updates log one failed attempt and succeed later; reagentc /info and update history decide."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/4138751/event-4502-winreagent-after-windows-update",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0184",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "exfat",
+        "eventId": 141
+      },
+      "verdict": "critical",
+      "title": "Windows lost data during a delayed write",
+      "plain": "Cached data could not be written to the exFAT volume named in the event and Windows reports that the data was lost.",
+      "why": "This is an integrity failure, not a performance warning. Removal, write protection, cabling, controller resets, or failing media can all cause it.",
+      "action": "Stop writing to the volume, copy readable data elsewhere, check the connection and write-protect state, then test or replace the media before trusting it again.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/networking/delayed-write-failed-error-data-lost"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/networking/delayed-write-failed-error-data-lost",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0185",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": ".NET Runtime",
+        "eventId": 1023
+      },
+      "verdict": "actionable",
+      "title": "A .NET application is missing its required runtime",
+      "plain": "The application could not start because the requested .NET framework version or architecture is not installed.",
+      "why": "A newer major runtime is not automatically compatible with an application targeting an older major version. The event names the exact framework and architecture.",
+      "action": "Install a supported runtime containing the named framework and matching architecture, or update the application to a supported target.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/dotnet/core/runtime-discovery/troubleshoot-app-launch"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/dotnet/core/runtime-discovery/troubleshoot-app-launch",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0186",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": ".NET Runtime",
+        "eventId": 1025
+      },
+      "verdict": "investigate",
+      "title": "A .NET process terminated itself with FailFast",
+      "plain": "The process deliberately invoked the .NET FailFast path after the exception shown in the event, bypassing normal exception handling.",
+      "why": "The process ended immediately and cleanup code may not have run. The inner exception and missing module or policy component identify the cause.",
+      "action": "Read the first inner exception and module name, then repair or update that application and its runtime. Preserve a dump if the failure recurs.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/dotnet/api/system.environment.failfast"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/dotnet/api/system.environment.failfast",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0201",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 1
+      },
+      "verdict": "informational",
+      "title": "Process creation",
+      "plain": "A process started and Sysmon recorded its image, command line, parent, hashes, and process identity.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Use the process and parent GUIDs to connect this start to later file, network, and exit activity.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0202",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 2
+      },
+      "verdict": "investigate",
+      "title": "File creation time changed",
+      "plain": "A process changed a file creation timestamp.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Check the image and target file. Legitimate installers do this; unexpected changes can be an attempt to hide when a file arrived.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0203",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 3
+      },
+      "verdict": "informational",
+      "title": "Network connection",
+      "plain": "A process opened a TCP or UDP connection.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Use the image, destination, and process GUID as timeline evidence; the connection alone does not establish malicious intent.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0204",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 4
+      },
+      "verdict": "informational",
+      "title": "Sysmon service state changed",
+      "plain": "The Sysmon service started or stopped.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Expected service starts are bookkeeping. Investigate an unplanned stop because telemetry is absent while the service is down.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0205",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 5
+      },
+      "verdict": "informational",
+      "title": "Process terminated",
+      "plain": "A monitored process exited.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Pair the process GUID with its creation and other activity to complete the timeline.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0206",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 6
+      },
+      "verdict": "informational",
+      "title": "Driver loaded",
+      "plain": "Windows loaded a kernel driver and Sysmon recorded its signature and hashes.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Review unsigned or unexpected drivers; a signed driver load is not an alert by itself.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0207",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 7
+      },
+      "verdict": "informational",
+      "title": "Image loaded",
+      "plain": "A process loaded an executable image or DLL.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Use the signature, hash, and process context to investigate side-loading; this high-volume event is neutral on its own.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0208",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 8
+      },
+      "verdict": "investigate",
+      "title": "Remote thread created",
+      "plain": "One process created a thread inside another process.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Check source and target images, start address, and signing. Debuggers and security tools do this legitimately, but injection uses the same mechanism.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0209",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 9
+      },
+      "verdict": "investigate",
+      "title": "Raw disk read",
+      "plain": "A process read a disk through a raw device handle.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Confirm the process is an approved backup, disk, or security tool. Unexpected raw reads can bypass file-level controls.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0210",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 10
+      },
+      "verdict": "informational",
+      "title": "Process access",
+      "plain": "One process opened another process with recorded access rights.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Use GrantedAccess and both images to distinguish routine inspection from credential access or injection preparation.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0211",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 11
+      },
+      "verdict": "informational",
+      "title": "File created",
+      "plain": "A process created or overwrote a file.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Review the target and process in context; software installation and ordinary saves generate this event.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0212",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 12
+      },
+      "verdict": "informational",
+      "title": "Registry object created or deleted",
+      "plain": "A process created or deleted a monitored registry key or value.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Use the target path and process to evaluate persistence or configuration changes.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0213",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 13
+      },
+      "verdict": "informational",
+      "title": "Registry value set",
+      "plain": "A process wrote data to a monitored registry value.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Inspect the target and data when it changes a startup, security, or policy location.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0214",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 14
+      },
+      "verdict": "informational",
+      "title": "Registry key renamed",
+      "plain": "A process renamed a monitored registry key.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Review unexpected renames in persistence or security-policy locations.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0215",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 15
+      },
+      "verdict": "investigate",
+      "title": "Alternate data stream created",
+      "plain": "A process created a named file stream and Sysmon recorded its hash.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Check the stream name, file origin, and process. Browsers create Zone.Identifier legitimately; payload staging can also use streams.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0216",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 16
+      },
+      "verdict": "informational",
+      "title": "Sysmon configuration changed",
+      "plain": "The active Sysmon filtering configuration changed.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Confirm the change matches an approved deployment. An unexpected reduction in telemetry deserves investigation.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0217",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 17
+      },
+      "verdict": "informational",
+      "title": "Named pipe created",
+      "plain": "A process created a named pipe.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Use the pipe name and process as correlation evidence; many applications use pipes for ordinary IPC.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0218",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 18
+      },
+      "verdict": "informational",
+      "title": "Named pipe connected",
+      "plain": "A process connected to a named pipe.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Pair this with the pipe-creation event to identify both sides of the communication.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0219",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 19
+      },
+      "verdict": "investigate",
+      "title": "WMI event filter registered",
+      "plain": "A persistent WMI event filter was registered.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Confirm the filter belongs to approved management software; WMI subscriptions are also a persistence mechanism.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0220",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 20
+      },
+      "verdict": "investigate",
+      "title": "WMI event consumer registered",
+      "plain": "A persistent WMI event consumer was registered.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Review the consumer command or script and its owner before treating it as approved.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0221",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 21
+      },
+      "verdict": "investigate",
+      "title": "WMI consumer bound to a filter",
+      "plain": "A WMI event consumer was bound to a filter, completing a subscription.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Correlate events 19 through 21 and remove an unapproved subscription only after preserving its command and owner.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0222",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 22
+      },
+      "verdict": "informational",
+      "title": "DNS query",
+      "plain": "A process issued a DNS query.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Use the process, query name, and result as timeline evidence; ordinary applications generate large volumes of these.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0223",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 23
+      },
+      "verdict": "informational",
+      "title": "File deleted and archived",
+      "plain": "A process deleted a file and Sysmon archived a copy.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Review the deleting process and preserved file when the path is unexpected; routine cleanup also generates this.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0224",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 24
+      },
+      "verdict": "informational",
+      "title": "Clipboard content changed",
+      "plain": "The system clipboard content changed and Sysmon recorded its hash.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Use the event only as correlation evidence unless policy says the source process or timing is unexpected.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0225",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 25
+      },
+      "verdict": "investigate",
+      "title": "Process image tampering detected",
+      "plain": "Sysmon detected a process-hiding image change such as hollowing or herpaderp.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Preserve the process tree and image hashes, isolate the host if the process is not an approved security or test tool, and investigate immediately.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0226",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 26
+      },
+      "verdict": "informational",
+      "title": "File deletion detected",
+      "plain": "A process deleted a monitored file without archiving its contents.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Use the process and path to connect cleanup or destruction to the rest of the timeline.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0227",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 27
+      },
+      "verdict": "investigate",
+      "title": "Executable file creation blocked",
+      "plain": "Sysmon blocked creation of an executable file under its configured rule.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Review the process, target, and hash. The block succeeded, but the attempted executable creation still needs attribution.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0228",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 28
+      },
+      "verdict": "investigate",
+      "title": "File shredding blocked",
+      "plain": "Sysmon blocked a file-shredding operation under its configured rule.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Identify the process and target. Confirm approved secure deletion or investigate attempted evidence destruction.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0229",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 29
+      },
+      "verdict": "informational",
+      "title": "Executable file detected",
+      "plain": "Sysmon detected creation of a portable executable file.",
+      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
+      "action": "Review the creating process, target, signature, and hash in context; installers produce this normally.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0255",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "provider": "Microsoft-Windows-Sysmon",
+        "eventId": 255
+      },
+      "verdict": "investigate",
+      "title": "Sysmon internal error",
+      "plain": "Sysmon reported an internal error and may have lost telemetry.",
+      "why": "An internal error creates a coverage gap: activity can occur while the expected Sysmon evidence is missing.",
+      "action": "Read the error text, check resource pressure and Sysmon version, then correct the failure and confirm events resume.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
+      ],
+      "falsepositives": [
+        "Approved administration, development, security, and software deployment can produce this event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0300",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 1000
+      },
+      "verdict": "informational",
+      "title": "Defender scan started",
+      "plain": "Microsoft Defender Antivirus started the scan described in the event.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "No action is required unless the scan never produces a completion or failure event.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0301",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 1001
+      },
+      "verdict": "informational",
+      "title": "Defender scan finished",
+      "plain": "Microsoft Defender Antivirus completed a scan.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Read the scan type, duration, and result as ordinary protection history.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0302",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 1002
+      },
+      "verdict": "investigate",
+      "title": "Defender scan stopped early",
+      "plain": "A Defender scan ended before completion.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Read the reason and rerun the scan if it was not intentionally cancelled.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0303",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 1006
+      },
+      "verdict": "actionable",
+      "title": "Defender detected malware or unwanted software",
+      "plain": "Defender detected the threat and resource named in the event.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Review the threat, path, user, and origin, then confirm a later action event quarantined or removed it.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0304",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 1007
+      },
+      "verdict": "investigate",
+      "title": "Defender took a protection action",
+      "plain": "Defender attempted the remediation action recorded for a detected threat.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Read Action and Action Status. Confirm the result is Clean, Quarantine, or Remove rather than Allow or No action.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0305",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 1008
+      },
+      "verdict": "actionable",
+      "title": "Defender could not complete a protection action",
+      "plain": "Defender failed while trying to remediate the threat named in the event.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Update security intelligence, use the error details, and rerun remediation or an offline scan.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0306",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 1116
+      },
+      "verdict": "actionable",
+      "title": "Defender detected a threat",
+      "plain": "Defender detected malware or potentially unwanted software and recorded its severity, path, origin, and process.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Confirm a following 1117 event performed an acceptable action. If none exists, isolate and remediate the resource.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0307",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 1117
+      },
+      "verdict": "investigate",
+      "title": "Defender recorded the threat action",
+      "plain": "Defender acted on a detected threat, with the result and action status in the event.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Verify the action was Clean, Quarantine, or Remove. Allow, None, and No action leave the threat unremediated.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0308",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 1118
+      },
+      "verdict": "actionable",
+      "title": "Defender remediation hit a noncritical error",
+      "plain": "Defender could not complete one task associated with threat remediation.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Read the error and action status, update definitions, and verify the threat no longer remains.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0309",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 1119
+      },
+      "verdict": "critical",
+      "title": "Defender remediation failed critically",
+      "plain": "Defender encountered a critical failure while acting on a detected threat.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Treat the endpoint as potentially unprotected: isolate as appropriate, update definitions, run an offline scan, and verify removal.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0310",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 1121
+      },
+      "verdict": "investigate",
+      "title": "Attack surface reduction blocked activity",
+      "plain": "A Defender attack-surface-reduction rule blocked the process or resource in the event.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "The block succeeded. Attribute the process and path, then tune the rule only if the activity is approved and required.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0311",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 1127
+      },
+      "verdict": "investigate",
+      "title": "Controlled Folder Access blocked disk-sector modification",
+      "plain": "Controlled Folder Access stopped an untrusted process from modifying protected disk sectors.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Review the process and device. Allow it only after confirming it is trusted and the low-level write is required.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0312",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 5001
+      },
+      "verdict": "actionable",
+      "title": "Defender real-time protection was disabled",
+      "plain": "Real-time malware scanning was turned off.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Confirm this was an approved policy or another registered antivirus. Otherwise re-enable protection and investigate who changed it.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0313",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 5004
+      },
+      "verdict": "informational",
+      "title": "Defender real-time protection configuration changed",
+      "plain": "A real-time protection feature setting changed.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Compare the old and new setting with policy. Investigate only when the change is unexpected.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0314",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 5007
+      },
+      "verdict": "investigate",
+      "title": "Defender configuration changed",
+      "plain": "A Microsoft Defender Antivirus configuration value changed.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Verify the old and new values against policy; Microsoft notes that unexpected changes can be caused by malware.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0315",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 5008
+      },
+      "verdict": "actionable",
+      "title": "Defender engine failed",
+      "plain": "The antimalware engine crashed, hung, or stopped because of an unexpected error.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Restart the protection service, update the platform and intelligence, and verify real-time protection returns.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0316",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 5010
+      },
+      "verdict": "actionable",
+      "title": "Defender malware scanning was disabled",
+      "plain": "Scanning for malware and potentially unwanted software was turned off.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Confirm another approved antivirus owns protection; otherwise re-enable Defender and investigate the policy or actor.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0317",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 5012
+      },
+      "verdict": "actionable",
+      "title": "Defender virus scanning was disabled",
+      "plain": "Virus scanning was turned off.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "Confirm another approved antivirus owns protection; otherwise re-enable scanning and investigate the change.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0318",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Windows Defender/Operational",
+        "provider": "Microsoft-Windows-Windows Defender",
+        "eventId": 5013
+      },
+      "verdict": "investigate",
+      "title": "Tamper protection blocked a Defender change",
+      "plain": "Tamper protection stopped an attempted settings change.",
+      "why": "This is a first-party Defender state or threat record. The event details and adjacent detection, action, or recovery events determine whether protection succeeded.",
+      "action": "The protection held. Identify the setting and initiating management tool or process, then confirm the attempt was authorized.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus"
+      ],
+      "falsepositives": [
+        "Approved policy and another registered antivirus can intentionally change Defender state."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/defender-endpoint/troubleshoot-microsoft-defender-antivirus",
+          "retrieved": "2026-08-01"
+        }
+      ]
     }
   ],
   "correlations": [
@@ -1814,7 +4291,10 @@
       "verified": "2026-08-01",
       "correlation": {
         "type": "temporal",
-        "rules": ["LV-0010", "LV-0020"],
+        "rules": [
+          "LV-0010",
+          "LV-0020"
+        ],
         "timespan": "10m"
       },
       "verdict": "critical",
@@ -1834,7 +4314,10 @@
       "verified": "2026-08-01",
       "correlation": {
         "type": "temporal_ordered",
-        "rules": ["LV-0050", "LV-0040"],
+        "rules": [
+          "LV-0050",
+          "LV-0040"
+        ],
         "timespan": "5m"
       },
       "verdict": "actionable",
@@ -1854,7 +4337,10 @@
       "verified": "2026-08-01",
       "correlation": {
         "type": "temporal",
-        "rules": ["LV-0021", "LV-0020"],
+        "rules": [
+          "LV-0021",
+          "LV-0020"
+        ],
         "timespan": "15m"
       },
       "verdict": "actionable",
@@ -1872,7 +4358,10 @@
       "verified": "2026-08-01",
       "correlation": {
         "type": "temporal_ordered",
-        "rules": ["LV-0030", "LV-0032"],
+        "rules": [
+          "LV-0030",
+          "LV-0032"
+        ],
         "timespan": "1h"
       },
       "verdict": "critical",
@@ -1892,7 +4381,10 @@
       "verified": "2026-08-01",
       "correlation": {
         "type": "temporal",
-        "rules": ["LV-0072", "LV-0090"],
+        "rules": [
+          "LV-0072",
+          "LV-0090"
+        ],
         "timespan": "30m"
       },
       "verdict": "actionable",

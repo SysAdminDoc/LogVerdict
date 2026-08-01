@@ -74,6 +74,26 @@ Describe 'Verdict database' {
         ($ids | Select-Object -Unique).Count | Should -Be $ids.Count
     }
 
+    It 'ships more than 150 curated rules' {
+        @((Get-LogVerdictDatabase).rules).Count | Should -BeGreaterThan 150
+    }
+
+    It 'covers every documented Sysmon event type' {
+        $rules = @((Get-LogVerdictDatabase).rules | Where-Object { $_.match.provider -eq 'Microsoft-Windows-Sysmon' })
+        $expected = @(1..29) + @(255)
+        @($rules.match.eventId | Sort-Object) | Should -Be @($expected | Sort-Object)
+    }
+
+    It 'covers Defender detection, remediation, health, and tamper events' {
+        $ids = @((Get-LogVerdictDatabase).rules |
+            Where-Object { $_.match.provider -eq 'Microsoft-Windows-Windows Defender' } |
+            Select-Object -ExpandProperty match |
+            Select-Object -ExpandProperty eventId)
+        foreach ($eventId in @(1006, 1008, 1116, 1117, 1118, 1119, 1121, 1127, 5001, 5007, 5008, 5010, 5012, 5013)) {
+            $ids | Should -Contain $eventId
+        }
+    }
+
     It 'ships every rule with a status and a verification date' {
         foreach ($rule in (Get-LogVerdictDatabase).rules) {
             $rule.status | Should -Not -BeNullOrEmpty -Because "rule $($rule.id) must declare its lifecycle"
@@ -2051,6 +2071,92 @@ Describe 'Reliability Monitor collection' {
                 $f.Verdict | Should -Not -Be 'unknown' -Because "$($f.Key) must be ruled, even if only by the catch-all"
             }
         }
+    }
+}
+
+Describe 'Microsoft Docs event importer' {
+    BeforeAll {
+        $script:MsDocsImporter = Join-Path (Split-Path $PSScriptRoot -Parent) 'Tools\Import-MsDocsEvent.ps1'
+
+        function Export-MsDocsFixtureCorpus {
+            param([string]$Root)
+
+            New-Item -ItemType Directory -Path (Join-Path $Root 'support\windows-server\backup-and-storage') -Force | Out-Null
+            @'
+Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+'@ | Set-Content -LiteralPath (Join-Path $Root 'LICENSE') -Encoding UTF8
+            @'
+---
+title: Event ID 513 when running VSS in Windows Server
+---
+
+Event ID 513 is logged when Cryptographic Services cannot process the System Writer identity.
+The article explains the affected writer and the permissions that should be checked before another backup.
+'@ | Set-Content -LiteralPath (Join-Path $Root 'support\windows-server\backup-and-storage\event-id-513-vss-windows-server.md') -Encoding UTF8
+        }
+
+        function Export-MsDocsReviewFile {
+            param([string]$Path, [string]$Plain)
+
+            @([ordered]@{
+                id = 'LV-TEST1'
+                sourcePath = 'support/windows-server/backup-and-storage/event-id-513-vss-windows-server.md'
+                match = [ordered]@{ source = 'event'; provider = 'Microsoft-Windows-CAPI2'; eventId = 513 }
+                verdict = 'investigate'
+                title = 'A backup writer could not inventory a service'
+                plain = $Plain
+                why = 'The snapshot can omit service files when the System Writer cannot enumerate them.'
+                action = 'Read the named service and repair only its access or registration problem before retrying the backup.'
+                confidence = 'high'
+                falsepositives = @()
+            }) | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $Path -Encoding UTF8
+        }
+    }
+
+    It 'discovers event IDs only after verifying the corpus licence' {
+        $corpus = Join-Path $TestDrive 'discover'
+        Export-MsDocsFixtureCorpus -Root $corpus
+
+        $candidate = @(& $script:MsDocsImporter -CorpusPath $corpus)
+
+        $candidate.Count | Should -Be 1
+        $candidate[0].EventId | Should -Be 513
+        $candidate[0].SourceUri | Should -Be 'https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/event-id-513-vss-windows-server'
+    }
+
+    It 'turns reviewed paraphrases into attributed CC-BY rules' {
+        $corpus = Join-Path $TestDrive 'reviewed'
+        Export-MsDocsFixtureCorpus -Root $corpus
+        $review = Join-Path $TestDrive 'review.json'
+        Export-MsDocsReviewFile -Path $review -Plain 'The snapshot service could not list one service binary while assembling the System Writer metadata.'
+
+        $rule = @(& $script:MsDocsImporter -CorpusPath $corpus -ReviewPath $review -Retrieved '2026-08-01')
+
+        $rule.Count | Should -Be 1
+        $rule[0].id | Should -Be 'LV-TEST1'
+        $rule[0].sources[0].licence | Should -Be 'CC-BY-4.0'
+        $rule[0].sources[0].author | Should -Be 'Microsoft'
+        $rule[0].sources[0].modified | Should -BeTrue
+        $rule[0].verified | Should -Be '2026-08-01'
+    }
+
+    It 'rejects reviewed prose copied from the article' {
+        $corpus = Join-Path $TestDrive 'copied'
+        Export-MsDocsFixtureCorpus -Root $corpus
+        $review = Join-Path $TestDrive 'copied.json'
+        Export-MsDocsReviewFile -Path $review -Plain 'The article explains the affected writer and the permissions that should be checked before another backup.'
+
+        { & $script:MsDocsImporter -CorpusPath $corpus -ReviewPath $review } |
+            Should -Throw '*reproduces source prose verbatim*'
+    }
+
+    It 'fails closed when the checkout does not carry the expected licence' {
+        $corpus = Join-Path $TestDrive 'unlicensed'
+        New-Item -ItemType Directory -Path $corpus -Force | Out-Null
+        'Not a licence' | Set-Content -LiteralPath (Join-Path $corpus 'LICENSE') -Encoding UTF8
+
+        { & $script:MsDocsImporter -CorpusPath $corpus } | Should -Throw '*not recognizably CC-BY-4.0*'
     }
 }
 

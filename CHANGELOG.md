@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **The curated database now contains 171 rules, up from 85.** New narrow rules cover 37 Windows failures observed on the development machine, all 30 documented Sysmon event types, and 19 Defender detection, remediation, health, configuration and tamper events. On the same 30-day live corpus this reduced unknown signatures from 43 of 76 (56.6%) to 6 of 76 (7.9%); the six left are product-specific providers and remain unknown rather than guessed.
+- `Tools\Import-MsDocsEvent.ps1` turns a local `MicrosoftDocs/SupportArticles-docs` checkout into review candidates and imports only human-reviewed paraphrases. It re-verifies the checkout's CC-BY-4.0 licence on every run, rejects copied prose, and records Microsoft attribution, retrieval date and modification status on every imported rule.
 - **`Export-LogVerdictReport -IncludeEvidence`** writes a zip beside the report holding the reports, the matching text-log lines and the scanned event channels as `.evtx` - the artifact to attach to a ticket. The report says what LogVerdict concluded; the bundle carries what it concluded it from, so somebody else can check the working.
 - Combined with `-Redact` the channel exports are deliberately omitted. `.evtx` is a binary format carrying the same account names, hostnames and SIDs that redaction strips out of the text, and a bundle that claimed to be sanitized while shipping them would be worse than one that never claimed it. The manifest states the omission, so a reader months later cannot mistake a withheld channel for a clean one.
 - The bundle carries the matching log lines rather than the log files. `CBS.log` alone routinely runs to hundreds of megabytes and almost none of it is evidence.
@@ -30,7 +32,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Rules
 
-- **Nine rules completing the community-verified list of high-traffic events**, closing the worklist begun in 0.6.0. `WHEA-Logger/19` (the processor's own corrected-error channel, escalating by rate), `TPM-WMI/1796` (a Secure Boot key update the firmware refused), `AppReadiness/214`, `Perflib/1008`, the `DeviceSetupManager/200/201/202` boot-order cluster, and two for `ESENT`. 85 rules ship.
+- **Nine rules completing the community-verified list of high-traffic events**, closing the worklist begun in 0.6.0. `WHEA-Logger/19` (the processor's own corrected-error channel, escalating by rate), `TPM-WMI/1796` (a Secure Boot key update the firmware refused), `AppReadiness/214`, `Perflib/1008`, the `DeviceSetupManager/200/201/202` boot-order cluster, and two for `ESENT`. This brought the database to 85 rules before the later expansion to 171.
 - ESENT is ruled as a family rather than per event id. Its events read as system database errors and are routinely mistaken for them; in fact each one belongs to whichever component the message names first. One rule covers the `-1032` access-denied file-operation family that `486` and `522` both report, and a provider-wide rule explains the rest without claiming a cause for an id nobody has documented. Together they cover 4 signatures here that previously reported as `unknown`.
 
 ## [0.6.0] - 2026-07-31

@@ -1051,6 +1051,1038 @@
         "Id": 4242,
         "SampleMessage": "The Example updater reported a problem that no more specific rule covers."
       }
+    },
+    {
+      "ruleId": "LV-0150",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-HAL",
+        "Id": 20,
+        "SampleMessage": "The hardware real-time clock was not queried because evaluation of the ACPI Time and Alarm Device method failed. Status: 0xC00000BB."
+      }
+    },
+    {
+      "ruleId": "LV-0151",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-HAL",
+        "Id": 21,
+        "SampleMessage": "The hardware real-time clock was not set because evaluation of the ACPI Time and Alarm Device method failed. Status: 0xC00000BB."
+      }
+    },
+    {
+      "ruleId": "LV-0152",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-Perflib",
+        "Id": 1014,
+        "SampleMessage": "The Collect procedure for service Spooler failed with error code The RPC server is unavailable. The performance data will not be returned."
+      }
+    },
+    {
+      "ruleId": "LV-0153",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-WLAN-AutoConfig",
+        "Id": 10002,
+        "SampleMessage": "WLAN Extensibility Module has stopped. Module Path: C:\\Windows\\System32\\DriverStore\\FileRepository\\vendor\\VendorIhvRouter.dll"
+      }
+    },
+    {
+      "ruleId": "LV-0154",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Tcpip",
+        "Id": 4227,
+        "SampleMessage": "TCP/IP failed to establish an outgoing connection because the selected local endpoint was recently used to connect to the same remote endpoint."
+      }
+    },
+    {
+      "ruleId": "LV-0155",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Tcpip",
+        "Id": 4231,
+        "SampleMessage": "A request to allocate an ephemeral port number from the global TCP port space has failed due to all such ports being in use."
+      }
+    },
+    {
+      "ruleId": "LV-0156",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-CAPI2",
+        "Id": 513,
+        "SampleMessage": "Cryptographic Services failed while processing the OnIdentity call in the System Writer Object. Unable to back up image of a service because access is denied."
+      }
+    },
+    {
+      "ruleId": "LV-0157",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-System-Restore",
+        "Id": 8303,
+        "SampleMessage": "Scoping unsuccessful for shadowcopy \\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy9 with error 0x80070057."
+      }
+    },
+    {
+      "ruleId": "LV-0158",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-TPM-WMI",
+        "Id": 1800,
+        "SampleMessage": "A reboot is required before installing the Secure Boot update. Reason: Option ROM CA 2023 (DB)"
+      }
+    },
+    {
+      "ruleId": "LV-0159",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-TPM-WMI",
+        "Id": 1801,
+        "SampleMessage": "Updated Secure Boot certificates are available on this device but have not yet been applied to the firmware."
+      }
+    },
+    {
+      "ruleId": "LV-0160",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "VSS",
+        "Id": 13,
+        "SampleMessage": "Volume Shadow Copy Service information: The COM Server CEventSystem cannot be started. 0x8007045b, A system shutdown is in progress."
+      }
+    },
+    {
+      "ruleId": "LV-0161",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Volsnap",
+        "Id": 24,
+        "SampleMessage": "There was insufficient disk space on volume C: to grow the shadow copy storage for shadow copies of C:."
+      }
+    },
+    {
+      "ruleId": "LV-0162",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Volsnap",
+        "Id": 25,
+        "SampleMessage": "The shadow copies of volume C: were deleted because the shadow copy storage could not grow in time."
+      }
+    },
+    {
+      "ruleId": "LV-0163",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Volsnap",
+        "Id": 35,
+        "SampleMessage": "The shadow copies of volume C: were aborted because the shadow copy storage failed to grow."
+      }
+    },
+    {
+      "ruleId": "LV-0164",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-CertificateServicesClient-CertEnroll",
+        "Id": 87,
+        "SampleMessage": "SCEP Certificate enrollment for Local system via the Microsoft AIK service failed: SubmitV2Attestation: Bad Request. P-256 ECC public keys are not supported."
+      }
+    },
+    {
+      "ruleId": "LV-0165",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-CertificateServicesClient-AutoEnrollment",
+        "Id": 64,
+        "SampleMessage": "Certificate for local system with Thumbprint 54 90 89 CB is about to expire or already expired."
+      }
+    },
+    {
+      "ruleId": "LV-0166",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Schannel",
+        "Id": 36884,
+        "SampleMessage": "The certificate received from the remote server does not contain the expected name. The TLS connection request has failed."
+      }
+    },
+    {
+      "ruleId": "LV-0167",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Schannel",
+        "Id": 36876,
+        "SampleMessage": "The certificate received from the remote server has not validated correctly. The error code is 0x80092013. The TLS connection request has failed."
+      }
+    },
+    {
+      "ruleId": "LV-0168",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-DNS-Client",
+        "Id": 1012,
+        "SampleMessage": "There was an error while attempting to read the local hosts file."
+      }
+    },
+    {
+      "ruleId": "LV-0169",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "winsrvext",
+        "Id": 100,
+        "SampleMessage": "Process C:\\Program Files\\Example\\app.exe is delaying system shutdown after 5140 milliseconds."
+      }
+    },
+    {
+      "ruleId": "LV-0170",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-Security-SPP",
+        "Id": 8233,
+        "SampleMessage": "The rules engine reported a failed VL activation attempt. Reason: 0xC004F074."
+      }
+    },
+    {
+      "ruleId": "LV-0171",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-Security-SPP",
+        "Id": 1014,
+        "SampleMessage": "Acquisition of End User License failed. hr=0xC004C004. Sku Id=00000000-0000-0000-0000-000000000000"
+      }
+    },
+    {
+      "ruleId": "LV-0172",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-Security-SPP",
+        "Id": 8200,
+        "SampleMessage": "License acquisition failure details. hr=0xC004C004"
+      }
+    },
+    {
+      "ruleId": "LV-0173",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-WinRM",
+        "Id": 10149,
+        "SampleMessage": "The WinRM service is not listening for WS-Management requests."
+      }
+    },
+    {
+      "ruleId": "LV-0174",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-User Profiles Service",
+        "Id": 1500,
+        "SampleMessage": "Windows cannot log you on because your profile cannot be loaded. DETAIL - Access is denied."
+      }
+    },
+    {
+      "ruleId": "LV-0175",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-User Profiles Service",
+        "Id": 1511,
+        "SampleMessage": "Windows cannot find the local profile and is logging you on with a temporary profile. Changes you make will be lost when you log off."
+      }
+    },
+    {
+      "ruleId": "LV-0176",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-User Profiles Service",
+        "Id": 1533,
+        "SampleMessage": "Windows cannot delete the profile directory C:\\Users\\user\\AppData. DETAIL - Access is denied."
+      }
+    },
+    {
+      "ruleId": "LV-0177",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "MsiInstaller",
+        "Id": 1039,
+        "SampleMessage": "Product: Example. The application tried to modify a protected Windows registry key."
+      }
+    },
+    {
+      "ruleId": "LV-0178",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Service Control Manager",
+        "Id": 7030,
+        "SampleMessage": "The Example service is marked as an interactive service. However, the system is configured to not allow interactive services."
+      }
+    },
+    {
+      "ruleId": "LV-0179",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Service Control Manager",
+        "Id": 7024,
+        "SampleMessage": "The Example service terminated with the following service-specific error: 45."
+      }
+    },
+    {
+      "ruleId": "LV-0180",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-TPM-WMI",
+        "Id": 1040,
+        "SampleMessage": "Pre-attestation health checks confirm a critical component has failed, and the device is not expected to pass attestation."
+      }
+    },
+    {
+      "ruleId": "LV-0181",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-Winlogon",
+        "Id": 6004,
+        "SampleMessage": "The winlogon notification subscriber TrustedInstaller failed a critical notification event."
+      }
+    },
+    {
+      "ruleId": "LV-0182",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "SideBySide",
+        "Id": 33,
+        "SampleMessage": "Activation context generation failed for C:\\Program Files\\Example\\component.dll. Dependent Assembly Example.Dependencies version 1.0.0.0 could not be found."
+      }
+    },
+    {
+      "ruleId": "LV-0183",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-WinREAgent",
+        "Id": 4502,
+        "SampleMessage": "Windows Recovery Environment servicing failed."
+      }
+    },
+    {
+      "ruleId": "LV-0184",
+      "origin": "observed",
+      "expect": "critical",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "exfat",
+        "Id": 141,
+        "SampleMessage": "Delayed Write Failed: Windows was unable to save all the data for the file on an exFAT volume; the data has been lost."
+      }
+    },
+    {
+      "ruleId": "LV-0185",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": ".NET Runtime",
+        "Id": 1023,
+        "SampleMessage": "A .NET application failed. You must install or update .NET to run this application. Framework: Microsoft.NETCore.App, version 3.0.0, x64."
+      }
+    },
+    {
+      "ruleId": "LV-0186",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": ".NET Runtime",
+        "Id": 1025,
+        "SampleMessage": "The application requested process termination through System.Environment.FailFast. System.TypeInitializationException: a required module could not be found."
+      }
+    },
+    {
+      "ruleId": "LV-0201",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 1,
+        "SampleMessage": "Process creation event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0202",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 2,
+        "SampleMessage": "File creation time changed event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0203",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 3,
+        "SampleMessage": "Network connection event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0204",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 4,
+        "SampleMessage": "Sysmon service state changed event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0205",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 5,
+        "SampleMessage": "Process terminated event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0206",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 6,
+        "SampleMessage": "Driver loaded event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0207",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 7,
+        "SampleMessage": "Image loaded event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0208",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 8,
+        "SampleMessage": "Remote thread created event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0209",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 9,
+        "SampleMessage": "Raw disk read event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0210",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 10,
+        "SampleMessage": "Process access event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0211",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 11,
+        "SampleMessage": "File created event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0212",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 12,
+        "SampleMessage": "Registry object created or deleted event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0213",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 13,
+        "SampleMessage": "Registry value set event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0214",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 14,
+        "SampleMessage": "Registry key renamed event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0215",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 15,
+        "SampleMessage": "Alternate data stream created event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0216",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 16,
+        "SampleMessage": "Sysmon configuration changed event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0217",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 17,
+        "SampleMessage": "Named pipe created event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0218",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 18,
+        "SampleMessage": "Named pipe connected event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0219",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 19,
+        "SampleMessage": "WMI event filter registered event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0220",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 20,
+        "SampleMessage": "WMI event consumer registered event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0221",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 21,
+        "SampleMessage": "WMI consumer bound to a filter event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0222",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 22,
+        "SampleMessage": "DNS query event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0223",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 23,
+        "SampleMessage": "File deleted and archived event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0224",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 24,
+        "SampleMessage": "Clipboard content changed event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0225",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 25,
+        "SampleMessage": "Process image tampering detected event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0226",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 26,
+        "SampleMessage": "File deletion detected event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0227",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 27,
+        "SampleMessage": "Executable file creation blocked event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0228",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 28,
+        "SampleMessage": "File shredding blocked event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0229",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 29,
+        "SampleMessage": "Executable file detected event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0255",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Sysmon/Operational",
+        "Provider": "Microsoft-Windows-Sysmon",
+        "Id": 255,
+        "SampleMessage": "Sysmon internal error event recorded by Microsoft-Windows-Sysmon."
+      }
+    },
+    {
+      "ruleId": "LV-0300",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 1000,
+        "SampleMessage": "Defender scan started event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0301",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 1001,
+        "SampleMessage": "Defender scan finished event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0302",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 1002,
+        "SampleMessage": "Defender scan stopped early event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0303",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 1006,
+        "SampleMessage": "Defender detected malware or unwanted software event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0304",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 1007,
+        "SampleMessage": "Defender took a protection action event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0305",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 1008,
+        "SampleMessage": "Defender could not complete a protection action event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0306",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 1116,
+        "SampleMessage": "Defender detected a threat event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0307",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 1117,
+        "SampleMessage": "Defender recorded the threat action event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0308",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 1118,
+        "SampleMessage": "Defender remediation hit a noncritical error event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0309",
+      "origin": "constructed",
+      "expect": "critical",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 1119,
+        "SampleMessage": "Defender remediation failed critically event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0310",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 1121,
+        "SampleMessage": "Attack surface reduction blocked activity event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0311",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 1127,
+        "SampleMessage": "Controlled Folder Access blocked disk-sector modification event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0312",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 5001,
+        "SampleMessage": "Defender real-time protection was disabled event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0313",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 5004,
+        "SampleMessage": "Defender real-time protection configuration changed event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0314",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 5007,
+        "SampleMessage": "Defender configuration changed event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0315",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 5008,
+        "SampleMessage": "Defender engine failed event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0316",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 5010,
+        "SampleMessage": "Defender malware scanning was disabled event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0317",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 5012,
+        "SampleMessage": "Defender virus scanning was disabled event recorded by Microsoft-Windows-Windows Defender."
+      }
+    },
+    {
+      "ruleId": "LV-0318",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Windows Defender/Operational",
+        "Provider": "Microsoft-Windows-Windows Defender",
+        "Id": 5013,
+        "SampleMessage": "Tamper protection blocked a Defender change event recorded by Microsoft-Windows-Windows Defender."
+      }
     }
   ]
 }

@@ -180,6 +180,8 @@ Test-LogVerdictDatabase
 
 Every shipped rule also carries a regression fixture in [`Data/fixtures.json`](Data/fixtures.json): a minimal signature the rule must still claim, resolved through the real resolver. A rule that quietly stops matching is otherwise invisible - it produces no error, just an `unknown` signature that looks like a gap in coverage rather than a broken rule. The fixtures also catch the opposite mistake, a new rule that is broader than it looks and shadows an existing one, and the failure names which rule stole the match. Local databases need no fixtures; the checks are skipped when there is no fixture file.
 
+The Microsoft support corpus has a guarded import path. `Tools\Import-MsDocsEvent.ps1` reads a local `MicrosoftDocs/SupportArticles-docs` checkout, verifies its CC-BY-4.0 licence, discovers event-ID articles, and turns only reviewed, paraphrased prose into attributed rule objects. It refuses copied prose and never edits the database on discovery alone.
+
 `match` accepts `source`, `channel`, `provider` (trailing `*` wildcard allowed), `eventId`, and `messagePattern` (regex). More match keys means higher specificity, and the most specific matching rule wins.
 
 ## Requirements
@@ -198,7 +200,7 @@ Invoke-Pester -Path .\Tests
 
 ## Honest limitations
 
-- **Coverage is the roadmap.** 85 rules ship. A first scan will report plenty of `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
+- **Coverage is the roadmap.** 171 rules ship. A first scan will still report `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
 - **Crash dumps are inventoried, not decoded.** Reading a minidump needs a debugger and symbols.
 - **A clean result is not proof of health.** An in-place upgrade or a cleared log resets the event channels, so the report states each channel's oldest surviving record and warns when that horizon falls inside the requested window.
 - Only the live machine is supported today. Offline analysis of a collected evidence bundle is planned.
