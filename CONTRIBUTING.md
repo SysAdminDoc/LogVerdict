@@ -43,7 +43,30 @@ If you are not sure what an event means, do not write the rule. Or write it with
    }
    ```
 
-4. Validate:
+4. Add a regression fixture for it in `Data/fixtures.json`. Every shipped rule has one and the test suite fails if any rule does not:
+
+   ```json
+   {
+     "ruleId": "LV-0200",
+     "origin": "observed",
+     "expect": "investigate",
+     "signature": {
+       "Source": "event",
+       "Channel": "Application",
+       "Provider": "Contoso-Agent",
+       "Id": 4242,
+       "SampleMessage": "The agent could not read its configuration file."
+     }
+   }
+   ```
+
+   The fixture is resolved through the real resolver and must come back as *your* rule with *your* verdict. This is what catches a later rule silently shadowing yours, and it is why the check cannot be skipped.
+
+   - `origin` is `observed` if you captured the signature from a real machine, `constructed` if you built it from the match keys. Do not blur the two.
+   - `expect` is the verdict the rule should produce. Add `"perDay"` above an `escalate.perDay` threshold to pin the escalated verdict instead.
+   - **Redact before you commit.** A captured message carries the hostname, account name, SIDs and profile paths of the machine it came from. A test asserts none of those survive, but it only knows about the patterns it was taught, so read your own fixture before pushing it. If a message reproduces something private - PowerShell script block logging reproduces the source of whatever ran - replace it with a `constructed` one instead.
+
+5. Validate:
 
    ```powershell
    Test-LogVerdictDatabase        # must report 0 problems

@@ -4,6 +4,14 @@ All notable changes to LogVerdict are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Every rule now carries a regression fixture.** `Data/fixtures.json` holds a minimal signature per rule, resolved through the real resolver by `Test-LogVerdictDatabase` and the test suite. A rule that quietly stops matching was previously invisible - it raises no error, it just produces an `unknown` signature that reads as a gap in coverage rather than as a broken rule. The fixtures also catch the inverse mistake, a newly added rule that is broader than it looks and shadows an existing one, and the failure names which rule stole the match rather than only reporting that the original missed.
+- 47 of the 65 fixtures were captured from a real machine; the rest are constructed from the rule's match keys, and each says which it is. Fixtures for rules with a rate threshold pin the escalated verdict, so an `escalate` block cannot silently stop firing.
+- `Test-LogVerdictDatabase` gained `-FixturePath` and `-SkipFixture`. A missing fixture file is not an error - a site running a hand-written `verdicts.local.json` has none and must still be able to validate - but a rule in the shipped database without one is reported as a warning and fails the suite.
+
 ## [0.5.0] - 2026-07-31
 
 ### Added

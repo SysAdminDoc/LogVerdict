@@ -168,6 +168,8 @@ Put site-specific rules in `Data/verdicts.local.json` - it is merged automatical
 Test-LogVerdictDatabase
 ```
 
+Every shipped rule also carries a regression fixture in [`Data/fixtures.json`](Data/fixtures.json): a minimal signature the rule must still claim, resolved through the real resolver. A rule that quietly stops matching is otherwise invisible - it produces no error, just an `unknown` signature that looks like a gap in coverage rather than a broken rule. The fixtures also catch the opposite mistake, a new rule that is broader than it looks and shadows an existing one, and the failure names which rule stole the match. Local databases need no fixtures; the checks are skipped when there is no fixture file.
+
 `match` accepts `source`, `channel`, `provider` (trailing `*` wildcard allowed), `eventId`, and `messagePattern` (regex). More match keys means higher specificity, and the most specific matching rule wins.
 
 ## Requirements

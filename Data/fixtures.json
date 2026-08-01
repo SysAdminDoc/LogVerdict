@@ -1,0 +1,816 @@
+{
+  "schemaVersion": 1,
+  "name": "LogVerdict rule regression fixtures",
+  "updated": "2026-07-31",
+  "notes": "One minimal signature per rule, resolved against the shipped database by the test suite. origin=observed means the signature was captured from a real machine; origin=constructed means it was built from the rule match keys because nothing on the authoring machine exercised the rule.",
+  "fixtures": [
+    {
+      "ruleId": "LV-0001",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-DistributedCOM",
+        "Id": 10016,
+        "SampleMessage": "The application-specific permission settings do not grant Local Activation permission for the COM Server application with CLSID \r\n{2593F8B9-4EAF-457C-B68A-50F6B8EA6B54}\r\n and APPID \r\n{15C20B67-12E7-4BB6-92BB-7AFF07997402}\r\n to the user MACHINE\\user SID (S-1-5-21-<SID>) from address LocalHost (Using LRPC) running in the application container Unavailable SID (Unav"
+      }
+    },
+    {
+      "ruleId": "LV-0002",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-DistributedCOM",
+        "Id": 10010,
+        "SampleMessage": "The server {00000000-0000-0000-0000-000000000000} did not register with DCOM within the required timeout."
+      }
+    },
+    {
+      "ruleId": "LV-0010",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-WHEA-Logger",
+        "Id": 17,
+        "SampleMessage": "A corrected hardware error has occurred.\r\n\r\nComponent: PCI Express Legacy Endpoint\r\nError Source: Advanced Error Reporting (PCI Express)\r\n\r\nPrimary Bus:Device:Function: 0x1:0x0:0x0\r\nSecondary Bus:Device:Function: 0x0:0x0:0x0\r\nPrimary Device Name:PCI\\VEN_10DE&DEV_2783&SUBSYS_51371462&REV_A1\r\nSecondary Device Name:"
+      }
+    },
+    {
+      "ruleId": "LV-0010",
+      "name": "at the escalation rate",
+      "origin": "constructed",
+      "expect": "actionable",
+      "perDay": 40,
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-WHEA-Logger",
+        "Id": 17,
+        "SampleMessage": "A corrected hardware error has occurred. Reported by component: Processor Core."
+      }
+    },
+    {
+      "ruleId": "LV-0011",
+      "origin": "constructed",
+      "expect": "critical",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-WHEA-Logger",
+        "Id": 18,
+        "SampleMessage": "A fatal hardware error has occurred. Reported by component: Processor Core. Error Source: Machine Check Exception."
+      }
+    },
+    {
+      "ruleId": "LV-0020",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-Kernel-Power",
+        "Id": 41,
+        "SampleMessage": "The system has rebooted without cleanly shutting down first. This error could be caused if the system stopped responding, crashed, or lost power unexpectedly."
+      }
+    },
+    {
+      "ruleId": "LV-0021",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-WER-SystemErrorReporting",
+        "Id": 1001,
+        "SampleMessage": "The computer has rebooted from a bugcheck. The bugcheck was: 0x0000007e (0xffffffffc0000005, 0xfffff8000f1a2b3c, 0xffffd0002a1b3c40, 0xffffd0002a1b3a80)."
+      }
+    },
+    {
+      "ruleId": "LV-0022",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "EventLog",
+        "Id": 6008,
+        "SampleMessage": "The previous system shutdown at 5:01:15 AM on 6/24/2026 was unexpected."
+      }
+    },
+    {
+      "ruleId": "LV-0030",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "disk",
+        "Id": 51,
+        "SampleMessage": "An error was detected on device \\DR7 during a paging operation."
+      }
+    },
+    {
+      "ruleId": "LV-0031",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "disk",
+        "Id": 157,
+        "SampleMessage": "Disk 5 has been surprise removed."
+      }
+    },
+    {
+      "ruleId": "LV-0032",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Ntfs",
+        "Id": 55,
+        "SampleMessage": "A corruption was discovered in the file system structure on volume C:."
+      }
+    },
+    {
+      "ruleId": "LV-0040",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Service Control Manager",
+        "Id": 7031,
+        "SampleMessage": "The UserDataSvc_71cc1 service terminated unexpectedly.  It has done this 1 time(s).  The following corrective action will be taken in 10000 milliseconds: Restart the service."
+      }
+    },
+    {
+      "ruleId": "LV-0040",
+      "name": "at the escalation rate",
+      "origin": "constructed",
+      "expect": "actionable",
+      "perDay": 9,
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Service Control Manager",
+        "Id": 7031,
+        "SampleMessage": "The Contoso Agent service terminated unexpectedly. It has done this 12 time(s)."
+      }
+    },
+    {
+      "ruleId": "LV-0041",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Service Control Manager",
+        "Id": 7034,
+        "SampleMessage": "The Gaming Services service terminated unexpectedly.  It has done this 1 time(s)."
+      }
+    },
+    {
+      "ruleId": "LV-0042",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Service Control Manager",
+        "Id": 7000,
+        "SampleMessage": "The Steam Client Service service failed to start due to the following error: \r\nThe service did not respond to the start or control request in a timely fashion."
+      }
+    },
+    {
+      "ruleId": "LV-0043",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Service Control Manager",
+        "Id": 7009,
+        "SampleMessage": "A timeout was reached (30000 milliseconds) while waiting for the Steam Client Service service to connect."
+      }
+    },
+    {
+      "ruleId": "LV-0050",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Application Error",
+        "Id": 1000,
+        "SampleMessage": "Faulting application name: python.exe, version: 3.12.10150.1013, time stamp: 0x67f515a7\r\nFaulting module name: python312.dll, version: 3.12.10150.1013, time stamp: 0x67f5153a\r\nException code: 0xc0000005\r\nFault offset: 0x0000000000083929\r\nFaulting process id: 0xB7BC\r\nFaulting application start time: 0x1DD1FBC3C027637\r\nFaulting application path: C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\py"
+      }
+    },
+    {
+      "ruleId": "LV-0051",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Application Hang",
+        "Id": 1002,
+        "SampleMessage": "The program Explorer.EXE version 10.0.26100.1 stopped interacting with Windows and was closed."
+      }
+    },
+    {
+      "ruleId": "LV-0052",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": ".NET Runtime",
+        "Id": 1026,
+        "SampleMessage": "Application: SyncTrayzor.exe\nCoreCLR Version: 10.0.1026.32716\n.NET Version: 10.0.10\nDescription: The process was terminated due to an unhandled exception.\nException Info: System.Threading.Tasks.TaskCanceledException: A task was canceled.\r\n   at System.Windows.Threading.DispatcherOperation.Wait(TimeSpan timeout)\r\n   at System.Windows.Threading.Dispatcher.InvokeImpl(DispatcherOperation operation, Ca"
+      }
+    },
+    {
+      "ruleId": "LV-0060",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Kernel-EventTracing/Admin",
+        "Provider": "Microsoft-Windows-Kernel-EventTracing",
+        "Id": 2,
+        "SampleMessage": "Session \"RdClientAutoTrace\" failed to start with the following error: 0xC0000022"
+      }
+    },
+    {
+      "ruleId": "LV-0061",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Kernel-EventTracing/Admin",
+        "Provider": "Microsoft-Windows-Kernel-EventTracing",
+        "Id": 3,
+        "SampleMessage": "Session \"ReadyBoot\" stopped due to the following error: 0xC0000188"
+      }
+    },
+    {
+      "ruleId": "LV-0062",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-RestartManager",
+        "Id": 10010,
+        "SampleMessage": "Application 'C:\\Program Files\\nodejs\\node.exe' (pid 160084) cannot be restarted - Application SID does not match Conductor SID.."
+      }
+    },
+    {
+      "ruleId": "LV-0063",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "VBScriptDeprecationAlert",
+        "Id": 4096,
+        "SampleMessage": "(no message template registered for this provider on this machine)"
+      }
+    },
+    {
+      "ruleId": "LV-0064",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-User Profiles General",
+        "Id": 1509,
+        "SampleMessage": "Windows cannot copy file \\\\?\\C:\\Users\\user\\AppData\\Local\\Example\\settings.dat to location \\\\?\\C:\\Users\\Default\\AppData\\Local\\Example\\settings.dat. This error may be caused by network problems or insufficient security rights.  DETAIL - Access is denied."
+      }
+    },
+    {
+      "ruleId": "LV-0070",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-Eventlog",
+        "Id": 104,
+        "SampleMessage": "The System log file was cleared."
+      }
+    },
+    {
+      "ruleId": "LV-0071",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-Kernel-PnP",
+        "Id": 219,
+        "SampleMessage": "The driver \\Driver\\WudfRd failed to load.\r\nDevice: USB\\VID_04E8&PID_6860&MS_COMP_MTP&SAMSUNG_Android\\6&127b3139&0&0000\r\nStatus: 0xC0000365"
+      }
+    },
+    {
+      "ruleId": "LV-0072",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-WindowsUpdateClient",
+        "Id": 20,
+        "SampleMessage": "Installation Failure: Windows failed to install the following update with error 0x80073D02: 9PLM9XGG6VKS-OpenAI.Codex."
+      }
+    },
+    {
+      "ruleId": "LV-0073",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "NETLOGON",
+        "Id": 5719,
+        "SampleMessage": "This computer was not able to set up a secure session with a domain controller due to the following: There are currently no logon servers available to service the logon request."
+      }
+    },
+    {
+      "ruleId": "LV-0074",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-GroupPolicy",
+        "Id": 1058,
+        "SampleMessage": "The processing of Group Policy failed. Windows attempted to read the file gpt.ini from a domain controller and was not successful."
+      }
+    },
+    {
+      "ruleId": "LV-0075",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-Security-Kerberos",
+        "Id": 4,
+        "SampleMessage": "The Kerberos client received a KRB_AP_ERR_MODIFIED error from the server."
+      }
+    },
+    {
+      "ruleId": "LV-0080",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-DNS-Client",
+        "Id": 1014,
+        "SampleMessage": "Name resolution for the name update.example.com timed out after none of the configured DNS servers responded."
+      }
+    },
+    {
+      "ruleId": "LV-0081",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-Time-Service",
+        "Id": 47,
+        "SampleMessage": "Time Provider NtpClient: No valid response has been received from manually configured peer pool.ntp.org after 8 attempts to contact it. This peer will be discarded as a time source and NtpClient will attempt to discover a new peer with this DNS name. The error was: The peer is unreachable."
+      }
+    },
+    {
+      "ruleId": "LV-0082",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Diagnostics-Performance/Operational",
+        "Provider": "Microsoft-Windows-Diagnostics-Performance",
+        "Id": 100,
+        "SampleMessage": "Windows has started up: Boot Duration : 38562ms, IsDegradation : false."
+      }
+    },
+    {
+      "ruleId": "LV-0090",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "textlog",
+        "Channel": "CBS",
+        "Provider": "CBS",
+        "Id": 0,
+        "SampleMessage": "2026-07-31 00:31:52, Error                 CSI    00000123 (F) Hashes for file member wuaueng.dll do not match actual file."
+      }
+    },
+    {
+      "ruleId": "LV-0091",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "textlog",
+        "Channel": "CBS",
+        "Provider": "CBS",
+        "Id": 0,
+        "SampleMessage": "2026-07-31 00:31:52, Error                 CBS    Failed to load the COMPONENTS hive [HRESULT = 0x800f0805]"
+      }
+    },
+    {
+      "ruleId": "LV-0092",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "textlog",
+        "Channel": "SetupAPI",
+        "Provider": "SetupAPI",
+        "Id": 0,
+        "SampleMessage": "!!!  inf:                          Failed to open/create registry key 'HKR(Driver)\\DeviceData'. Error = 0x00000005"
+      }
+    },
+    {
+      "ruleId": "LV-0093",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "textlog",
+        "Channel": "DISM",
+        "Provider": "DISM",
+        "Id": 0,
+        "SampleMessage": "2026-07-31 01:51:30, Error                 DISM   DISM Package Manager: PID=3 Failed opening package. [HRESULT = 0x800f0805]"
+      }
+    },
+    {
+      "ruleId": "LV-0094",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "textlog",
+        "Channel": "NetSetup",
+        "Provider": "NetSetup",
+        "Id": 0,
+        "SampleMessage": "07/31/2026 10:15:00:123 NetpProvisionComputerAccount: Failed to join domain: status = 0x54b"
+      }
+    },
+    {
+      "ruleId": "LV-0100",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Hyper-V-VmSwitch-Operational",
+        "Provider": "Microsoft-Windows-Hyper-V-VmSwitch",
+        "Id": 285,
+        "SampleMessage": "V-Switch operation OID_GEN_STATISTICS (131334) took too long to complete. Operation Type: OID HOST VNIC. Execution time 0 ms. Queued time 0 ms. Expected execution time less than 0 ms. NicName: C08CB7B8-9B3C-408E-8E30-5E16A3AEB445. NicFriendlyName: Default Switch."
+      }
+    },
+    {
+      "ruleId": "LV-0101",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Hyper-V-VmSwitch-Operational",
+        "Provider": "Microsoft-Windows-Hyper-V-VmSwitch",
+        "Id": 148,
+        "SampleMessage": "Ndk Oid 0xFC040202 for external NIC  (Friendly Name: ) on behalf of virtual NIC C08CB7B8-9B3C-408E-8E30-5E16A3AEB445 (Friendly Name: Default Switch). Status: 0x0. Reason: Unknown.."
+      }
+    },
+    {
+      "ruleId": "LV-0102",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-StateRepository/Operational",
+        "Provider": "Microsoft-Windows-StateRepository",
+        "Id": 104,
+        "SampleMessage": "Warning 0x5: database is locked in \"PRAGMA journal_mode;\""
+      }
+    },
+    {
+      "ruleId": "LV-0103",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-StateRepository/Operational",
+        "Provider": "Microsoft-Windows-StateRepository",
+        "Id": 100,
+        "SampleMessage": "Error 0x15: misuse at line 185353 of [737ae4a347]"
+      }
+    },
+    {
+      "ruleId": "LV-0104",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Security-LessPrivilegedAppContainer/Operational",
+        "Provider": "Microsoft-Windows-Security-LessPrivilegedAppContainer",
+        "Id": 1,
+        "SampleMessage": "Access to the a resource has been denied for a less privileged app container at 2026-07-25T19:41:58.529527500Z (StackHash: 0xCF66DF64)."
+      }
+    },
+    {
+      "ruleId": "LV-0105",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Known Folders API Service",
+        "Provider": "Microsoft-Windows-KnownFolders",
+        "Id": 1002,
+        "SampleMessage": "Error 0x80070005 occurred while verifying known folder {f1b32785-6fba-4fcf-9d55-7b8e7f157091} with path 'C:\\Users\\user\\AppData\\Local'."
+      }
+    },
+    {
+      "ruleId": "LV-0106",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Known Folders API Service",
+        "Provider": "Microsoft-Windows-KnownFolders",
+        "Id": 1000,
+        "SampleMessage": "Error 0x80070005 occurred while creating known folder {62ab5d82-fdc1-4dc3-a9dd-070d1d495d97} with path 'C:\\ProgramData'."
+      }
+    },
+    {
+      "ruleId": "LV-0107",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-AppXDeploymentServer/Operational",
+        "Provider": "Microsoft-Windows-AppXDeployment-Server",
+        "Id": 493,
+        "SampleMessage": "There were 1 additional files that failed to be deleted under the folder \\\\?\\C:\\Program Files\\WindowsApps\\Deleted."
+      }
+    },
+    {
+      "ruleId": "LV-0108",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-UniversalTelemetryClient/Operational",
+        "Provider": "Microsoft-Windows-UniversalTelemetryClient",
+        "Id": 29,
+        "SampleMessage": "Connection state - Some connections have failed since the previous period."
+      }
+    },
+    {
+      "ruleId": "LV-0109",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-CloudStore/Initialization",
+        "Provider": "Microsoft-Windows-CloudStore",
+        "Id": 4007,
+        "SampleMessage": "Failed to set policy MicrosoftDevice to false: Class not registered."
+      }
+    },
+    {
+      "ruleId": "LV-0110",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-WMI-Activity/Operational",
+        "Provider": "Microsoft-Windows-WMI-Activity",
+        "Id": 5858,
+        "SampleMessage": "Id = {C517F6C6-20F6-000D-78B6-40C5F620DD01}; ClientMachine = MACHINE; User = MACHINE\\user; ClientProcessId = 2396; Component = Unknown; Operation = Start IWbemServices::ExecNotificationQuery - root\\WMI : select * from WmiMonitorBrightnessEvent; ResultCode = 0x80041032; PossibleCause = Unknown"
+      }
+    },
+    {
+      "ruleId": "LV-0111",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-PowerShell/Operational",
+        "Provider": "Microsoft-Windows-PowerShell",
+        "Id": 4104,
+        "SampleMessage": "Creating Scriptblock text (1 of 1):\nGet-Service -Name Spooler | Select-Object -Property Status\n\nScriptBlock ID: 00000000-0000-0000-0000-000000000000\nPath: C:\\Scripts\\Example.ps1"
+      }
+    },
+    {
+      "ruleId": "LV-0112",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "PowerShellCore/Operational",
+        "Provider": "PowerShellCore",
+        "Id": 4104,
+        "SampleMessage": "Creating Scriptblock text (1 of 1):\nGet-Service -Name Spooler | Select-Object -Property Status\n\nScriptBlock ID: 00000000-0000-0000-0000-000000000000\nPath: C:\\Scripts\\Example.ps1"
+      }
+    },
+    {
+      "ruleId": "LV-0113",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-TerminalServices-RDPClient/Operational",
+        "Provider": "Microsoft-Windows-TerminalServices-ClientActiveXCore",
+        "Id": 1033,
+        "SampleMessage": "Component name:slint, :: SL::OnDisconnected, Error code:0x904"
+      }
+    },
+    {
+      "ruleId": "LV-0114",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Storage-ClassPnP/Operational",
+        "Provider": "Microsoft-Windows-StorDiag",
+        "Id": 507,
+        "SampleMessage": "Completing a failed non-ReadWrite SCSI SRB request"
+      }
+    },
+    {
+      "ruleId": "LV-0115",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Store/Operational",
+        "Provider": "Microsoft-Windows-Store",
+        "Id": 8002,
+        "SampleMessage": "Trying to remove timer {F8800FAE-ED92-FFA7-7787-AC27E8DE878A} not in table\r\nFunction: MemoryTimerService::CancelTimerWithId\r\nSource: onecoreuap\\enduser\\winstore\\licensemanager\\lib\\memorytimer.cpp (80)"
+      }
+    },
+    {
+      "ruleId": "LV-0116",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Crypto-DPAPI/Operational",
+        "Provider": "Microsoft-Windows-Crypto-DPAPI",
+        "Id": 8198,
+        "SampleMessage": "DPAPI Unprotect failed .\r\n\r\n \tStatus:\t0xD\r\n \tReasonForFailure:\tMAC check failed"
+      }
+    },
+    {
+      "ruleId": "LV-0117",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-CodeIntegrity/Operational",
+        "Provider": "Microsoft-Windows-CodeIntegrity",
+        "Id": 3033,
+        "SampleMessage": "Code Integrity determined that a process (\\Device\\HarddiskVolume3\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe) attempted to load \\Device\\HarddiskVolume3\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\150.1.92.144\\vulkan-1.dll that did not meet the Microsoft signing level requirements."
+      }
+    },
+    {
+      "ruleId": "LV-0118",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Security-Mitigations/KernelMode",
+        "Provider": "Microsoft-Windows-Security-Mitigations",
+        "Id": 10,
+        "SampleMessage": "Process '\\Device\\HarddiskVolume3\\Program Files\\Docker\\Docker\\frontend\\Docker Desktop.exe' (PID 11932) was blocked from making system calls to Win32k.sys."
+      }
+    },
+    {
+      "ruleId": "LV-0119",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-User Device Registration/Admin",
+        "Provider": "Microsoft-Windows-User Device Registration",
+        "Id": 360,
+        "SampleMessage": "Windows Hello for Business provisioning will not be launched. \r\nDevice is Microsoft Entra joined (or hybrid joined): Not Tested \r\nUser has logged on with Microsoft Entra credentials: No \r\nWindows Hello for Business policy is enabled: Not Tested \r\nWindows Hello for Business post-logon provisioning is enabled: Not Tested \r\nLocal computer meets Windows hello for business hardware requirements: Not Te"
+      }
+    },
+    {
+      "ruleId": "LV-0120",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-PushNotification-Platform/Operational",
+        "Provider": "Microsoft-Windows-PushNotifications-Platform",
+        "Id": 1116,
+        "SampleMessage": "Device Compact Ticket request failed with error 0x800704CF for the Data Connection."
+      }
+    },
+    {
+      "ruleId": "LV-0121",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Kernel-EventTracing/Admin",
+        "Provider": "Microsoft-Windows-Kernel-EventTracing",
+        "Id": 1,
+        "SampleMessage": "The backing-file for the real-time session \"DefenderApiLogger\" has reached its maximum size. As a result, new events will not be logged to this session until space becomes available. This error is often caused by starting a trace session in real-time mode without having any real-time consumers."
+      }
+    },
+    {
+      "ruleId": "LV-0122",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Bits-Client/Operational",
+        "Provider": "Microsoft-Windows-Bits-Client",
+        "Id": 61,
+        "SampleMessage": "BITS stopped transferring the {291AA914-1033-4CE9-BD63-0C0A92D435E5} transfer job that is associated with the https://armmf.adobe.com/arm-manifests/win/ServicesUpdater/DC/AcroManifest3.msi URL. The status code is 0x80072EE7."
+      }
+    },
+    {
+      "ruleId": "LV-0123",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-AppXDeployment/Operational",
+        "Provider": "Microsoft-Windows-AppXDeployment",
+        "Id": 302,
+        "SampleMessage": "Failed to start system service: appxsvc with error: 0x8007045B."
+      }
+    },
+    {
+      "ruleId": "LV-0124",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Store/Operational",
+        "Provider": "Microsoft-Windows-Install-Agent",
+        "Id": 2007,
+        "SampleMessage": "Error while reading DirectDownloadReplacementSettings from OneSettings cache, value will remain empty\r\nError: Unknown HResult Error code: 0xefffffff\r\nFunction: DoInitializeOneSettingsConfiguration\r\nSource: onecoreuap\\enduser\\winstore\\installservice\\lib\\settings.cpp (2638)"
+      }
+    },
+    {
+      "ruleId": "LV-0125",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-StorageManagement/Operational",
+        "Provider": "Microsoft-Windows-StorageManagement",
+        "Id": 5,
+        "SampleMessage": "An error has occurred during method execution.                   \r\nClass: PS_StorageCmdlets                   \r\nMethod: GetStorageReliabilityCounter                   \r\nError Code: 2"
+      }
+    },
+    {
+      "ruleId": "LV-0126",
+      "origin": "observed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-DeviceSetupManager/Admin",
+        "Provider": "Microsoft-Windows-DeviceSetupManager",
+        "Id": 122,
+        "SampleMessage": "Driver search for device 'SWD\\DRIVERENUM\\{96bedf2c-18cb-4a15-b821-5e95ed0fea61}#VocaEffectPack&1&56dad8f&0' on Windows Update was blocked by policy."
+      }
+    },
+    {
+      "ruleId": "LV-0127",
+      "origin": "observed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-AppxPackaging/Operational",
+        "Provider": "Microsoft-Windows-AppxPackagingOM",
+        "Id": 216,
+        "SampleMessage": "App manifest validation warning: Declared namespace http://schemas.microsoft.com/developer/appx/2015/build is inapplicable, it will be ignored during manifest processing."
+      }
+    },
+    {
+      "ruleId": "LV-0128",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-WMI-Activity/Operational",
+        "Provider": "Microsoft-Windows-WMI-Activity",
+        "Id": 5861,
+        "SampleMessage": "Namespace = root\\CIMV2, Provider = WmiPerfClass, operation failed."
+      }
+    }
+  ]
+}

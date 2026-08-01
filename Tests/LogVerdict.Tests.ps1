@@ -1436,3 +1436,183 @@ Describe 'GUI coverage surfacing' {
         }
     }
 }
+
+Describe 'Rule regression fixtures' {
+    BeforeAll {
+        $script:DataDir     = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data'
+        $script:FixtureJson = [IO.File]::ReadAllText((Join-Path $script:DataDir 'fixtures.json'))
+        $script:VerdictJson = [IO.File]::ReadAllText((Join-Path $script:DataDir 'verdicts.json'))
+
+        # Every negative case below writes a deliberately broken pair into a scratch
+        # directory and validates THAT, so the shipped files are never touched.
+        function Export-BrokenPair {
+            param([scriptblock]$MutateFixtures, [scriptblock]$MutateDatabase)
+
+            $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('n'))
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+
+            $fx = $script:FixtureJson | ConvertFrom-Json
+            $db = $script:VerdictJson | ConvertFrom-Json
+            if ($MutateFixtures) { & $MutateFixtures $fx }
+            if ($MutateDatabase) { & $MutateDatabase $db }
+
+            $fx | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dir 'fixtures.json') -Encoding UTF8
+            $db | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dir 'verdicts.json') -Encoding UTF8
+            return (Join-Path $dir 'verdicts.json')
+        }
+    }
+
+    It 'covers every shipped rule' {
+        # The validator downgrades a missing fixture to a warning so a hand-written
+        # local database still validates. The shipped database is held to all of them.
+        $missing = @(Test-LogVerdictDatabase -IncludeWarnings | Where-Object { $_.Problem -like 'no regression fixture*' })
+        $missing.Count | Should -Be 0 -Because ("these rules are unprotected: {0}" -f (($missing.RuleId) -join ', '))
+    }
+
+    It 'resolves every fixture to its own rule with the expected verdict' {
+        @(Test-LogVerdictDatabase).Count | Should -Be 0
+    }
+
+    It 'drives the real resolver rather than a reimplementation of the matcher' {
+        # A fixture check that reimplemented matching could agree with itself forever
+        # while the shipped resolver drifted. This asserts the projected signature
+        # carries the property names Group-LVSignature actually emits.
+        InModuleScope LogVerdict {
+            $fixture = [pscustomobject]@{
+                ruleId = 'LV-0001'
+                signature = [pscustomobject]@{
+                    Source = 'event'; Channel = 'System'
+                    Provider = 'Microsoft-Windows-DistributedCOM'; Id = 10016
+                    SampleMessage = 'sample'
+                }
+            }
+            $projected = ConvertTo-LVFixtureSignature -Fixture $fixture
+            $reduced = @(Group-LVSignature -Record @([pscustomobject]@{
+                Source = 'event'; Channel = 'System'; Provider = 'P'; Id = 1
+                Level = 2; LevelName = 'Error'; TimeCreated = (Get-Date); Message = 'm'
+            }))[0]
+
+            foreach ($name in @('Key','Source','Channel','Provider','Id','SampleMessage','Count','PerDay','SpanDays')) {
+                $projected.PSObject.Properties[$name] | Should -Not -BeNullOrEmpty -Because "the resolver reads $name"
+                $reduced.PSObject.Properties[$name]   | Should -Not -BeNullOrEmpty -Because "$name must exist on a real signature too"
+            }
+        }
+    }
+
+    It 'catches a rule that has stopped claiming its own sample' {
+        $path = Export-BrokenPair -MutateFixtures {
+            param($fx)
+            ($fx.fixtures | Where-Object ruleId -eq 'LV-0011')[0].signature.Provider = 'Totally-Different-Provider'
+        }
+        $problems = @(Test-LogVerdictDatabase -Path $path | Where-Object RuleId -eq 'LV-0011')
+        $problems.Count | Should -BeGreaterThan 0
+        $problems[0].Problem | Should -Match 'no longer claims its own sample'
+    }
+
+    It 'names the rule that shadowed another rather than merely reporting a miss' {
+        # The failure mode this exists for: a new rule that looks specific but is
+        # broader than an existing one, silently stealing its matches. Knowing WHICH
+        # rule won is the whole diagnostic value.
+        $path = Export-BrokenPair -MutateDatabase {
+            param($db)
+            $shadow = [pscustomobject]@{
+                id = 'LV-9999'; status = 'stable'; verified = '2026-07-31'
+                match = [pscustomobject]@{ source = 'event'; provider = 'Microsoft-Windows-WHEA-Logger'; eventId = 18 }
+                verdict = 'benign'; title = 't'; plain = 'p'; why = 'w'; action = 'a'; confidence = 'low'
+            }
+            $db.rules = @($shadow) + @($db.rules)
+        }
+        $problems = @(Test-LogVerdictDatabase -Path $path | Where-Object RuleId -eq 'LV-0011')
+        $problems[0].Problem | Should -Match 'resolved to LV-9999'
+    }
+
+    It 'catches a verdict edited without its fixture' {
+        $path = Export-BrokenPair -MutateFixtures {
+            param($fx)
+            ($fx.fixtures | Where-Object ruleId -eq 'LV-0011')[0].expect = 'benign'
+        }
+        $problems = @(Test-LogVerdictDatabase -Path $path | Where-Object RuleId -eq 'LV-0011')
+        $problems[0].Problem | Should -Match "expected verdict 'benign' but resolved to 'critical'"
+    }
+
+    It 'catches a fixture left behind by a deleted rule' {
+        $path = Export-BrokenPair -MutateDatabase {
+            param($db)
+            $db.rules = @($db.rules | Where-Object { $_.id -ne 'LV-0011' })
+        }
+        $problems = @(Test-LogVerdictDatabase -Path $path | Where-Object RuleId -eq 'LV-0011')
+        $problems[0].Problem | Should -Match 'not in the database'
+    }
+
+    It 'exercises rate escalation, not just the base verdict' {
+        InModuleScope LogVerdict {
+            $escalating = @((Get-LVFixtureSet).fixtures | Where-Object { $null -ne $_.perDay })
+            $escalating.Count | Should -BeGreaterThan 0 -Because 'a threshold nothing crosses is a threshold nothing tests'
+            foreach ($f in $escalating) {
+                $rule = (Get-LogVerdictDatabase).rules | Where-Object id -eq $f.ruleId
+                $f.expect | Should -Be $rule.escalate.verdict -Because "$($f.ruleId) is rated above its own threshold"
+            }
+        }
+    }
+
+    It 'skips the fixture checks rather than failing when a database has none' {
+        # A site with a hand-written verdicts.local.json has no fixture file, and must
+        # still be able to validate. Absence is not a defect.
+        $dir = Join-Path $TestDrive 'no-fixtures'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $solo = @{
+            schemaVersion = 3; name = 'solo'; updated = '2026-07-31'
+            rules = @(@{
+                id = 'X-1'; status = 'stable'; verified = '2026-07-31'
+                match = @{ source = 'event'; provider = 'P'; eventId = 1 }
+                verdict = 'benign'; title = 't'; plain = 'p'; why = 'w'; action = 'a'; confidence = 'low'
+            })
+        }
+        $path = Join-Path $dir 'verdicts.json'
+        $solo | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $path -Encoding UTF8
+        Test-LogVerdictDatabase -Path $path -Quiet | Should -BeTrue
+    }
+
+    It 'keeps every text-log fixture in a shape its collector would actually match' {
+        # A fixture the collector would never produce cannot protect anything: the rule
+        # would pass its test and still never see a real line.
+        InModuleScope LogVerdict {
+            $set = Get-LVFixtureSet
+            foreach ($f in @($set.fixtures | Where-Object { $_.signature.Source -eq 'textlog' })) {
+                $target = $script:LVTextLogTarget | Where-Object { $_.Name -eq $f.signature.Channel }
+                $target | Should -Not -BeNullOrEmpty -Because "$($f.ruleId) names channel $($f.signature.Channel)"
+                $f.signature.SampleMessage | Should -Match $target.Pattern -Because "$($f.ruleId)'s sample must be a line the collector picks up"
+            }
+        }
+    }
+
+    It 'publishes no hostname, account name or SID from the machine it was captured on' {
+        # These are committed to a public repository and most were captured from a real
+        # machine, so the redaction that made them publishable is asserted, not assumed.
+        # Asserted against the decoded messages, not the raw JSON: in the file every
+        # path separator is doubled, and a pattern written for the escaped form can
+        # backtrack around its own lookahead and pass while the leak is still there.
+        InModuleScope LogVerdict {
+            foreach ($f in @((Get-LVFixtureSet).fixtures)) {
+                $msg = [string]$f.signature.SampleMessage
+                $msg | Should -Not -Match 'S-1-5-21-\d' -Because "$($f.ruleId) must not carry a real account SID"
+                $msg | Should -Not -Match 'S-1-15-\d'   -Because "$($f.ruleId) must not carry a real package SID"
+                $msg | Should -Not -Match ([regex]::Escape($env:COMPUTERNAME)) -Because "$($f.ruleId) must not name this machine"
+
+                foreach ($m in [regex]::Matches($msg, '(?i)[A-Z]:\\Users\\([^\\/:*?"<>|\r\n]+)')) {
+                    $m.Groups[1].Value | Should -BeIn @('user', 'Default', 'Public', 'All Users') `
+                        -Because "$($f.ruleId) must not name a real account in a profile path"
+                }
+            }
+        }
+    }
+
+    It 'says which fixtures were captured and which were constructed' {
+        InModuleScope LogVerdict {
+            $set = Get-LVFixtureSet
+            foreach ($f in @($set.fixtures)) {
+                $f.origin | Should -BeIn @('observed', 'constructed') -Because "$($f.ruleId) must not blur captured evidence with representative text"
+            }
+        }
+    }
+}

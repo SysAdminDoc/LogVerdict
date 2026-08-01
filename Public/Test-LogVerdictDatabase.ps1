@@ -18,6 +18,15 @@ function Test-LogVerdictDatabase {
         one that is malformed, and mixing the two would mean a documentation gap failed
         the same check as a broken regex.
 
+        .PARAMETER FixturePath
+        Regression fixtures to resolve against this database. Defaults to fixtures.json
+        beside the database being validated. When no fixture file exists the fixture
+        checks are skipped, so a hand-written local database still validates.
+
+        .PARAMETER SkipFixture
+        Validate structure only. Useful when the fixtures belong to a different database
+        than the one under test.
+
         .EXAMPLE
         Test-LogVerdictDatabase -Quiet
 
@@ -28,7 +37,9 @@ function Test-LogVerdictDatabase {
     param(
         [string]$Path,
         [switch]$Quiet,
-        [switch]$IncludeWarnings
+        [switch]$IncludeWarnings,
+        [string]$FixturePath,
+        [switch]$SkipFixture
     )
 
     $db = Get-LogVerdictDatabase -Path $Path
@@ -146,6 +157,25 @@ function Test-LogVerdictDatabase {
         }
     }
 
+    # Structure is only half the question. A database can be perfectly well formed and
+    # still have a rule that no longer matches anything it was written for, which is
+    # invisible in the report - an unmatched signature reads as a coverage gap, not as
+    # a broken rule. Resolving the fixtures through the real resolver is what catches it.
+    if (-not $SkipFixture) {
+        $fixtureSource = $FixturePath
+        if (-not $fixtureSource -and $Path) {
+            # Fixtures live beside the database they describe, so validating an explicit
+            # database looks next to that file rather than at the shipped fixtures.
+            $fixtureSource = Join-Path (Split-Path -Parent $Path) 'fixtures.json'
+        }
+        $fixtureSet = Get-LVFixtureSet -Path $fixtureSource
+        if ($null -ne $fixtureSet) {
+            foreach ($p in (Test-LVFixtureResolution -Database $db -FixtureSet $fixtureSet)) {
+                $problems.Add($p) | Out-Null
+            }
+        }
+    }
+
     # Problems default to errors; only those explicitly marked otherwise are warnings.
     foreach ($p in $problems) {
         if (-not $p.PSObject.Properties['Severity']) {
@@ -159,8 +189,13 @@ function Test-LogVerdictDatabase {
     # it cannot be trusted to load.
     if ($Quiet) { return ($errors.Count -eq 0) }
 
-    if ($warnings.Count -gt 0) {
-        Write-LVLog -Level warn -Message ("{0} rule(s) carry no source; their rulings cannot be checked by a reader." -f $warnings.Count)
+    $unsourced = @($warnings | Where-Object { $_.Problem -like 'no sources*' })
+    if ($unsourced.Count -gt 0) {
+        Write-LVLog -Level warn -Message ("{0} rule(s) carry no source; their rulings cannot be checked by a reader." -f $unsourced.Count)
+    }
+    $unfixtured = @($warnings | Where-Object { $_.Problem -like 'no regression fixture*' })
+    if ($unfixtured.Count -gt 0) {
+        Write-LVLog -Level warn -Message ("{0} rule(s) carry no regression fixture; nothing would notice if they stopped matching." -f $unfixtured.Count)
     }
 
     if ($errors.Count -eq 0) {
