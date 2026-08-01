@@ -38,6 +38,11 @@ function Export-LVChannelEvidence {
     $exported = New-Object System.Collections.Generic.List[string]
     $skipped = New-Object System.Collections.Generic.List[string]
 
+    if ($Result.PSObject.Properties['Offline'] -and $Result.Offline) {
+        $skipped.Add('Event channels were not re-exported from an offline analysis. Keep the original evidence bundle as the raw source.') | Out-Null
+        return [pscustomobject]@{ Exported=@(); Skipped=@($skipped.ToArray()) }
+    }
+
     $readable = @()
     if ($Result.ChannelStatus) {
         $readable = @($Result.ChannelStatus.Values |

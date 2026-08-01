@@ -120,9 +120,14 @@ powershell -ExecutionPolicy Bypass -File .\Invoke-LogVerdict.ps1
 
 # Console only, no files written
 .\Invoke-LogVerdict.ps1 -NoReport
+
+# Re-evaluate a bundle collected on another PC with the current rule database
+.\Invoke-LogVerdict.ps1 -EvidencePath .\LogVerdict-Evidence_HOST_20260801-120000.zip
 ```
 
 Reports land in a timestamped folder on the Desktop by default (safe even for right-click-elevated runs that start in System32). Override with `-OutputDir`.
+
+Offline analysis never reads the reviewing PC. It inherits the source report's look-back window unless `-DaysBack` is supplied, reopens exported `.evtx` members when present, and uses the captured report summaries for text logs and Reliability Monitor, whose full stores are deliberately not copied into a small evidence bundle. Redacted bundles contain no raw `.evtx`, so they are re-evaluated from report summaries and carry a coverage note saying so.
 
 As a module:
 
@@ -203,7 +208,7 @@ Invoke-Pester -Path .\Tests
 - **Coverage is the roadmap.** 171 rules ship. A first scan will still report `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
 - **Crash dumps are inventoried, not decoded.** Reading a minidump needs a debugger and symbols.
 - **A clean result is not proof of health.** An in-place upgrade or a cleared log resets the event channels, so the report states each channel's oldest surviving record and warns when that horizon falls inside the requested window.
-- Only the live machine is supported today. Offline analysis of a collected evidence bundle is planned.
+- Offline review is bounded by what the bundle captured. Exported event channels are re-read in full, while text logs and Reliability Monitor are re-evaluated from the signature summaries in the source report rather than copied wholesale.
 
 ## License
 

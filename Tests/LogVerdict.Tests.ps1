@@ -1608,6 +1608,107 @@ Describe 'Evidence bundle' {
     }
 }
 
+Describe 'Offline evidence analysis' {
+    BeforeAll {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+        function Export-OfflineReportBundle {
+            param([string]$Root)
+
+            $source = Join-Path $Root 'source'
+            New-Item -ItemType Directory -Path $source -Force | Out-Null
+            $report = [ordered]@{
+                Tool = 'LogVerdict'; Version = '0.7.0'; MachineName = 'ARCHIVE-HOST'
+                ScanTime = '2026-08-01T10:00:00-04:00'; DaysBack = 9; Elevated = $true
+                Channels = @('System'); ChannelStatus = @{}; DeniedChannels = @()
+                TruncatedChannels = @(); MetadataUnreadableCount = 0; CoverageNotes = @()
+                Reduction = [ordered]@{ RecordCount=1; SignatureCount=1; Ratio=1; LoudestKey='CBS/test'; LoudestShare=100 }
+                Findings = @([ordered]@{
+                    Key='CBS/test'; Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0
+                    Template='failure'; Count=1; UndatedCount=0
+                    FirstSeen='2026-08-01T09:00:00-04:00'; LastSeen='2026-08-01T09:00:00-04:00'
+                    WorstLevel=2; LevelName='Error'; SampleMessage='2026-08-01 09:00:00, Error CSI test failure'
+                    Samples=@('2026-08-01 09:00:00, Error CSI test failure')
+                    Times=@('2026-08-01T09:00:00-04:00'); Area='Component servicing'; PerDay=0.03; SpanDays=0
+                })
+                Correlations=@(); CrashArtifacts=@(); Horizon=@{}; HorizonWarning=$null
+                Stability=$null; ReliabilityAvailable=$false; DatabaseName='old'; DatabaseDate='2026-07-31'
+                RuleCount=85; WorstVerdict='investigate'; ExitCode=1
+            }
+            [IO.File]::WriteAllText((Join-Path $source 'LogVerdict-Report.json'),
+                ($report | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
+            $zip = Join-Path $Root 'evidence.zip'
+            [IO.Compression.ZipFile]::CreateFromDirectory($source, $zip)
+            return $zip
+        }
+    }
+
+    It 're-evaluates a report-only bundle without querying live sources' {
+        $bundle = Export-OfflineReportBundle -Root (Join-Path $TestDrive 'offline')
+        InModuleScope LogVerdict -Parameters @{ Bundle = $bundle } {
+            param($Bundle)
+            Mock Get-LVChannelStatus { throw 'live channel probe must not run' }
+            Mock Get-LVTextLogRecord { throw 'live text collection must not run' }
+            Mock Get-LVReliabilityRecord { throw 'live Reliability collection must not run' }
+            Mock Get-LVCrashArtifact { throw 'live crash inventory must not run' }
+
+            $result = Invoke-LogVerdictScan -EvidencePath $Bundle -SkipReliability
+
+            $result.Offline | Should -BeTrue
+            $result.MachineName | Should -Be 'ARCHIVE-HOST'
+            $result.DaysBack | Should -Be 9
+            $result.Findings[0].RuleId | Should -Be 'LV-0091'
+            $result.CoverageNotes | Should -Contain 'The package contains no raw event channel export. Findings were re-evaluated from the captured report summaries only.'
+            Assert-MockCalled Get-LVChannelStatus -Times 0
+            Assert-MockCalled Get-LVTextLogRecord -Times 0
+            Assert-MockCalled Get-LVReliabilityRecord -Times 0
+            Assert-MockCalled Get-LVCrashArtifact -Times 0
+        }
+    }
+
+    It 'normalizes records from an exported event file' {
+        InModuleScope LogVerdict {
+            Mock Get-WinEvent {
+                if ($Path) {
+                    return [pscustomobject]@{ LogName='System'; TimeCreated=[datetime]'2026-08-01T08:00:00'; }
+                }
+                return [pscustomobject]@{
+                    LogName='System'; ProviderName='Disk'; Id=7; Level=2; LevelDisplayName='Error'
+                    TimeCreated=[datetime]'2026-08-01T09:00:00'; MachineName='ARCHIVE-HOST'; RecordId=42; Message='bad block'
+                }
+            }
+
+            $data = Read-LVArchivedEventFile -Path 'fixture.evtx' -DaysBack 30
+
+            $data.Error | Should -BeNullOrEmpty
+            $data.Channel | Should -Be 'System'
+            $data.Records.Count | Should -Be 1
+            $data.Records[0].Provider | Should -Be 'Disk'
+            $data.Records[0].RecordId | Should -Be 42
+        }
+    }
+
+    It 'rejects an archive member that escapes the extraction directory' {
+        $zipPath = Join-Path $TestDrive 'traversal.zip'
+        $stream = [IO.File]::Open($zipPath, [IO.FileMode]::CreateNew)
+        $zip = New-Object IO.Compression.ZipArchive($stream, [IO.Compression.ZipArchiveMode]::Create)
+        try {
+            $entry = $zip.CreateEntry('../escape.evtx')
+            $writer = New-Object IO.StreamWriter($entry.Open())
+            try { $writer.Write('not an event log') } finally { $writer.Dispose() }
+        } finally {
+            $zip.Dispose()
+            $stream.Dispose()
+        }
+
+        InModuleScope LogVerdict -Parameters @{ ZipPath = $zipPath } {
+            param($ZipPath)
+            $archivePath = $ZipPath
+            { Expand-LVEvidencePackage -Path $archivePath } | Should -Throw '*escapes the extraction directory*'
+        }
+    }
+}
+
 Describe 'Correlation' {
     BeforeAll {
         # The test data is built here, in the test's own scope, and handed to the module

@@ -20,6 +20,9 @@
     .PARAMETER OutputDir
     Report destination. Defaults to a timestamped folder on the Desktop.
 
+    .PARAMETER EvidencePath
+    Analyze a LogVerdict evidence bundle or JSON report without reading this PC.
+
     .PARAMETER NoReport
     Console only; write nothing to disk.
 
@@ -48,6 +51,7 @@ param(
     [switch]$NoReport,
     [switch]$Redact,
     [switch]$IncludeEvidence,
+    [string]$EvidencePath,
     [switch]$Pause,
     [switch]$NoPause
 )
@@ -91,12 +95,13 @@ function Test-LVLaunchedInteractively {
 
 try {
     $scanArgs = @{
-        DaysBack        = $DaysBack
         IncludeBenign   = $IncludeBenign
         SkipTextLogs    = $SkipTextLogs
         SkipReliability = $SkipReliability
         AllChannels     = $AllChannels
     }
+    if (-not $EvidencePath -or $PSBoundParameters.ContainsKey('DaysBack')) { $scanArgs['DaysBack'] = $DaysBack }
+    if ($EvidencePath) { $scanArgs['EvidencePath'] = $EvidencePath }
     if ($Channel) {
         # powershell.exe -File hands "-Channel System,Application" over as ONE string
         # rather than binding it to the [string[]] parameter, so split it back out.

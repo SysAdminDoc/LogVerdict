@@ -29,6 +29,11 @@ function Invoke-LogVerdictScan {
         Keep signatures ruled benign in the result. Off by default - the entire point
         is to remove them.
 
+        .PARAMETER EvidencePath
+        Analyze a LogVerdict evidence zip, extracted evidence directory, or JSON report
+        without reading any source on the reviewing PC. Exported .evtx files are read
+        when present; captured report signatures preserve non-event evidence.
+
         .EXAMPLE
         Invoke-LogVerdictScan -DaysBack 7
 
@@ -43,8 +48,22 @@ function Invoke-LogVerdictScan {
         [switch]$SkipTextLogs,
         [switch]$SkipReliability,
         [switch]$IncludeBenign,
-        [string]$DatabasePath
+        [string]$DatabasePath,
+        [string]$EvidencePath
     )
+
+    if ($EvidencePath) {
+        $offlineArgs = @{
+            EvidencePath   = $EvidencePath
+            Channel        = $Channel
+            SkipTextLogs   = $SkipTextLogs
+            SkipReliability = $SkipReliability
+            IncludeBenign  = $IncludeBenign
+            DatabasePath   = $DatabasePath
+        }
+        if ($PSBoundParameters.ContainsKey('DaysBack')) { $offlineArgs['DaysBack'] = $DaysBack }
+        return Invoke-LVOfflineScan @offlineArgs
+    }
 
     $started = Get-Date
     $elevated = Test-LVElevated
