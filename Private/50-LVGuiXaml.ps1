@@ -540,6 +540,27 @@ function Get-LVGuiXaml {
               </Border>
             </StackPanel>
 
+            <!-- ==== Correlated findings ==== -->
+            <StackPanel x:Name="PnlCorrelation" Visibility="Collapsed"
+                        AutomationProperties.Name="Signatures that happened together">
+              <TextBlock Text="HAPPENED TOGETHER" Style="{StaticResource PanelLabel}"
+                         Margin="0,22,0,9" TextWrapping="Wrap"/>
+              <TextBlock Text="These also appear in the list. Apart they are symptoms; together they name a cause."
+                         Foreground="{StaticResource TextMuted}" FontSize="11" TextWrapping="Wrap"
+                         Margin="0,-4,0,9"/>
+              <Border Background="#2a2438" CornerRadius="6" Padding="12,10"
+                      BorderBrush="{StaticResource Surface0}" BorderThickness="1">
+                <ItemsControl x:Name="LstCorrelation">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,7"
+                                 Foreground="{StaticResource Subtext0}" FontSize="11.5" LineHeight="17"/>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Border>
+            </StackPanel>
+
             <!-- ==== Crash evidence ==== -->
             <StackPanel x:Name="PnlCrash" Visibility="Collapsed">
               <TextBlock Text="CRASH EVIDENCE ON DISK" Style="{StaticResource PanelLabel}"

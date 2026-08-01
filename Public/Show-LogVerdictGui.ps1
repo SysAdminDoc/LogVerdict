@@ -351,6 +351,16 @@ function Show-LogVerdictGui {
             $ui.PnlCrash.Visibility = 'Collapsed'
         }
 
+        # Correlated findings. Filtered rather than merely wrapped: a result with no
+        # Correlations property yields a one-element array holding null.
+        $together = Format-LVCorrelation -Correlation @($Result.Correlations | Where-Object { $_ })
+        if ($together.Count -gt 0) {
+            $ui.LstCorrelation.ItemsSource = [string[]]$together
+            $ui.PnlCorrelation.Visibility = 'Visible'
+        } else {
+            $ui.PnlCorrelation.Visibility = 'Collapsed'
+        }
+
         $ui.BtnSaveReport.IsEnabled = $true
 
         # Database age belongs on screen, not only in the text report. A curated ruling

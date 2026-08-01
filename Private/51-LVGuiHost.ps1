@@ -28,6 +28,7 @@ $script:LVGuiElement = @(
     'ChipInformational', 'ChipBenign',
     'TxtRecords', 'TxtSignatures', 'TxtReduction', 'TxtRules',
     'PnlCoverage', 'LstCoverage', 'PnlCrash', 'LstCrash',
+    'PnlCorrelation', 'LstCorrelation',
     'TxtSearch', 'TxtSearchHint', 'TxtShown', 'LvFindings',
     'PnlEmpty', 'TxtEmptyTitle', 'TxtEmptyBody',
     'TxtNoSelection', 'ScrDetail', 'PillDetail', 'TxtDetailVerdict', 'TxtDetailTitle',
@@ -190,6 +191,34 @@ function Format-LVCrashArtifact {
     $lines = foreach ($a in $Artifact) {
         if ($null -eq $a) { continue }
         '{0}  {1:yyyy-MM-dd HH:mm}  {2}' -f $a.Kind, $a.When, (Split-Path -Leaf ([string]$a.Path))
+    }
+    return ConvertTo-LVArrayOutput -Value @($lines)
+}
+
+function Format-LVCorrelation {
+    <#
+        .SYNOPSIS
+        One correlated finding as a readable block for the window's sidebar.
+
+        .DESCRIPTION
+        The window has no place to render a second full findings list, but leaving
+        correlations out entirely would mean the same scan told you different things
+        depending on how you ran it - the exact asymmetry that hid crash evidence from
+        the window until 0.5.0.
+
+        The verdict leads, then the title, then the windows of time to look at, so the
+        line is a sentence when a screen reader announces it.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Correlation)
+
+    $lines = foreach ($c in $Correlation) {
+        if ($null -eq $c) { continue }
+        $windows = @($c.Windows | Where-Object { $_ })
+        $when = (@($windows | Select-Object -First 3 | ForEach-Object { '{0:yyyy-MM-dd HH:mm}' -f $_.Start }) -join ', ')
+        if ($windows.Count -gt 3) { $when += (' and {0} more' -f ($windows.Count - 3)) }
+        '{0}. {1}. {2} time(s), within {3}: {4}.' -f `
+            ([string]$c.Verdict).ToUpper(), $c.Title, $windows.Count, $c.Timespan, $when
     }
     return ConvertTo-LVArrayOutput -Value @($lines)
 }

@@ -1426,6 +1426,37 @@ Describe 'GUI coverage surfacing' {
         }
     }
 
+    It 'formats a correlated finding as a sentence, leading with the verdict' {
+        InModuleScope LogVerdict {
+            $c = [pscustomobject]@{
+                Verdict = 'critical'; Title = 'Hardware died'; Timespan = '10m'
+                Windows = @(
+                    [pscustomobject]@{ Start = [datetime]'2026-06-20 09:09:02' }
+                    [pscustomobject]@{ Start = [datetime]'2026-06-24 05:40:26' }
+                )
+            }
+            $line = @(Format-LVCorrelation -Correlation @($c))[0]
+            $line | Should -Match '^CRITICAL\. Hardware died\. 2 time\(s\), within 10m'
+            $line | Should -Match '2026-06-20 09:09'
+        }
+    }
+
+    It 'returns an empty array when nothing correlated' {
+        InModuleScope LogVerdict {
+            @(Format-LVCorrelation -Correlation @()).Count | Should -Be 0
+        }
+    }
+
+    It 'surfaces correlations in the window, not only in the console report' {
+        # The window silently dropping something the console shows is how the same scan
+        # ends up telling you different things depending on how you ran it.
+        $gui = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1') -Raw
+        $gui | Should -Match 'Format-LVCorrelation'
+        $gui | Should -Match 'PnlCorrelation'
+        $xaml = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Private\50-LVGuiXaml.ps1') -Raw
+        $xaml | Should -Match 'x:Name="LstCorrelation"'
+    }
+
     It 'counts rulings whose guidance has gone stale' {
         InModuleScope LogVerdict {
             $fresh = [pscustomobject]@{ Verified = (Get-Date).ToString('yyyy-MM-dd') }
