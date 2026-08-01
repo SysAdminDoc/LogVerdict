@@ -3,15 +3,15 @@
 # window logic there reads as wiring rather than infrastructure.
 
 # Pill colours. Each verdict is painted as its accent with near-black ink; measured
-# against #11111b every pair clears 8:1, so the smallest labels in the product are
+# against #06101e every pair clears 8:1, so the smallest labels in the product are
 # still well past the 4.5:1 WCAG AA floor for body text.
 $script:LVVerdictPalette = @{
-    'critical'      = @{ Label = 'CRITICAL';    Fill = '#f38ba8'; Ink = '#11111b'; Accent = '#f38ba8' }
-    'actionable'    = @{ Label = 'ACTIONABLE';  Fill = '#fab387'; Ink = '#11111b'; Accent = '#fab387' }
-    'investigate'   = @{ Label = 'INVESTIGATE'; Fill = '#f9e2af'; Ink = '#11111b'; Accent = '#f9e2af' }
-    'unknown'       = @{ Label = 'UNKNOWN';     Fill = '#b4befe'; Ink = '#11111b'; Accent = '#b4befe' }
-    'informational' = @{ Label = 'INFO';        Fill = '#89dceb'; Ink = '#11111b'; Accent = '#89dceb' }
-    'benign'        = @{ Label = 'HARMLESS';    Fill = '#a6e3a1'; Ink = '#11111b'; Accent = '#a6e3a1' }
+    'critical'      = @{ Label = 'CRITICAL';    Fill = '#ff6b6b'; Ink = '#06101e'; Accent = '#ff6b6b' }
+    'actionable'    = @{ Label = 'ACTIONABLE';  Fill = '#ffaa64'; Ink = '#06101e'; Accent = '#ffaa64' }
+    'investigate'   = @{ Label = 'INVESTIGATE'; Fill = '#ffd166'; Ink = '#06101e'; Accent = '#ffd166' }
+    'unknown'       = @{ Label = 'UNKNOWN';     Fill = '#82b4ff'; Ink = '#06101e'; Accent = '#82b4ff' }
+    'informational' = @{ Label = 'INFO';        Fill = '#56d4e8'; Ink = '#06101e'; Accent = '#56d4e8' }
+    'benign'        = @{ Label = 'HARMLESS';    Fill = '#5dd39e'; Ink = '#06101e'; Accent = '#5dd39e' }
 }
 
 # Chip order in the sidebar, worst first, matching the report's ordering.
@@ -22,6 +22,31 @@ $script:LVVerdictDisplayOrder = @('critical', 'actionable', 'investigate', 'unkn
 # this list against the markup - so a renamed x:Name is caught before a build rather
 # than by a null reference somewhere deep in an event handler.
 $script:LVGuiElement = @(
+    'NavOverview', 'NavFindings', 'NavCoverage', 'NavActivity',
+    'PageOverview', 'PageFindings', 'PageCoverage', 'PageActivity',
+    'TxtSideMachine', 'TxtSideElevation', 'BtnSideElevate',
+    'TxtSideDbTitle', 'TxtSideDbMeta', 'TxtSideDbUpdated',
+    'TxtOverviewDays', 'ChkOverviewAllChannels', 'ChkOverviewIncludeText',
+    'ChkOverviewIncludeBenign', 'BtnOverviewScan', 'BtnOverviewCancel',
+    'TxtOverviewLastVerdict', 'TxtOverviewFindingCount', 'TxtOverviewScanTime',
+    'PnlOverviewSummary', 'TxtOverviewRecords', 'TxtOverviewSignatures',
+    'TxtOverviewReduction', 'TxtOverviewRules',
+    'TxtOverviewCritical', 'TxtOverviewActionable', 'TxtOverviewInvestigate',
+    'TxtOverviewUnknown', 'TxtOverviewInfo', 'TxtOverviewBenign',
+    'BtnViewFindings', 'LvPriority', 'TxtOverviewCoverage', 'BtnViewCoverage',
+    'BtnFindingsSave', 'BtnFindingsOpen',
+    'FltCritical', 'FltActionable', 'FltInvestigate', 'FltUnknown',
+    'FltInformational', 'FltBenign',
+    'BtnCoverageElevate', 'TxtCoverageState', 'TxtCoverageSummary',
+    'TxtCoverageRatio', 'PbCoverage', 'TxtCoverageReadable', 'TxtCoverageGaps',
+    'TxtCoverageWindow', 'LstChannelCoverage', 'LstCoveragePage', 'TxtCoverageNone',
+    'TxtHorizonPage', 'LstCrashPage', 'TxtCrashNone',
+    'LstCorrelationPage', 'TxtCorrelationNone',
+    'TxtActivitySubtitle', 'TxtActivityState', 'BtnActivityClear',
+    'TxtActivityHeadline', 'BtnActivityRunAgain', 'TxtActivityLastLine',
+    'TxtActivityLog', 'TxtActivitySearch', 'TxtActivitySearchHint', 'TxtActivityDuration',
+    'TxtActivityRecords', 'TxtActivitySignatures', 'TxtActivityRules',
+    'TxtActivityReportState', 'BtnActivitySave', 'BtnActivityOpen',
     'TxtVersion', 'TxtMachine', 'ChipElevation', 'TxtElevation', 'PnlElevate', 'BtnElevate',
     'TxtDays', 'ChkAllChannels', 'ChkSkipText', 'ChkIncludeBenign', 'BtnScan', 'BtnCancel',
     'PnlSummary', 'ChipCritical', 'ChipActionable', 'ChipInvestigate', 'ChipUnknown',
@@ -419,8 +444,16 @@ public static extern int DwmSetWindowAttribute(System.IntPtr hwnd, int attr, ref
 
         $enabled = 1
         foreach ($attr in @(20, 19)) {
-            if ([LVNative.Dwm]::DwmSetWindowAttribute($hwnd, $attr, [ref]$enabled, 4) -eq 0) { return }
+            if ([LVNative.Dwm]::DwmSetWindowAttribute($hwnd, $attr, [ref]$enabled, 4) -eq 0) { break }
         }
+
+        # Windows 11 otherwise honours the user's bright accent colour for an active
+        # caption, which cuts a blue slab across an otherwise restrained dark window.
+        # These newer attributes are best-effort and are ignored by older builds.
+        $captionColour = 0x001e1006 # COLORREF for RGB #06101e
+        $textColour = 0x00fbf7f5    # COLORREF for RGB #f5f7fb
+        $null = [LVNative.Dwm]::DwmSetWindowAttribute($hwnd, 35, [ref]$captionColour, 4)
+        $null = [LVNative.Dwm]::DwmSetWindowAttribute($hwnd, 36, [ref]$textColour, 4)
     } catch {
         Write-Verbose ("Dark title bar unavailable: {0}" -f $_.Exception.Message)
     }

@@ -76,16 +76,31 @@ function Show-LogVerdictGui {
         SortAsc    = $false
         Chips      = @{}
         Scanning   = $false
+        CurrentPage = 'Overview'
+        ActivityLines = (New-Object System.Collections.Generic.List[string])
     }
     foreach ($v in $script:LVVerdictDisplayOrder) { $state.Chips[$v] = $true }
 
     $chipControl = @{
-        'critical'      = $ui.ChipCritical
-        'actionable'    = $ui.ChipActionable
-        'investigate'   = $ui.ChipInvestigate
-        'unknown'       = $ui.ChipUnknown
-        'informational' = $ui.ChipInformational
-        'benign'        = $ui.ChipBenign
+        'critical'      = $ui.FltCritical
+        'actionable'    = $ui.FltActionable
+        'investigate'   = $ui.FltInvestigate
+        'unknown'       = $ui.FltUnknown
+        'informational' = $ui.FltInformational
+        'benign'        = $ui.FltBenign
+    }
+
+    $pageControl = @{
+        'Overview' = $ui.PageOverview
+        'Findings' = $ui.PageFindings
+        'Coverage' = $ui.PageCoverage
+        'Activity' = $ui.PageActivity
+    }
+    $navControl = @{
+        'Overview' = $ui.NavOverview
+        'Findings' = $ui.NavFindings
+        'Coverage' = $ui.NavCoverage
+        'Activity' = $ui.NavActivity
     }
 
     # ---------------------------------------------------------------- helpers ----
@@ -95,12 +110,23 @@ function Show-LogVerdictGui {
         $ui.TxtStatus.Text = $Message
     }
 
+    $showPage = {
+        param([string]$Name)
+        if (-not $pageControl.ContainsKey($Name)) { return }
+        foreach ($key in $pageControl.Keys) {
+            $pageControl[$key].Visibility = $(if ($key -eq $Name) { 'Visible' } else { 'Collapsed' })
+            $navControl[$key].IsChecked = ($key -eq $Name)
+        }
+        $state.CurrentPage = $Name
+    }
+
     $chipContent = {
         param([string]$Label, $Count)
         $dock = New-Object System.Windows.Controls.DockPanel
         $number = New-Object System.Windows.Controls.TextBlock
         $number.Text = [string]$Count
         $number.FontWeight = 'SemiBold'
+        $number.Margin = New-Object System.Windows.Thickness(7, 0, 0, 0)
         [System.Windows.Controls.DockPanel]::SetDock($number, [System.Windows.Controls.Dock]::Right)
         $caption = New-Object System.Windows.Controls.TextBlock
         $caption.Text = $Label
@@ -251,6 +277,13 @@ function Show-LogVerdictGui {
 
         $ui.TxtLog.AppendText($panelLine)
         $ui.TxtLog.ScrollToEnd()
+        $state.ActivityLines.Add($panelLine.TrimEnd()) | Out-Null
+        $activityFilter = $ui.TxtActivitySearch.Text.Trim()
+        if (-not $activityFilter -or $panelLine -like ('*{0}*' -f $activityFilter)) {
+            $ui.TxtActivityLog.AppendText($panelLine)
+            $ui.TxtActivityLog.ScrollToEnd()
+        }
+        $ui.TxtActivityLastLine.Text = $Message
         $ui.TxtLastLine.Text = $Message
         $ui.TxtStatus.Text = $Message
     }
@@ -274,12 +307,26 @@ function Show-LogVerdictGui {
         $state.Scanning = $On
         $ui.BtnScan.IsEnabled = -not $On
         $ui.BtnCancel.Visibility = $(if ($On) { 'Visible' } else { 'Collapsed' })
+        $ui.BtnOverviewScan.IsEnabled = -not $On
+        $ui.BtnOverviewCancel.Visibility = $(if ($On) { 'Visible' } else { 'Collapsed' })
+        $ui.BtnActivityRunAgain.IsEnabled = -not $On
         $ui.PbScan.Visibility = $(if ($On) { 'Visible' } else { 'Collapsed' })
         $ui.PbScan.IsIndeterminate = $On
         foreach ($n in @('TxtDays', 'ChkAllChannels', 'ChkSkipText', 'ChkIncludeBenign', 'BtnElevate')) {
             $ui[$n].IsEnabled = -not $On
         }
+        foreach ($n in @('TxtOverviewDays', 'ChkOverviewAllChannels', 'ChkOverviewIncludeText',
+                'ChkOverviewIncludeBenign', 'BtnCoverageElevate', 'BtnSideElevate')) {
+            $ui[$n].IsEnabled = -not $On
+        }
         if ($On) { $ui.BtnScan.Content = 'Scanning...' } else { $ui.BtnScan.Content = 'Run scan' }
+        if ($On) {
+            $ui.BtnOverviewScan.Content = 'Scanning...'
+            $ui.TxtActivityState.Text = 'Scanning...'
+            $ui.TxtActivityHeadline.Text = 'Collecting and reducing diagnostic records'
+        } else {
+            $ui.BtnOverviewScan.Content = 'Run scan'
+        }
     }
 
     $renderResult = {
@@ -301,6 +348,8 @@ function Show-LogVerdictGui {
         }
         $state.View = $view
         $ui.LvFindings.ItemsSource = $view
+        $priority = @($rows | Select-Object -First 3)
+        $ui.LvPriority.ItemsSource = [object[]]$priority
 
         # Counts are of everything found, not of what the filter is showing, so
         # switching a chip off never makes its own number change under the cursor.
@@ -324,13 +373,41 @@ function Show-LogVerdictGui {
             $chip.Opacity = $(if ($counts[$v] -eq 0) { 0.45 } else { 1.0 })
         }
 
+        $ui.TxtOverviewCritical.Text    = [string]$counts['critical']
+        $ui.TxtOverviewActionable.Text  = [string]$counts['actionable']
+        $ui.TxtOverviewInvestigate.Text = [string]$counts['investigate']
+        $ui.TxtOverviewUnknown.Text     = [string]$counts['unknown']
+        $ui.TxtOverviewInfo.Text        = [string]$counts['informational']
+        $ui.TxtOverviewBenign.Text      = [string]$counts['benign']
+
         $ui.TxtRecords.Text    = '{0:N0}' -f $Result.Reduction.RecordCount
         $ui.TxtSignatures.Text = '{0:N0}' -f $Result.Reduction.SignatureCount
         $ui.TxtReduction.Text  = '{0}:1' -f $Result.Reduction.Ratio
         $ui.TxtRules.Text      = '{0:N0}' -f $Result.RuleCount
         $ui.PnlSummary.Visibility = 'Visible'
 
-        $notes = @($Result.CoverageNotes | Where-Object { $_ })
+        $ui.TxtOverviewRecords.Text    = '{0:N0}' -f $Result.Reduction.RecordCount
+        $ui.TxtOverviewSignatures.Text = '{0:N0}' -f $Result.Reduction.SignatureCount
+        $ui.TxtOverviewReduction.Text  = '{0}x' -f $Result.Reduction.Ratio
+        $ui.TxtOverviewRules.Text      = '{0:N0}' -f $Result.RuleCount
+        $ui.PnlOverviewSummary.Visibility = 'Visible'
+
+        $worst = Get-LVVerdictStyle -Verdict $Result.WorstVerdict
+        $overviewVerdict = switch ([string]$Result.WorstVerdict) {
+            'critical'      { 'Critical finding' }
+            'actionable'    { 'Action required' }
+            'investigate'   { 'Needs investigation' }
+            'unknown'       { 'Unrecognized activity' }
+            'informational' { 'Informational only' }
+            default         { 'No action required' }
+        }
+        $ui.TxtOverviewLastVerdict.Text = $(if (@($Result.Findings).Count -eq 0) { 'No action required' } else { $overviewVerdict })
+        $ui.TxtOverviewLastVerdict.Foreground = $worst.Accent
+        $ui.TxtOverviewFindingCount.Text = '{0:N0}' -f @($Result.Findings).Count
+        $ui.TxtOverviewScanTime.Text = 'Completed {0:yyyy-MM-dd HH:mm} in {1:N1}s' -f $Result.ScanTime, $Result.Duration.TotalSeconds
+
+        $coverageNotes = @($Result.CoverageNotes | Where-Object { $_ })
+        $notes = @($coverageNotes)
         if ($Result.HorizonWarning) { $notes = @($notes) + @($Result.HorizonWarning) }
         if ($notes.Count -gt 0) {
             $ui.LstCoverage.ItemsSource = [string[]]$notes
@@ -338,6 +415,48 @@ function Show-LogVerdictGui {
         } else {
             $ui.PnlCoverage.Visibility = 'Collapsed'
         }
+        if ($coverageNotes.Count -gt 0) {
+            $ui.LstCoveragePage.ItemsSource = [string[]]$coverageNotes
+            $ui.TxtCoverageNone.Visibility = 'Collapsed'
+        } else {
+            $ui.LstCoveragePage.ItemsSource = [string[]]@()
+            $ui.TxtCoverageNone.Visibility = 'Visible'
+        }
+
+        $channelLines = New-Object System.Collections.Generic.List[string]
+        $readable = 0
+        $totalChannels = 0
+        if ($Result.ChannelStatus) {
+            foreach ($name in @($Result.ChannelStatus.Keys | Sort-Object)) {
+                $entry = $Result.ChannelStatus[$name]
+                $totalChannels++
+                if ($entry.Access -eq 'readable') { $readable++ }
+                $availability = [string]$entry.Access
+                if ($entry.Oldest) { $availability = 'oldest {0:yyyy-MM-dd HH:mm}' -f $entry.Oldest }
+                $channelLines.Add(('{0,-36} {1,-11} {2}' -f $name, ([string]$entry.Access).ToUpperInvariant(), $availability)) | Out-Null
+            }
+        }
+        if ($channelLines.Count -eq 0) { $channelLines.Add('No event-channel status was returned.') | Out-Null }
+        $ui.LstChannelCoverage.ItemsSource = [string[]]$channelLines.ToArray()
+
+        $coverageGaps = $notes.Count
+        $coveragePercent = 0
+        if ($totalChannels -gt 0) { $coveragePercent = [Math]::Round(100 * $readable / $totalChannels) }
+        $ui.TxtCoverageReadable.Text = [string]$readable
+        $ui.TxtCoverageGaps.Text = [string]$coverageGaps
+        $ui.TxtCoverageWindow.Text = '{0}-day' -f $Result.DaysBack
+        $ui.TxtCoverageRatio.Text = '{0} of {1} requested channels readable' -f $readable, $totalChannels
+        $ui.PbCoverage.Value = $coveragePercent
+        if ($notes.Count -gt 0) {
+            $ui.TxtCoverageState.Text = 'Partial coverage'
+            $ui.TxtCoverageSummary.Text = 'The scan completed, but some requested diagnostic history was unavailable.'
+            $ui.TxtOverviewCoverage.Text = '{0} coverage note(s) need review. {1} of {2} requested event channels were readable.' -f $notes.Count, $readable, $totalChannels
+        } else {
+            $ui.TxtCoverageState.Text = 'Requested sources readable'
+            $ui.TxtCoverageSummary.Text = 'No access, truncation, or history gaps were reported for the requested sources.'
+            $ui.TxtOverviewCoverage.Text = 'All {0} requested event channels were readable and no coverage gaps were reported.' -f $totalChannels
+        }
+        $ui.TxtHorizonPage.Text = $(if ($Result.HorizonWarning) { [string]$Result.HorizonWarning } else { 'The requested event history window was available for the channels that reported an oldest record.' })
 
         $ui.TxtEmptyTitle.Text = 'Nothing to report'
         $ui.TxtEmptyBody.Text = 'The scan completed and found no signature worth raising in the last ' + $Result.DaysBack + ' day(s). Check the panel on the left for anything the scan was not allowed to read.'
@@ -346,9 +465,13 @@ function Show-LogVerdictGui {
         $crash = Format-LVCrashArtifact -Artifact @($Result.CrashArtifacts)
         if ($crash.Count -gt 0) {
             $ui.LstCrash.ItemsSource = [string[]]$crash
+            $ui.LstCrashPage.ItemsSource = [string[]]$crash
+            $ui.TxtCrashNone.Visibility = 'Collapsed'
             $ui.PnlCrash.Visibility = 'Visible'
         } else {
             $ui.PnlCrash.Visibility = 'Collapsed'
+            $ui.LstCrashPage.ItemsSource = [string[]]@()
+            $ui.TxtCrashNone.Visibility = 'Visible'
         }
 
         # Correlated findings. Filtered rather than merely wrapped: a result with no
@@ -356,12 +479,32 @@ function Show-LogVerdictGui {
         $together = Format-LVCorrelation -Correlation @($Result.Correlations | Where-Object { $_ })
         if ($together.Count -gt 0) {
             $ui.LstCorrelation.ItemsSource = [string[]]$together
+            $ui.LstCorrelationPage.ItemsSource = [string[]]$together
+            $ui.TxtCorrelationNone.Visibility = 'Collapsed'
             $ui.PnlCorrelation.Visibility = 'Visible'
         } else {
             $ui.PnlCorrelation.Visibility = 'Collapsed'
+            $ui.LstCorrelationPage.ItemsSource = [string[]]@()
+            $ui.TxtCorrelationNone.Visibility = 'Visible'
         }
 
         $ui.BtnSaveReport.IsEnabled = $true
+        $ui.BtnFindingsSave.IsEnabled = $true
+        $ui.BtnActivitySave.IsEnabled = $true
+        $ui.TxtActivityReportState.Text = 'Ready to save'
+
+        $ui.TxtActivitySubtitle.Text = 'Latest scan - {0:yyyy-MM-dd HH:mm}' -f $Result.ScanTime
+        $ui.TxtActivityState.Text = 'Completed in {0:N1}s' -f $Result.Duration.TotalSeconds
+        $ui.TxtActivityHeadline.Text = '{0:N0} records reduced to {1:N0} signatures' -f $Result.Reduction.RecordCount, $Result.Reduction.SignatureCount
+        $ui.BtnActivityRunAgain.Content = 'Run again'
+        $ui.TxtActivityDuration.Text = '{0:N1}s' -f $Result.Duration.TotalSeconds
+        $ui.TxtActivityRecords.Text = '{0:N0}' -f $Result.Reduction.RecordCount
+        $ui.TxtActivitySignatures.Text = '{0:N0}' -f $Result.Reduction.SignatureCount
+        $ui.TxtActivityRules.Text = '{0:N0}' -f $Result.RuleCount
+
+        $ui.TxtSideDbTitle.Text = 'Database up to date'
+        $ui.TxtSideDbMeta.Text = 'v{0} - {1} rules' -f $script:LVVersion, $Result.RuleCount
+        $ui.TxtSideDbUpdated.Text = $(if ($Result.DatabaseDate) { 'Updated {0}' -f $Result.DatabaseDate } else { 'Bundled verdict database' })
 
         # Database age belongs on screen, not only in the text report. A curated ruling
         # is only as good as the day it was last checked.
@@ -381,7 +524,6 @@ function Show-LogVerdictGui {
         & $showDetail $null
         & $applyFilter
 
-        $worst = Get-LVVerdictStyle -Verdict $Result.WorstVerdict
         $summary = 'Scan complete. {0} finding(s), worst is {1}. {2:N0} record(s) reduced to {3:N0} signature(s).' -f `
             @($Result.Findings).Count, $worst.Label, $Result.Reduction.RecordCount, $Result.Reduction.SignatureCount
         & $setStatus $summary
@@ -392,16 +534,90 @@ function Show-LogVerdictGui {
     $ui.TxtVersion.Text = 'v{0}' -f $script:LVVersion
     $ui.TxtMachine.Text = $env:COMPUTERNAME
     $ui.TxtDays.Text = [string]$DaysBack
+    $ui.TxtSideMachine.Text = $env:COMPUTERNAME
+    $ui.TxtOverviewDays.Text = [string]$DaysBack
+    $ui.BtnFindingsSave.IsEnabled = $false
+    $ui.BtnFindingsOpen.IsEnabled = $false
+    $ui.BtnActivitySave.IsEnabled = $false
+    $ui.BtnActivityOpen.IsEnabled = $false
 
     if (Test-LVElevated) {
         $ui.TxtElevation.Text = 'Administrator'
-        $ui.TxtElevation.Foreground = '#a6e3a1'
+        $ui.TxtElevation.Foreground = '#5dd39e'
+        $ui.TxtSideElevation.Text = 'Administrator access'
+        $ui.TxtSideElevation.Foreground = '#5dd39e'
+        $ui.BtnCoverageElevate.Visibility = 'Collapsed'
     } else {
         $ui.TxtElevation.Text = 'Standard user'
+        $ui.TxtSideElevation.Text = 'Standard access'
         $ui.PnlElevate.Visibility = 'Visible'
+        $ui.BtnSideElevate.Visibility = 'Visible'
     }
 
     $window.Add_SourceInitialized({ Enable-LVDarkTitleBar -Window $window })
+
+    # Checked, not Click: TogglePattern is how assistive automation activates a
+    # ToggleButton. Mouse, keyboard and UI Automation must all navigate identically.
+    $ui.NavOverview.Add_Checked({ & $showPage 'Overview' })
+    $ui.NavFindings.Add_Checked({ & $showPage 'Findings' })
+    $ui.NavCoverage.Add_Checked({ & $showPage 'Coverage' })
+    $ui.NavActivity.Add_Checked({ & $showPage 'Activity' })
+
+    $syncOverviewOptions = {
+        $ui.TxtDays.Text = $ui.TxtOverviewDays.Text
+        $ui.ChkAllChannels.IsChecked = [bool]$ui.ChkOverviewAllChannels.IsChecked
+        $ui.ChkSkipText.IsChecked = -not [bool]$ui.ChkOverviewIncludeText.IsChecked
+        $ui.ChkIncludeBenign.IsChecked = [bool]$ui.ChkOverviewIncludeBenign.IsChecked
+    }
+
+    $ui.BtnOverviewScan.Add_Click({
+        & $syncOverviewOptions
+        & $showPage 'Activity'
+        $ui.BtnScan.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
+    })
+    $ui.BtnActivityRunAgain.Add_Click({
+        & $syncOverviewOptions
+        & $showPage 'Activity'
+        $ui.BtnScan.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
+    })
+    $ui.BtnOverviewCancel.Add_Click({
+        $ui.BtnCancel.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
+    })
+    $ui.BtnViewFindings.Add_Click({ & $showPage 'Findings' })
+    $ui.BtnViewCoverage.Add_Click({ & $showPage 'Coverage' })
+    $ui.BtnCoverageElevate.Add_Click({
+        $ui.BtnElevate.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
+    })
+    $ui.BtnSideElevate.Add_Click({
+        $ui.BtnElevate.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
+    })
+
+    $ui.BtnFindingsSave.Add_Click({
+        $ui.BtnSaveReport.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
+    })
+    $ui.BtnActivitySave.Add_Click({
+        $ui.BtnSaveReport.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
+    })
+    $ui.BtnFindingsOpen.Add_Click({
+        $ui.BtnOpenReport.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
+    })
+    $ui.BtnActivityOpen.Add_Click({
+        $ui.BtnOpenReport.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
+    })
+
+    $ui.BtnActivityClear.Add_Click({
+        $state.ActivityLines.Clear()
+        $ui.TxtActivityLog.Clear()
+        $ui.TxtActivityLastLine.Text = ''
+    })
+
+    $ui.TxtActivitySearch.Add_TextChanged({
+        $needle = $ui.TxtActivitySearch.Text.Trim()
+        $ui.TxtActivitySearchHint.Visibility = $(if ($needle) { 'Collapsed' } else { 'Visible' })
+        $visibleLines = @($state.ActivityLines | Where-Object { -not $needle -or $_ -like ('*{0}*' -f $needle) })
+        $ui.TxtActivityLog.Text = $visibleLines -join [Environment]::NewLine
+        $ui.TxtActivityLog.ScrollToEnd()
+    })
 
     $ui.TxtSearch.Add_TextChanged({
         $text = $ui.TxtSearch.Text
@@ -430,6 +646,13 @@ function Show-LogVerdictGui {
 
     $ui.LvFindings.Add_SelectionChanged({
         & $showDetail $ui.LvFindings.SelectedItem
+    })
+
+    $ui.LvPriority.Add_SelectionChanged({
+        if ($null -eq $ui.LvPriority.SelectedItem) { return }
+        & $showPage 'Findings'
+        $ui.LvFindings.SelectedItem = $ui.LvPriority.SelectedItem
+        $ui.LvFindings.ScrollIntoView($ui.LvPriority.SelectedItem)
     })
 
     $ui.LvFindings.AddHandler(
@@ -512,6 +735,10 @@ function Show-LogVerdictGui {
         }
 
         $ui.TxtLog.Clear()
+        $ui.TxtActivityLog.Clear()
+        $state.ActivityLines.Clear()
+        $ui.TxtActivitySearch.Clear()
+        $ui.TxtActivityLastLine.Text = ''
         # Each report carries its own scan's transcript, not everything since launch.
         $script:LVLogLines.Clear()
         $state.Sink = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
@@ -519,6 +746,11 @@ function Show-LogVerdictGui {
         $state.HtmlPath = $null
         $ui.BtnOpenReport.IsEnabled = $false
         $ui.BtnSaveReport.IsEnabled = $false
+        $ui.BtnFindingsOpen.IsEnabled = $false
+        $ui.BtnFindingsSave.IsEnabled = $false
+        $ui.BtnActivityOpen.IsEnabled = $false
+        $ui.BtnActivitySave.IsEnabled = $false
+        $ui.TxtActivityReportState.Text = 'Not saved yet'
         $ui.PnlEmpty.Visibility = 'Collapsed'
 
         $scanArgs = @{
@@ -537,6 +769,7 @@ function Show-LogVerdictGui {
 
         & $setScanning $true
         & $setStatus 'Scanning...'
+        & $showPage 'Activity'
         $state.Timer.Start()
     })
 
@@ -547,6 +780,8 @@ function Show-LogVerdictGui {
         $state.Job = $null
         & $setScanning $false
         & $setStatus 'Scan cancelled. Nothing on this machine was changed.'
+        $ui.TxtActivityState.Text = 'Cancelled'
+        $ui.TxtActivityHeadline.Text = 'The scan was cancelled. Nothing was changed.'
     })
 
     $ui.BtnSaveReport.Add_Click({
@@ -556,6 +791,9 @@ function Show-LogVerdictGui {
             $state.ReportDir = $out.OutputDir
             $state.HtmlPath = ($out.Files | Where-Object { $_ -like '*.html' } | Select-Object -First 1)
             $ui.BtnOpenReport.IsEnabled = $true
+            $ui.BtnFindingsOpen.IsEnabled = $true
+            $ui.BtnActivityOpen.IsEnabled = $true
+            $ui.TxtActivityReportState.Text = 'Saved to {0}' -f $out.OutputDir
             & $setStatus ('Report written to {0}' -f $out.OutputDir)
         } catch {
             & $setStatus ('Could not write the report: {0}' -f $_.Exception.Message)
@@ -629,8 +867,10 @@ function Show-LogVerdictGui {
             & $setScanning $false
             & $appendLog 'error' ('{0:yyyy-MM-dd HH:mm:ss}' -f (Get-Date)) ([string]$_.Exception.Message)
             & $setStatus ('Scan failed: {0}' -f $_.Exception.Message)
+            $ui.TxtActivityState.Text = 'Failed'
+            $ui.TxtActivityHeadline.Text = 'The scan did not finish'
             $ui.TxtEmptyTitle.Text = 'The scan did not finish'
-            $ui.TxtEmptyBody.Text = 'Open the activity log at the bottom of the window for the detail.'
+            $ui.TxtEmptyBody.Text = 'Open Activity for the full diagnostic message.'
             $ui.PnlEmpty.Visibility = 'Visible'
         }
     })
@@ -648,6 +888,7 @@ function Show-LogVerdictGui {
         $window.Add_ContentRendered({ $ui.BtnScan.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent))) })
     }
 
+    & $showPage 'Overview'
     $null = $window.ShowDialog()
 
     if ($PassThru) { return $state.Result }

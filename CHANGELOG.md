@@ -16,6 +16,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **The window slides rather than bucketing, which is where this departs from Sigma.** Sigma cuts time into fixed intervals: with a one-hour timespan a crash at 09:59 and the service death it caused at 10:01 fall in different buckets and never correlate, while two unrelated events at 09:01 and 09:56 do. Both behaviours are backwards for a single machine. Tests pin both directions.
 - Correlation is deliberately curated and never inferred. Checked against this machine, the top discovered co-occurrences were all high-volume noise signatures pairing with everything - a constantly-firing signature is near everything by construction, so an inferred correlation is mostly an artefact of volume rather than a cause.
 
+### Changed
+
+- **The window is now a four-page diagnostics workspace.** Overview owns scan setup and the last-run summary; Findings combines filters, the signature table and full ruling detail; Coverage surfaces readable sources, evidence horizons, gaps, crash artifacts and correlations; Activity keeps the live pipeline and transcript visible. The scan and report engines are unchanged, so the console and GUI still cannot disagree about a verdict.
+- The GUI now uses a purpose-built deep-navy observability palette, a persistent navigation rail, compact metric cards, a dark active caption and page-specific empty states. Keyboard focus, screen-reader names and the existing WCAG contrast checks remain part of the release gate.
+
 ### Fixed
 
 - **Redaction missed any identifier sitting between underscores**, which included the one place the machine name most reliably appears: the report folder is named `LogVerdict_<MACHINE>_<timestamp>` and that path is all over the run transcript. The word-boundary lookaround treated `_` as a word character and refused to match there. Boundaries are now alphanumeric.

@@ -54,9 +54,10 @@ Collect  ->  Reduce  ->  Resolve  ->  Correlate  ->  Report
 
 `LogVerdict-GUI.exe` is the whole tool in one double-clickable file. It scans, ranks the findings worst-first, and explains the selected one in plain English beside the raw evidence it was ruled on.
 
-- **Verdict chips** on the left double as filters - click one to show or hide that class of finding.
-- **The search box** filters on title, provider, event id and message text at once.
-- **What this scan could not see** is always on screen. A finding list is only as trustworthy as the coverage behind it, so denied channels, truncated logs and a missing elevation say so rather than being quietly absent.
+- **Overview** holds the scan controls, last-run state, reduction metrics, verdict distribution and the three highest-priority findings.
+- **Findings** is the diagnostic workspace. Verdict chips and the search box filter the list; selecting a row opens its plain-English ruling, concrete action and raw evidence beside it.
+- **Coverage** makes the trust boundary explicit. Readable channels, event horizons, denied sources, crash artifacts and curated correlations have one page rather than being buried in a sidebar.
+- **Activity** shows the live collect, reduce, correlate, resolve and report stages, the full run transcript and a compact run summary.
 - **Save report** writes the same text, JSON and HTML bundle the console tool produces.
 - The scan runs on a background thread, so the window stays responsive and can be cancelled mid-run.
 
