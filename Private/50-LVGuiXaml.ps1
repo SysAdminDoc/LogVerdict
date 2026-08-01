@@ -540,6 +540,27 @@ function Get-LVGuiXaml {
               </Border>
             </StackPanel>
 
+            <!-- ==== Crash evidence ==== -->
+            <StackPanel x:Name="PnlCrash" Visibility="Collapsed">
+              <TextBlock Text="CRASH EVIDENCE ON DISK" Style="{StaticResource PanelLabel}"
+                         Margin="0,22,0,9" TextWrapping="Wrap"/>
+              <TextBlock Text="Collected, not decoded. Reading a dump needs a debugger."
+                         Foreground="{StaticResource TextMuted}" FontSize="11" TextWrapping="Wrap"
+                         Margin="0,-4,0,9"/>
+              <Border Background="{StaticResource Base}" CornerRadius="6" Padding="12,10"
+                      BorderBrush="{StaticResource Surface0}" BorderThickness="1">
+                <ItemsControl x:Name="LstCrash">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,6"
+                                 Foreground="{StaticResource TextMuted}" FontSize="11.5"
+                                 FontFamily="Consolas" LineHeight="16"/>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Border>
+            </StackPanel>
+
             <!-- ==== Coverage gaps ==== -->
             <StackPanel x:Name="PnlCoverage" Visibility="Collapsed">
               <TextBlock Text="WHAT THIS SCAN COULD NOT SEE" Style="{StaticResource PanelLabel}"

@@ -27,7 +27,7 @@ $script:LVGuiElement = @(
     'PnlSummary', 'ChipCritical', 'ChipActionable', 'ChipInvestigate', 'ChipUnknown',
     'ChipInformational', 'ChipBenign',
     'TxtRecords', 'TxtSignatures', 'TxtReduction', 'TxtRules',
-    'PnlCoverage', 'LstCoverage',
+    'PnlCoverage', 'LstCoverage', 'PnlCrash', 'LstCrash',
     'TxtSearch', 'TxtSearchHint', 'TxtShown', 'LvFindings',
     'PnlEmpty', 'TxtEmptyTitle', 'TxtEmptyBody',
     'TxtNoSelection', 'ScrDetail', 'PillDetail', 'TxtDetailVerdict', 'TxtDetailTitle',
@@ -150,6 +150,48 @@ function ConvertTo-LVGuiRow {
     }
 
     return ConvertTo-LVArrayOutput -Value @($rows)
+}
+
+function Get-LVStaleRuleCount {
+    <#
+        .SYNOPSIS
+        How many findings were ruled on by guidance that has not been re-checked recently.
+
+        .DESCRIPTION
+        A curated database is only as good as the day each rule was last verified, and
+        Windows ships new noise every patch cycle. A confidently wrong ruling is worse
+        than no ruling, so the age of the guidance behind a finding is reported rather
+        than left implicit.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Finding)
+
+    $cutoff = (Get-Date).AddMonths(-1 * $script:LVVerificationMaxAgeMonths)
+    $stale = 0
+    foreach ($f in $Finding) {
+        if (-not $f.Verified) { continue }
+        $parsed = [datetime]::MinValue
+        if (-not [datetime]::TryParseExact([string]$f.Verified, 'yyyy-MM-dd',
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::None, [ref]$parsed)) { continue }
+        if ($parsed -lt $cutoff) { $stale++ }
+    }
+    return $stale
+}
+
+function Format-LVCrashArtifact {
+    <#
+        .SYNOPSIS
+        One crash artifact as a single readable line for the window's sidebar.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Artifact)
+
+    $lines = foreach ($a in $Artifact) {
+        if ($null -eq $a) { continue }
+        '{0}  {1:yyyy-MM-dd HH:mm}  {2}' -f $a.Kind, $a.When, (Split-Path -Leaf ([string]$a.Path))
+    }
+    return ConvertTo-LVArrayOutput -Value @($lines)
 }
 
 function Get-LVGuiScanScript {

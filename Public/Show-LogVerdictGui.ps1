@@ -342,8 +342,31 @@ function Show-LogVerdictGui {
         $ui.TxtEmptyTitle.Text = 'Nothing to report'
         $ui.TxtEmptyBody.Text = 'The scan completed and found no signature worth raising in the last ' + $Result.DaysBack + ' day(s). Check the panel on the left for anything the scan was not allowed to read.'
 
+        # Crash evidence the console report has always shown and the window used to drop.
+        $crash = Format-LVCrashArtifact -Artifact @($Result.CrashArtifacts)
+        if ($crash.Count -gt 0) {
+            $ui.LstCrash.ItemsSource = [string[]]$crash
+            $ui.PnlCrash.Visibility = 'Visible'
+        } else {
+            $ui.PnlCrash.Visibility = 'Collapsed'
+        }
+
         $ui.BtnSaveReport.IsEnabled = $true
-        $ui.TxtFooter.Text = '{0} - {1} rule(s) - scanned in {2:N1}s' -f $Result.DatabaseName, $Result.RuleCount, $Result.Duration.TotalSeconds
+
+        # Database age belongs on screen, not only in the text report. A curated ruling
+        # is only as good as the day it was last checked.
+        $footer = '{0} - {1} rule(s)' -f $Result.DatabaseName, $Result.RuleCount
+        if ($Result.DatabaseDate) { $footer += ' - updated {0}' -f $Result.DatabaseDate }
+        $footer += ' - scanned in {0:N1}s' -f $Result.Duration.TotalSeconds
+
+        $stale = Get-LVStaleRuleCount -Finding @($Result.Findings)
+        if ($stale -gt 0) {
+            $footer += ' - {0} ruling(s) not re-checked in over {1} months' -f $stale, $script:LVVerificationMaxAgeMonths
+            $ui.TxtFooter.Foreground = $ui.PillDetail.FindResource('Yellow')
+        } else {
+            $ui.TxtFooter.Foreground = $ui.PillDetail.FindResource('TextMuted')
+        }
+        $ui.TxtFooter.Text = $footer
 
         & $showDetail $null
         & $applyFilter

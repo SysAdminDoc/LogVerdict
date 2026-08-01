@@ -12,6 +12,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `Test-LogVerdictDatabase` now separates errors from warnings. A rule with no source is a warning: it does not make the database invalid, but `-IncludeWarnings` lists them and the summary line counts them. A `DRL-*` source with no author is an error, because the licence obliges us to display one.
 - Schema v2 databases continue to load unchanged; a v4 database is still refused outright rather than partially read.
 
+### Changed
+
+- The window now shows crash evidence found on disk (minidumps and Windows Error Reporting archives). The console and HTML reports had always listed these; the window silently dropped them, so the same scan told you different things depending on how you ran it.
+- The footer states when the verdict database was last updated, and warns when any finding was ruled on by guidance that has not been re-checked within the staleness ceiling. A curated ruling is only as good as the day it was verified, and that date was previously buried in the text report.
+
 ### Accessibility
 
 - **The window was unusable with a screen reader.** Every findings row was announced as the underlying object graph - hex colour codes and the whole search haystack read aloud - because nothing supplied an accessible name. Rows now announce as a sentence: "ACTIONABLE. An update failed to install. Seen 12 time(s), 0.55 per day, last 2 days ago. Source Microsoft-Windows-WindowsUpdateClient 20."

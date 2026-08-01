@@ -1403,3 +1403,36 @@ Describe 'GUI colour contrast' {
         }
     }
 }
+
+Describe 'GUI coverage surfacing' {
+    It 'formats a crash artifact as one readable line' {
+        InModuleScope LogVerdict {
+            $a = [pscustomobject]@{ Kind = 'minidump'; When = [datetime]'2026-07-30 14:05'; Path = (Join-Path 'C:\Windows\Minidump' 'dump-1.dmp') }
+            $line = @(Format-LVCrashArtifact -Artifact @($a))[0]
+            $line | Should -Match '^minidump'
+            $line | Should -Match '2026-07-30 14:05'
+            $line | Should -Match 'dump-1\.dmp'
+        }
+    }
+
+    It 'returns an empty array when there are no crash artifacts' {
+        InModuleScope LogVerdict {
+            @(Format-LVCrashArtifact -Artifact @()).Count | Should -Be 0
+        }
+    }
+
+    It 'counts rulings whose guidance has gone stale' {
+        InModuleScope LogVerdict {
+            $fresh = [pscustomobject]@{ Verified = (Get-Date).ToString('yyyy-MM-dd') }
+            $old   = [pscustomobject]@{ Verified = (Get-Date).AddMonths(-1 * ($script:LVVerificationMaxAgeMonths + 6)).ToString('yyyy-MM-dd') }
+            $none  = [pscustomobject]@{ Verified = $null }
+            Get-LVStaleRuleCount -Finding @($fresh, $old, $none) | Should -Be 1
+        }
+    }
+
+    It 'ignores an unparseable verified date rather than counting it as stale' {
+        InModuleScope LogVerdict {
+            Get-LVStaleRuleCount -Finding @([pscustomobject]@{ Verified = 'last tuesday' }) | Should -Be 0
+        }
+    }
+}
