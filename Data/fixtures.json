@@ -29,6 +29,18 @@
       }
     },
     {
+      "ruleId": "LV-0003",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-DistributedCOM",
+        "Id": 10005,
+        "SampleMessage": "DCOM got error \"1053\" attempting to start the service BcastDVRUserService with arguments \"Unavailable\" in order to run the server: {0F8E8C1F-B2E9-4D6A-9C1B-3A4E5F6D7C8B}"
+      }
+    },
+    {
       "ruleId": "LV-0010",
       "origin": "observed",
       "expect": "investigate",
@@ -139,6 +151,18 @@
       }
     },
     {
+      "ruleId": "LV-0033",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "disk",
+        "Id": 153,
+        "SampleMessage": "The IO operation at logical block address 0x1a2b3c for Disk 2 (PDO name: \\Device\\0000003e) was retried."
+      }
+    },
+    {
       "ruleId": "LV-0040",
       "origin": "observed",
       "expect": "investigate",
@@ -201,6 +225,18 @@
       }
     },
     {
+      "ruleId": "LV-0044",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Service Control Manager",
+        "Id": 7011,
+        "SampleMessage": "A timeout (30000 milliseconds) was reached while waiting for a transaction response from the WSearch service."
+      }
+    },
+    {
       "ruleId": "LV-0050",
       "origin": "observed",
       "expect": "investigate",
@@ -234,6 +270,18 @@
         "Provider": ".NET Runtime",
         "Id": 1026,
         "SampleMessage": "Application: SyncTrayzor.exe\nCoreCLR Version: 10.0.1026.32716\n.NET Version: 10.0.10\nDescription: The process was terminated due to an unhandled exception.\nException Info: System.Threading.Tasks.TaskCanceledException: A task was canceled.\r\n   at System.Windows.Threading.DispatcherOperation.Wait(TimeSpan timeout)\r\n   at System.Windows.Threading.Dispatcher.InvokeImpl(DispatcherOperation operation, Ca"
+      }
+    },
+    {
+      "ruleId": "LV-0053",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Windows Error Reporting",
+        "Id": 1001,
+        "SampleMessage": "Fault bucket 1234567890123456789, type 4\r\nEvent Name: APPCRASH\r\nResponse: Not available\r\nCab Id: 0\r\n\r\nProblem signature:\r\nP1: example.exe\r\nP2: 1.0.0.0\r\nP3: 67f515a7\r\nP4: example.dll"
       }
     },
     {
@@ -402,6 +450,18 @@
         "Provider": "Microsoft-Windows-Diagnostics-Performance",
         "Id": 100,
         "SampleMessage": "Windows has started up: Boot Duration : 38562ms, IsDegradation : false."
+      }
+    },
+    {
+      "ruleId": "LV-0083",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "VSS",
+        "Id": 8193,
+        "SampleMessage": "Volume Shadow Copy Service error: Unexpected error calling routine ConvertStringSidToSid.  hr = 0x80070005, Access is denied."
       }
     },
     {

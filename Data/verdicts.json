@@ -51,6 +51,28 @@
       ]
     },
     {
+      "id": "LV-0003",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-DistributedCOM",
+        "eventId": 10005
+      },
+      "verdict": "investigate",
+      "title": "DCOM could not start a service something asked for",
+      "plain": "A program asked DCOM to launch a Windows service on its behalf, and the service did not start. The message names both the service and the Windows error code that stopped it.",
+      "why": "DCOM is the messenger here, not the fault. The event id on its own says nothing useful - the service name and the error code inside the message are the diagnosis, and they differ completely from one occurrence to the next. This is why the DCOM reconfiguration commonly recommended for it changes nothing.",
+      "action": "Read the service name and the error code out of the message, then investigate that service directly. Do not reconfigure DCOM.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/4338635/distributed-com-errors-10005"
+      ],
+      "falsepositives": [
+        "A service deliberately disabled, or a per-user service absent by design, produces this every time something asks for it."
+      ]
+    },
+    {
       "id": "LV-0010",
       "status": "stable",
       "verified": "2026-07-31",
@@ -215,6 +237,38 @@
       "falsepositives": []
     },
     {
+      "id": "LV-0033",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "disk",
+        "eventId": 153
+      },
+      "verdict": "investigate",
+      "title": "A disk read or write had to be retried",
+      "plain": "The storage driver did not get a response to a read or write in time, so it sent the request again. The retry worked - had it not, this would have been logged as an error rather than a warning.",
+      "why": "Microsoft documents this as the storage stack timing out a request, which happens both on genuinely failing hardware and on healthy storage that is simply overloaded. The event on its own therefore does not distinguish a dying drive from a busy one, and the rate is what separates them.",
+      "action": "At a trickle, note it and move on. Sustained, read the drive's SMART data and check its cable and controller - and check whether several busy drives are sharing one controller.",
+      "escalate": {
+        "perDay": 10,
+        "verdict": "actionable",
+        "why": "Retries at this rate point at a failing drive, cable or controller rather than an occasional busy moment."
+      },
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "External and USB drives retry routinely, especially while a backup is running.",
+        "A virtualization host under load produces these on perfectly healthy storage."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/troubleshoot-data-corruption-and-disk-errors",
+          "retrieved": "2026-07-31"
+        }
+      ]
+    },
+    {
       "id": "LV-0040",
       "status": "stable",
       "verified": "2026-07-31",
@@ -298,6 +352,32 @@
       ]
     },
     {
+      "id": "LV-0044",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Service Control Manager",
+        "eventId": 7011
+      },
+      "verdict": "investigate",
+      "title": "A service did not answer the service manager in time",
+      "plain": "The Service Control Manager sent a service a start, stop or control request and gave up waiting for its acknowledgement after the timeout named in the message - 30 seconds unless the machine has been configured otherwise.",
+      "why": "Microsoft documents this as the service being slow to respond, which is not the same as being broken; it is routine at boot on machines with slow storage or heavy startup load. It matters when the same service appears repeatedly, or when it is one you depend on.",
+      "action": "Identify the service named in the message and check whether it is running now. Raising the ServicesPipeTimeout registry value hides the symptom rather than fixing it, and belongs last rather than first.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Common at boot on loaded or spinning-disk machines, with the service starting successfully moments later."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/system-management-components/service-not-start-events-7000-7011-time-out-error",
+          "retrieved": "2026-07-31"
+        }
+      ]
+    },
+    {
       "id": "LV-0050",
       "status": "stable",
       "verified": "2026-07-31",
@@ -352,6 +432,34 @@
       "confidence": "high",
       "references": [],
       "falsepositives": []
+    },
+    {
+      "id": "LV-0053",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "Windows Error Reporting",
+        "eventId": 1001
+      },
+      "verdict": "informational",
+      "title": "Windows Error Reporting filed a report",
+      "plain": "Windows Error Reporting recorded a report about something that crashed, hung or otherwise failed. This entry is the report, not the failure itself.",
+      "why": "Logged for every report Windows Error Reporting files, so on a crash it duplicates an Application Error 1000 or Application Hang 1002 you already have. Counting both double-counts one incident. Its own value is the Event Name and the problem signature parameters, which pin the faulting module and version precisely.",
+      "action": "Read the matching Application Error or Application Hang event for the crash itself. Come back here for the Event Name and P-parameters when you need the exact faulting module and version.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/archive/technet-wiki/3116.event-id-1001-windows-error-reporting"
+      ],
+      "falsepositives": [
+        "Event Name values other than APPCRASH cover hangs, generic reports and setup diagnostics, so a 1001 does not by itself mean anything crashed."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-application-service-crashing-behavior",
+          "retrieved": "2026-07-31"
+        }
+      ]
     },
     {
       "id": "LV-0060",
@@ -629,6 +737,34 @@
       "references": [],
       "falsepositives": [
         "Emitted on every boot regardless of health."
+      ]
+    },
+    {
+      "id": "LV-0083",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "event",
+        "provider": "VSS",
+        "eventId": 8193
+      },
+      "verdict": "investigate",
+      "title": "Volume Shadow Copy hit an unexpected error",
+      "plain": "The Volume Shadow Copy Service - the component that lets backups and System Restore snapshot files that are in use - failed inside one of its own routines. The message names the routine and a hexadecimal error code.",
+      "why": "Microsoft documents several unrelated causes behind this single event id: registry permissions overwritten when a server role is installed, VSS components that are not registered, a stale .bak entry under a writer's registry key, and metadata that has grown past its size limit. The routine name and the hr value are what separate them, so the event id alone does not identify the problem and cannot be ruled on more precisely than this.",
+      "action": "Read the routine name and the hr value out of the message and match them against Microsoft's VSS event guidance. First check whether backups and System Restore actually work - if they do, this recorded a transient failure rather than a broken backup.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/event-id-8193-when-you-perform-backup"
+      ],
+      "falsepositives": [
+        "Backup software that enumerates VSS writers can log this and still complete its backup successfully."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/previous-versions/troubleshoot/windows-server/volume-shadow-copy-service-events",
+          "retrieved": "2026-07-31"
+        }
       ]
     },
     {
