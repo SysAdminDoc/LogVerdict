@@ -72,6 +72,20 @@ LogVerdict-GUI.exe -AutoScan          scan immediately on open
 LogVerdict-GUI.exe -DaysBack 7        explicitly override the saved look-back
 ```
 
+The Overview page exposes the deterministic live-scan and report choices rather than hiding them behind a second engine:
+
+| Capability | Window control | Console / module equivalent |
+|---|---|---|
+| Look-back | Look back | `-DaysBack` |
+| Default, focused, all, or named event channels | Focused/all switches or Named event channels | `-DiagnosticChannels`, `-AllChannels`, `-Channel` |
+| Setup logs, Reliability Monitor, harmless findings | Source switches | `-SkipTextLogs`, `-SkipReliability`, `-IncludeBenign` |
+| Alternate complete rule database | Rules path / picker | `-DatabasePath` |
+| Report destination, identifier masking, evidence bundle | Report controls | `-OutputDir`, `-Redact`, `-IncludeEvidence` |
+| Offline evidence re-evaluation | Console-only batch/review workflow | `-EvidencePath` |
+| Local-model draft and rule-authoring workflow | Deliberately console-only so model endpoint and local-rule writes remain explicit | `-ExplainUnknown`, `-OllamaModel`, `-OllamaEndpoint`, `-PromoteToRule`, `-LocalRulePath` |
+| Output format selection | The window always saves Text, JSON, and HTML together | `-Format` |
+| Console lifecycle | Not applicable to a persistent window | `-NoReport`, `-Pause`, `-NoPause` |
+
 ### The executable
 
 `LogVerdict.exe` is a single self-contained file with the verdict database compiled in. Copy it to the machine you are troubleshooting and run it - nothing is installed and there are no dependencies.

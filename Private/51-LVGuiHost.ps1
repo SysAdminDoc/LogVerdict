@@ -139,6 +139,54 @@ function Save-LVGuiSetting {
     }
 }
 
+function Get-LVGuiNamedChannel {
+    <#
+        .SYNOPSIS
+        Normalize the named-channel text box into a stable, duplicate-free array.
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()][AllowNull()][string]$Text)
+
+    $channel = @($Text -split '[,;\r\n]+' |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ } |
+        Select-Object -Unique)
+    return ConvertTo-LVArrayOutput -Value $channel
+}
+
+function Select-LVGuiFolder {
+    <#
+        .SYNOPSIS
+        Show an owned folder picker so the dialog stays with the LogVerdict window.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Window,
+        [AllowEmptyString()][string]$InitialDirectory
+    )
+
+    Add-Type -AssemblyName System.Windows.Forms
+    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $owner = New-Object System.Windows.Forms.NativeWindow
+    try {
+        $dialog.Description = 'Choose where LogVerdict should save reports'
+        $dialog.ShowNewFolderButton = $true
+        if ($InitialDirectory -and (Test-Path -LiteralPath $InitialDirectory -PathType Container)) {
+            $dialog.SelectedPath = $InitialDirectory
+        }
+
+        $handle = (New-Object System.Windows.Interop.WindowInteropHelper($Window)).Handle
+        $owner.AssignHandle($handle)
+        if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
+            return $dialog.SelectedPath
+        }
+    } finally {
+        $owner.ReleaseHandle()
+        $dialog.Dispose()
+    }
+    return $null
+}
+
 # Every brush the XAML treats as semantic rather than decorative. DynamicResource
 # references point at these keys, so replacing the resource objects repaints the
 # existing visual tree without rebuilding the window.
@@ -281,8 +329,11 @@ $script:LVGuiElement = @(
     'PageOverview', 'PageFindings', 'PageCoverage', 'PageActivity',
     'TxtSideMachine', 'TxtSideElevation', 'BtnSideElevate',
     'TxtSideDbTitle', 'TxtSideDbMeta', 'TxtSideDbUpdated',
-    'TxtOverviewDays', 'ChkOverviewAllChannels', 'ChkOverviewIncludeText',
-    'ChkOverviewIncludeBenign', 'BtnOverviewScan', 'BtnOverviewCancel',
+    'TxtOverviewDays', 'ChkOverviewAllChannels', 'ChkOverviewDiagnosticChannels',
+    'ChkOverviewIncludeText', 'ChkOverviewIncludeBenign', 'TxtOverviewChannels',
+    'TxtOverviewDatabase', 'BtnOverviewBrowseDatabase', 'ChkOverviewSkipReliability',
+    'TxtOverviewOutputDir', 'BtnOverviewBrowseOutput', 'ChkOverviewRedact',
+    'ChkOverviewEvidence', 'BtnOverviewScan', 'BtnOverviewCancel',
     'TxtOverviewLastVerdict', 'TxtOverviewFindingCount', 'TxtOverviewScanTime',
     'PnlOverviewSummary', 'TxtOverviewRecords', 'TxtOverviewSignatures',
     'TxtOverviewReduction', 'TxtOverviewRules',

@@ -697,12 +697,53 @@ function Get-LVGuiXaml {
                     <TextBlock Text="SOURCES" Style="{StaticResource PanelLabel}" Margin="0,0,0,6"/>
                     <WrapPanel>
                       <CheckBox x:Name="ChkOverviewAllChannels" Content="All event channels" Margin="0,0,20,6"/>
+                      <CheckBox x:Name="ChkOverviewDiagnosticChannels" Content="Focused diagnostic channels" Margin="0,0,20,6"/>
                       <CheckBox x:Name="ChkOverviewIncludeText" Content="Include setup logs"
                                 IsChecked="True" Margin="0,0,20,6"/>
                       <CheckBox x:Name="ChkOverviewIncludeBenign" Content="Show harmless" Margin="0,0,0,6"/>
                     </WrapPanel>
                   </StackPanel>
                 </Grid>
+
+                <TextBlock Text="ADVANCED SCAN" Style="{StaticResource PanelLabel}" Margin="0,12,0,6"/>
+                <TextBlock Text="Named event channels" Foreground="{DynamicResource Subtext0}" FontSize="11"
+                           Margin="0,0,0,4"/>
+                <TextBox x:Name="TxtOverviewChannels" AutomationProperties.Name="Named event channels"
+                         ToolTip="Comma, semicolon, or one channel per line. Named channels override the broader channel choices."/>
+
+                <TextBlock Text="Alternate rule database" Foreground="{DynamicResource Subtext0}" FontSize="11"
+                           Margin="0,8,0,4"/>
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <TextBox x:Name="TxtOverviewDatabase" AutomationProperties.Name="Alternate verdict database"
+                           ToolTip="Optional path to a full verdicts.json database."/>
+                  <Button x:Name="BtnOverviewBrowseDatabase" Grid.Column="1" Style="{StaticResource BaseButton}"
+                          Content="Rules..." Margin="7,0,0,0" Padding="11,6"/>
+                </Grid>
+                <WrapPanel Margin="0,8,0,0">
+                  <CheckBox x:Name="ChkOverviewSkipReliability" Content="Skip Reliability Monitor" Margin="0,0,20,6"/>
+                </WrapPanel>
+
+                <TextBlock Text="REPORT" Style="{StaticResource PanelLabel}" Margin="0,7,0,6"/>
+                <TextBlock Text="Report folder" Foreground="{DynamicResource Subtext0}" FontSize="11"
+                           Margin="0,0,0,4"/>
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <TextBox x:Name="TxtOverviewOutputDir" AutomationProperties.Name="Report folder"
+                           ToolTip="Optional folder used by Save report."/>
+                  <Button x:Name="BtnOverviewBrowseOutput" Grid.Column="1" Style="{StaticResource BaseButton}"
+                          Content="Folder..." Margin="7,0,0,0" Padding="11,6"/>
+                </Grid>
+                <WrapPanel Margin="0,8,0,0">
+                  <CheckBox x:Name="ChkOverviewRedact" Content="Redact written reports" Margin="0,0,20,6"/>
+                  <CheckBox x:Name="ChkOverviewEvidence" Content="Include evidence zip" Margin="0,0,0,6"/>
+                </WrapPanel>
 
                 <StackPanel Orientation="Horizontal" Margin="0,13,0,0">
                   <Button x:Name="BtnOverviewScan" Style="{StaticResource AccentButton}" Content="Run scan"

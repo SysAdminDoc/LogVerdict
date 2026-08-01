@@ -1621,6 +1621,41 @@ Describe 'GUI settings persistence' {
     }
 }
 
+Describe 'GUI and console feature parity' {
+    It 'normalizes comma, semicolon, and line-separated named channels' {
+        InModuleScope LogVerdict {
+            $channels = @(Get-LVGuiNamedChannel -Text "System, Application;System`r`nMicrosoft-Windows-Ntfs/Operational")
+            $channels | Should -Be @('System', 'Application', 'Microsoft-Windows-Ntfs/Operational')
+            @(Get-LVGuiNamedChannel -Text '  ').Count | Should -Be 0
+        }
+    }
+
+    It 'wires every deterministic live scan choice into the engine arguments' {
+        $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Show-LogVerdictGui.ps1'
+        $text = Get-Content -LiteralPath $path -Raw
+        foreach ($argument in @('Channel', 'AllChannels', 'DiagnosticChannels', 'SkipTextLogs',
+                'SkipReliability', 'IncludeBenign', 'DatabasePath')) {
+            $text | Should -Match ("scanArgs\['{0}'\]|{0}\s*=" -f $argument) -Because "$argument must reach Invoke-LogVerdictScan"
+        }
+    }
+
+    It 'wires report destination, redaction, and evidence choices into export' {
+        $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Show-LogVerdictGui.ps1'
+        $text = Get-Content -LiteralPath $path -Raw
+        $text | Should -Match "exportArgs\['OutputDir'\]"
+        $text | Should -Match 'Redact\s*=\s*\[bool\]\$ui\.ChkOverviewRedact\.IsChecked'
+        $text | Should -Match 'IncludeEvidence\s*=\s*\[bool\]\$ui\.ChkOverviewEvidence\.IsChecked'
+    }
+
+    It 'documents every intentionally console-only option' {
+        $readme = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'README.md') -Raw
+        foreach ($option in @('EvidencePath', 'ExplainUnknown', 'OllamaModel', 'OllamaEndpoint',
+                'PromoteToRule', 'LocalRulePath', 'Format')) {
+            $readme | Should -Match ([regex]::Escape($option)) -Because "$option must be reachable or deliberately documented"
+        }
+    }
+}
+
 Describe 'GUI row projection' {
     It 'dates an undated signature to DateTime.MinValue rather than to now' {
         # Undated text-log lines must sort to the bottom of a last-seen sort, not to

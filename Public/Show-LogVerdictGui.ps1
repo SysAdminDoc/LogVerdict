@@ -334,7 +334,10 @@ function Show-LogVerdictGui {
             $ui[$n].IsEnabled = -not $On
         }
         foreach ($n in @('TxtOverviewDays', 'ChkOverviewAllChannels', 'ChkOverviewIncludeText',
-                'ChkOverviewIncludeBenign', 'BtnCoverageElevate', 'BtnSideElevate')) {
+                'ChkOverviewDiagnosticChannels', 'ChkOverviewIncludeBenign', 'TxtOverviewChannels',
+                'TxtOverviewDatabase', 'BtnOverviewBrowseDatabase', 'ChkOverviewSkipReliability',
+                'TxtOverviewOutputDir', 'BtnOverviewBrowseOutput', 'ChkOverviewRedact',
+                'ChkOverviewEvidence', 'BtnCoverageElevate', 'BtnSideElevate')) {
             $ui[$n].IsEnabled = -not $On
         }
         if ($On) { $ui.BtnScan.Content = 'Scanning...' } else { $ui.BtnScan.Content = 'Run scan' }
@@ -622,6 +625,37 @@ function Show-LogVerdictGui {
         & $showPage 'Activity'
         $ui.BtnScan.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
     })
+
+    $ui.ChkOverviewAllChannels.Add_Checked({
+        $ui.ChkOverviewDiagnosticChannels.IsChecked = $false
+    })
+    $ui.ChkOverviewDiagnosticChannels.Add_Checked({
+        $ui.ChkOverviewAllChannels.IsChecked = $false
+    })
+    $ui.TxtOverviewChannels.Add_TextChanged({
+        if ($ui.TxtOverviewChannels.Text.Trim()) {
+            $ui.ChkOverviewAllChannels.IsChecked = $false
+            $ui.ChkOverviewDiagnosticChannels.IsChecked = $false
+        }
+    })
+
+    $ui.BtnOverviewBrowseDatabase.Add_Click({
+        $dialog = New-Object Microsoft.Win32.OpenFileDialog
+        $dialog.Title = 'Choose a LogVerdict rule database'
+        $dialog.Filter = 'JSON rule database (*.json)|*.json|All files (*.*)|*.*'
+        $dialog.CheckFileExists = $true
+        $current = $ui.TxtOverviewDatabase.Text.Trim()
+        if ($current -and (Test-Path -LiteralPath $current -PathType Leaf)) {
+            $dialog.InitialDirectory = Split-Path -Parent $current
+            $dialog.FileName = Split-Path -Leaf $current
+        }
+        if ($dialog.ShowDialog($window)) { $ui.TxtOverviewDatabase.Text = $dialog.FileName }
+    })
+
+    $ui.BtnOverviewBrowseOutput.Add_Click({
+        $folder = Select-LVGuiFolder -Window $window -InitialDirectory $ui.TxtOverviewOutputDir.Text.Trim()
+        if ($folder) { $ui.TxtOverviewOutputDir.Text = $folder }
+    })
     $ui.BtnOverviewCancel.Add_Click({
         $ui.BtnCancel.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
     })
@@ -770,9 +804,10 @@ function Show-LogVerdictGui {
         if ($state.Scanning) { return }
 
         $days = 0
-        if (-not [int]::TryParse($ui.TxtDays.Text.Trim(), [ref]$days) -or $days -lt 1 -or $days -gt 3650) {
+        if (-not [int]::TryParse($ui.TxtOverviewDays.Text.Trim(), [ref]$days) -or $days -lt 1 -or $days -gt 3650) {
             $days = 30
             $ui.TxtDays.Text = '30'
+            $ui.TxtOverviewDays.Text = '30'
             & $setStatus 'Look-back must be a whole number of days between 1 and 3650. Reset to 30.'
         }
 
@@ -797,9 +832,28 @@ function Show-LogVerdictGui {
 
         $scanArgs = @{
             DaysBack      = $days
-            AllChannels   = [bool]$ui.ChkAllChannels.IsChecked
-            SkipTextLogs  = [bool]$ui.ChkSkipText.IsChecked
-            IncludeBenign = [bool]$ui.ChkIncludeBenign.IsChecked
+            SkipTextLogs  = -not [bool]$ui.ChkOverviewIncludeText.IsChecked
+            SkipReliability = [bool]$ui.ChkOverviewSkipReliability.IsChecked
+            IncludeBenign = [bool]$ui.ChkOverviewIncludeBenign.IsChecked
+        }
+
+        $namedChannels = @(Get-LVGuiNamedChannel -Text $ui.TxtOverviewChannels.Text)
+        if ($namedChannels.Count -gt 0) {
+            $scanArgs['Channel'] = $namedChannels
+        } elseif ([bool]$ui.ChkOverviewAllChannels.IsChecked) {
+            $scanArgs['AllChannels'] = $true
+        } elseif ([bool]$ui.ChkOverviewDiagnosticChannels.IsChecked) {
+            $scanArgs['DiagnosticChannels'] = $true
+        }
+
+        $databasePath = $ui.TxtOverviewDatabase.Text.Trim()
+        if ($databasePath) {
+            if (-not (Test-Path -LiteralPath $databasePath -PathType Leaf)) {
+                & $setStatus ('Rule database not found: {0}' -f $databasePath)
+                & $showPage 'Overview'
+                return
+            }
+            $scanArgs['DatabasePath'] = $databasePath
         }
 
         try {
@@ -829,7 +883,14 @@ function Show-LogVerdictGui {
     $ui.BtnSaveReport.Add_Click({
         if ($null -eq $state.Result) { return }
         try {
-            $out = Export-LogVerdictReport -Result $state.Result
+            $exportArgs = @{
+                Result          = $state.Result
+                Redact          = [bool]$ui.ChkOverviewRedact.IsChecked
+                IncludeEvidence = [bool]$ui.ChkOverviewEvidence.IsChecked
+            }
+            $outputDir = $ui.TxtOverviewOutputDir.Text.Trim()
+            if ($outputDir) { $exportArgs['OutputDir'] = $outputDir }
+            $out = Export-LogVerdictReport @exportArgs
             $state.ReportDir = $out.OutputDir
             $state.HtmlPath = ($out.Files | Where-Object { $_ -like '*.html' } | Select-Object -First 1)
             $ui.BtnOpenReport.IsEnabled = $true
