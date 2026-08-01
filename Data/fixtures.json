@@ -2107,6 +2107,78 @@
         "Id": 0,
         "SampleMessage": "Kernel minidump bug check 0x0000007E; parameters 0x0000000000000001, 0x0000000000000002, 0x0000000000000003, 0x0000000000000004"
       }
+    },
+    {
+      "ruleId": "LV-0321",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Ntfs/Operational",
+        "Provider": "Microsoft-Windows-Ntfs",
+        "Id": 141,
+        "SampleMessage": "An operation failed because the disk was full. Process: python.exe Volume name: C:"
+      }
+    },
+    {
+      "ruleId": "LV-0322",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Ntfs/Operational",
+        "Provider": "Microsoft-Windows-Ntfs",
+        "Id": 147,
+        "SampleMessage": "An IO took more than 30000 ms to complete for process python.exe on volume C:."
+      }
+    },
+    {
+      "ruleId": "LV-0323",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Kernel-PnP/Configuration",
+        "Provider": "Microsoft-Windows-Kernel-PnP",
+        "Id": 411,
+        "SampleMessage": "Device ROOT\\VMS_VSMP\\0001 had a problem starting. Driver Name: wvms_mp_windows.inf Problem: 0xA Problem Status: 0xC0000001"
+      }
+    },
+    {
+      "ruleId": "LV-0324",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-AppModel-Runtime/Admin",
+        "Provider": "Microsoft-Windows-AppModel-Runtime",
+        "Id": 2,
+        "SampleMessage": "AppModel Runtime: Cannot create the process for package Contoso.Widget because an error was encountered."
+      }
+    },
+    {
+      "ruleId": "LV-0325",
+      "origin": "observed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Resource-Exhaustion-Detector/Operational",
+        "Provider": "Microsoft-Windows-Resource-Exhaustion-Detector",
+        "Id": 1003,
+        "SampleMessage": "The Windows Resource Exhaustion Detector received a notification that the computer is low on virtual memory."
+      }
+    },
+    {
+      "ruleId": "LV-0326",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Kernel-Boot/Operational",
+        "Provider": "Microsoft-Windows-Kernel-Boot",
+        "Id": 292,
+        "SampleMessage": "Failed to update the SBAT value in FW."
+      }
     }
   ]
 }

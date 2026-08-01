@@ -11,6 +11,28 @@ function Get-LVDefaultChannel {
     return @('System', 'Application')
 }
 
+function Get-LVDiagnosticChannel {
+    <#
+        .SYNOPSIS
+        A focused tier between the default scan and a sweep of every populated log.
+
+        .DESCRIPTION
+        These channels carry high-value client troubleshooting evidence but are not
+        included in the traditional System and Application logs. Keep the defaults
+        first so callers get one ordered, duplicate-free list.
+    #>
+    return @(
+        'System'
+        'Application'
+        'Microsoft-Windows-Ntfs/Operational'
+        'Microsoft-Windows-CodeIntegrity/Operational'
+        'Microsoft-Windows-Kernel-PnP/Configuration'
+        'Microsoft-Windows-AppModel-Runtime/Admin'
+        'Microsoft-Windows-Resource-Exhaustion-Detector/Operational'
+        'Microsoft-Windows-Kernel-Boot/Operational'
+    )
+}
+
 function Get-LVErrorKind {
     <#
         .SYNOPSIS

@@ -1317,9 +1317,10 @@
     {
       "id": "LV-0117",
       "status": "stable",
-      "verified": "2026-07-31",
+      "verified": "2026-08-01",
       "match": {
         "source": "event",
+        "channel": "Microsoft-Windows-CodeIntegrity/Operational",
         "provider": "Microsoft-Windows-CodeIntegrity",
         "eventId": 3033
       },
@@ -4334,6 +4335,130 @@
           "uri": "https://github.com/volatilityfoundation/volatility/wiki/Crash-Address-Space",
           "retrieved": "2026-08-01"
         }
+      ]
+    },
+    {
+      "id": "LV-0321",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Ntfs/Operational",
+        "provider": "Microsoft-Windows-Ntfs",
+        "eventId": 141
+      },
+      "verdict": "actionable",
+      "title": "A volume ran out of usable space",
+      "plain": "NTFS could not complete an operation because the named volume had no usable space left for it.",
+      "why": "Writes can fail even when Explorer still shows a small amount free because transactions, the page file, or thin-provisioned backing storage need reserved capacity.",
+      "action": "Read the volume and process from the event, free or extend space there, then repeat the failed operation. On thin-provisioned storage, check the backing pool as well as the Windows volume.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": []
+    },
+    {
+      "id": "LV-0322",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Ntfs/Operational",
+        "provider": "Microsoft-Windows-Ntfs",
+        "eventId": 147
+      },
+      "verdict": "investigate",
+      "title": "A file-system I/O took more than 30 seconds",
+      "plain": "NTFS waited over 30 seconds for one storage operation to finish.",
+      "why": "A single stall can follow sleep, removable storage, or heavy contention. Repeated stalls on the same volume point to storage latency, a saturated path, or a device that is becoming unreliable.",
+      "action": "Read the process and volume from the event. Check nearby disk, StorPort, and NTFS errors, then measure latency and inspect the device and storage path if the warning repeats.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "A sleeping external disk or a one-time storage snapshot can produce an isolated stall without a failing device."
+      ]
+    },
+    {
+      "id": "LV-0323",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Kernel-PnP/Configuration",
+        "provider": "Microsoft-Windows-Kernel-PnP",
+        "eventId": 411
+      },
+      "verdict": "investigate",
+      "title": "A device had a problem starting",
+      "plain": "Windows configured the device but its driver or service did not start successfully.",
+      "why": "The device can be unavailable or left on a fallback driver. The problem and status codes in the event distinguish a missing device from a driver, service, or resource failure.",
+      "action": "Match the device instance and driver name to Device Manager and SetupAPI findings, then update, roll back, or reinstall that device's driver if the failure is current.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "A removed virtual or transient device can leave an old configuration failure after it no longer matters."
+      ]
+    },
+    {
+      "id": "LV-0324",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-AppModel-Runtime/Admin",
+        "provider": "Microsoft-Windows-AppModel-Runtime",
+        "eventId": 2
+      },
+      "verdict": "investigate",
+      "title": "Windows could not start a packaged application",
+      "plain": "The AppModel runtime could not create the process for the package named in the event.",
+      "why": "This is the launch failure itself rather than routine package activity. The package name and error code identify which app failed and whether the problem is recurring.",
+      "action": "Use the package name and error code from the event to identify the app. If users still cannot open it, repair or reset that package before reinstalling it.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "An app removed immediately after the event can make an old launch failure irrelevant."
+      ]
+    },
+    {
+      "id": "LV-0325",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Resource-Exhaustion-Detector/Operational",
+        "provider": "Microsoft-Windows-Resource-Exhaustion-Detector",
+        "eventId": 1003
+      },
+      "verdict": "actionable",
+      "title": "The computer ran low on virtual memory",
+      "plain": "Windows received a low-virtual-memory notification because committed memory was close to the available RAM-plus-page-file limit.",
+      "why": "New allocations can fail at this point, causing applications to hang, close, or behave unpredictably even when some physical RAM still appears free.",
+      "action": "Check the largest memory users near the event time and confirm the page file is enabled and has room to grow. Update or restart a leaking process; add memory only when sustained workload genuinely exceeds capacity.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "A deliberately constrained test or short-lived peak can trigger one notification without an ongoing leak."
+      ]
+    },
+    {
+      "id": "LV-0326",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Kernel-Boot/Operational",
+        "provider": "Microsoft-Windows-Kernel-Boot",
+        "eventId": 292
+      },
+      "verdict": "investigate",
+      "title": "Windows could not update the firmware SBAT value",
+      "plain": "During boot, Windows failed to write the Secure Boot Advanced Targeting revocation value to firmware.",
+      "why": "The update is intended to let Secure Boot reject known-vulnerable boot components. A failure can leave the firmware revocation state behind the state Windows attempted to apply.",
+      "action": "Install current Windows and system-firmware updates, confirm Secure Boot is enabled and healthy, and check whether the event returns on later boots before changing firmware settings.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "A later boot can apply the value successfully, leaving only this historical failure in the log."
       ]
     }
   ],

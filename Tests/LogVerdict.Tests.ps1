@@ -124,6 +124,13 @@ Describe 'Entry script launch behaviour' {
         $scan = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Invoke-LogVerdictScan.ps1') -Raw
         $scan | Should -Match '\$modelRequested\s*=\s*\[bool\]\(\$ExplainUnknown\s+-or\s+\$PromoteToRule\)'
     }
+
+    It 'passes the focused diagnostic-channel tier through the entry script' {
+        $entry = Join-Path (Split-Path $PSScriptRoot -Parent) 'Invoke-LogVerdict.ps1'
+        $text = Get-Content -LiteralPath $entry -Raw
+        $text | Should -Match '\[switch\]\$DiagnosticChannels'
+        $text | Should -Match 'DiagnosticChannels\s*=\s*\$DiagnosticChannels'
+    }
 }
 
 Describe 'Verdict database' {
@@ -304,6 +311,34 @@ Describe 'Channel access classification' {
             # Get-WinEvent -ListLog omits channels it cannot stat, so unelevated
             # Security disappears entirely. It must be unioned back in.
             Get-LVPopulatedChannel | Should -Contain 'Security'
+        }
+    }
+
+    It 'defines the focused diagnostic tier explicitly and in stable order' {
+        InModuleScope LogVerdict {
+            @(Get-LVDiagnosticChannel) | Should -Be @(
+                'System'
+                'Application'
+                'Microsoft-Windows-Ntfs/Operational'
+                'Microsoft-Windows-CodeIntegrity/Operational'
+                'Microsoft-Windows-Kernel-PnP/Configuration'
+                'Microsoft-Windows-AppModel-Runtime/Admin'
+                'Microsoft-Windows-Resource-Exhaustion-Detector/Operational'
+                'Microsoft-Windows-Kernel-Boot/Operational'
+            )
+        }
+    }
+
+    It 'ships a channel-specific rule for every focused diagnostic channel beyond the defaults' {
+        InModuleScope LogVerdict {
+            $db = Get-LogVerdictDatabase
+            foreach ($channel in @((Get-LVDiagnosticChannel) | Select-Object -Skip 2)) {
+                @($db.rules | Where-Object {
+                    (Test-LVRuleActive -Rule $_) -and
+                    $_.match.source -eq 'event' -and
+                    $_.match.channel -eq $channel
+                }).Count | Should -BeGreaterThan 0 -Because "$channel must add signal, not only unknowns"
+            }
         }
     }
 }

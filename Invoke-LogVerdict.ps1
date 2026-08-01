@@ -14,6 +14,10 @@
     .PARAMETER AllChannels
     Sweep every populated event channel instead of just System and Application.
 
+    .PARAMETER DiagnosticChannels
+    Scan System and Application plus six focused operational channels for storage,
+    code integrity, device setup, packaged apps, memory pressure, and boot security.
+
     .PARAMETER IncludeBenign
     Show signatures the database rules as harmless. Off by default.
 
@@ -43,6 +47,9 @@
     .EXAMPLE
     .\Invoke-LogVerdict.ps1 -DaysBack 7 -AllChannels
 
+    .EXAMPLE
+    .\Invoke-LogVerdict.ps1 -DaysBack 7 -DiagnosticChannels
+
     .NOTES
     Runs without admin. Elevation unlocks the Security channel and some text logs;
     a non-elevated run states exactly what it could not read.
@@ -55,6 +62,7 @@ param(
     [int]$DaysBack = 30,
     [string[]]$Channel,
     [switch]$AllChannels,
+    [switch]$DiagnosticChannels,
     [switch]$SkipTextLogs,
     [switch]$SkipReliability,
     [switch]$IncludeBenign,
@@ -115,6 +123,7 @@ try {
         SkipTextLogs    = $SkipTextLogs
         SkipReliability = $SkipReliability
         AllChannels     = $AllChannels
+        DiagnosticChannels = $DiagnosticChannels
         ExplainUnknown  = $ExplainUnknown
         OllamaModel     = $OllamaModel
         OllamaEndpoint  = $OllamaEndpoint

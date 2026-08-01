@@ -25,6 +25,7 @@ LogVerdict is the missing middle: local, whole-machine, multi-source, deduplicat
 | Source | Why it matters |
 |---|---|
 | System / Application event channels | The bulk of client troubleshooting signal |
+| Focused operational channels (`-DiagnosticChannels`) | Storage, code integrity, device setup, packaged apps, memory pressure, and boot security without a full sweep |
 | Any other populated channel (`-AllChannels`) | ~128 hold records on a typical machine |
 | `CBS.log` | Component store damage - the reason updates fail and SFC cannot repair |
 | `dism.log` | Image servicing failures |
@@ -76,6 +77,7 @@ LogVerdict-GUI.exe -DaysBack 7        pre-fill a narrower window
 
 ```
 LogVerdict.exe                                  scan the last 30 days
+LogVerdict.exe -DiagnosticChannels              add six focused operational channels
 LogVerdict.exe -DaysBack 7 -AllChannels         narrower window, every populated channel
 LogVerdict.exe -IncludeBenign                   show the signatures ruled harmless too
 LogVerdict.exe -NoReport                        console only, write nothing
@@ -118,6 +120,9 @@ powershell -ExecutionPolicy Bypass -File .\Invoke-LogVerdict.ps1
 # Narrower window, every populated channel
 .\Invoke-LogVerdict.ps1 -DaysBack 7 -AllChannels
 
+# Broader signal without sweeping every populated channel
+.\Invoke-LogVerdict.ps1 -DiagnosticChannels
+
 # Show the signatures ruled harmless too
 .\Invoke-LogVerdict.ps1 -IncludeBenign
 
@@ -147,6 +152,7 @@ As a module:
 ```powershell
 Import-Module .\LogVerdict.psd1
 $r = Invoke-LogVerdictScan -DaysBack 30
+$focused = Invoke-LogVerdictScan -DaysBack 30 -DiagnosticChannels
 $drafted = Invoke-LogVerdictScan -DaysBack 30 -ExplainUnknown -OllamaModel llama3.2
 $r.Findings | Where-Object Verdict -eq 'actionable'
 $r | Export-LogVerdictReport -OutputDir C:\Temp\lv

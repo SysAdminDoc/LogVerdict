@@ -18,6 +18,11 @@ function Invoke-LogVerdictScan {
         Sweep every channel on the machine that holds records. Much slower and much
         noisier; use when the default two come back empty but something is clearly wrong.
 
+        .PARAMETER DiagnosticChannels
+        Read System and Application plus six focused operational channels for storage,
+        code integrity, device setup, packaged apps, memory pressure, and boot security.
+        This is broader than the default scan without the noise and delay of AllChannels.
+
         .PARAMETER SkipTextLogs
         Skip CBS, DISM, SetupAPI and the other plain-text logs.
 
@@ -53,12 +58,16 @@ function Invoke-LogVerdictScan {
 
         .EXAMPLE
         Invoke-LogVerdictScan -AllChannels -IncludeBenign
+
+        .EXAMPLE
+        Invoke-LogVerdictScan -DiagnosticChannels
     #>
     [CmdletBinding()]
     param(
         [int]$DaysBack = 30,
         [string[]]$Channel,
         [switch]$AllChannels,
+        [switch]$DiagnosticChannels,
         [switch]$SkipTextLogs,
         [switch]$SkipReliability,
         [switch]$IncludeBenign,
@@ -105,6 +114,8 @@ function Invoke-LogVerdictScan {
         Write-LVLog -Level ok -Message ('{0} channel(s) hold records' -f $channels.Count)
     } elseif ($Channel) {
         $channels = $Channel
+    } elseif ($DiagnosticChannels) {
+        $channels = Get-LVDiagnosticChannel
     } else {
         $channels = Get-LVDefaultChannel
     }
