@@ -8,11 +8,13 @@ function Show-LogVerdictGui {
         scan runs unchanged on a background runspace and this window renders what comes
         back, so the GUI and the console tool can never disagree about a verdict.
 
-        Read-only. Nothing on the machine is modified unless you press Save report,
-        which writes to a folder on the Desktop.
+        Diagnostic sources are read-only. The window remembers its scan options and
+        size under the current user's local app-data folder. Save report writes to a
+        folder on the Desktop only when asked.
 
         .PARAMETER DaysBack
-        Pre-fills the look-back window. Default 30.
+        Explicitly pre-fills the look-back window. Without it, the last saved value is
+        used, falling back to 30 on a first launch.
 
         .PARAMETER AutoScan
         Start scanning as soon as the window opens instead of waiting for Run scan.
@@ -45,7 +47,20 @@ function Show-LogVerdictGui {
 
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
 
+    $savedSettings = Get-LVGuiSetting
+    $initialDays = $DaysBack
+    if (-not $PSBoundParameters.ContainsKey('DaysBack') -and $savedSettings) {
+        $initialDays = $savedSettings.DaysBack
+    }
+    $initialAllChannels = $(if ($savedSettings) { $savedSettings.AllChannels } else { $false })
+    $initialSkipText = $(if ($savedSettings) { $savedSettings.SkipTextLogs } else { $false })
+    $initialIncludeBenign = $(if ($savedSettings) { $savedSettings.IncludeBenign } else { $false })
+
     $window = [Windows.Markup.XamlReader]::Parse((Get-LVGuiXaml))
+    if ($savedSettings) {
+        $window.Width = $savedSettings.WindowWidth
+        $window.Height = $savedSettings.WindowHeight
+    }
 
     # Resolve every named element once. A missing name means the markup and this file
     # have drifted apart, and saying so here beats a null reference three interactions
@@ -541,9 +556,15 @@ function Show-LogVerdictGui {
 
     $ui.TxtVersion.Text = 'v{0}' -f $script:LVVersion
     $ui.TxtMachine.Text = $env:COMPUTERNAME
-    $ui.TxtDays.Text = [string]$DaysBack
+    $ui.TxtDays.Text = [string]$initialDays
+    $ui.ChkAllChannels.IsChecked = $initialAllChannels
+    $ui.ChkSkipText.IsChecked = $initialSkipText
+    $ui.ChkIncludeBenign.IsChecked = $initialIncludeBenign
     $ui.TxtSideMachine.Text = $env:COMPUTERNAME
-    $ui.TxtOverviewDays.Text = [string]$DaysBack
+    $ui.TxtOverviewDays.Text = [string]$initialDays
+    $ui.ChkOverviewAllChannels.IsChecked = $initialAllChannels
+    $ui.ChkOverviewIncludeText.IsChecked = -not $initialSkipText
+    $ui.ChkOverviewIncludeBenign.IsChecked = $initialIncludeBenign
     $ui.BtnFindingsSave.IsEnabled = $false
     $ui.BtnFindingsOpen.IsEnabled = $false
     $ui.BtnActivitySave.IsEnabled = $false
@@ -900,6 +921,22 @@ function Show-LogVerdictGui {
     $window.Add_Closing({
         $timer.Stop()
         [System.Windows.SystemParameters]::remove_StaticPropertyChanged($systemThemeChanged)
+
+        $savedDays = 0
+        if (-not [int]::TryParse($ui.TxtOverviewDays.Text.Trim(), [ref]$savedDays) -or
+            $savedDays -lt 1 -or $savedDays -gt 3650) {
+            $savedDays = $initialDays
+        }
+        $bounds = $window.RestoreBounds
+        $null = Save-LVGuiSetting -Settings ([pscustomobject]@{
+            DaysBack      = $savedDays
+            AllChannels   = [bool]$ui.ChkOverviewAllChannels.IsChecked
+            SkipTextLogs  = -not [bool]$ui.ChkOverviewIncludeText.IsChecked
+            IncludeBenign = [bool]$ui.ChkOverviewIncludeBenign.IsChecked
+            WindowWidth   = $bounds.Width
+            WindowHeight  = $bounds.Height
+        })
+
         if ($state.Job) {
             Stop-LVScanJob -Job $state.Job -Confirm:$false
             $state.Job = $null

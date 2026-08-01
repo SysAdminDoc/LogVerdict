@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **The window remembers its last scan setup and size.** Look-back, all-channel mode, setup-log inclusion, harmless-finding visibility, width, and height are atomically stored under `%LOCALAPPDATA%\LogVerdict`. Missing, malformed, future-version, invalid, or unreadable settings are ignored; an explicit `-DaysBack` still wins over the saved value.
 - **The self-contained HTML report is filterable offline.** Verdict toggles and a text search narrow the finding cards without any network request or external asset. Progressive enhancement keeps every finding visible and explains the limitation when scripting is disabled, while a live result count and keyboard-labelled controls keep the interaction accessible.
 - **HTML reports now print as light documents.** The print stylesheet removes the dark page background and interactive controls, expands clipped evidence, and keeps finding, warning, and summary cards together across page boundaries for browser-to-PDF and paper handoffs.
 - **A focused diagnostic-channel tier.** `-DiagnosticChannels` keeps System and Application, then adds the populated NTFS, Code Integrity, Kernel PnP configuration, AppModel Runtime, Resource Exhaustion, and Kernel Boot channels. Each added channel has a narrow curated rule. On the development machine's 30-day warning/error corpus the tier added 62 records across five signatures, all five ruled and none unknown.

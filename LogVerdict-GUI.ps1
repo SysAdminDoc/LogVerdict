@@ -6,10 +6,12 @@
     Opens the LogVerdict front end. Imports the module beside it, then hands over to
     Show-LogVerdictGui. The scan itself is the same one Invoke-LogVerdict.ps1 runs.
 
-    Read-only: nothing on the machine is modified unless you press Save report.
+    Diagnostic sources are read-only. The window remembers its scan options and size
+    under the current user's local app-data folder; Save report writes only when asked.
 
     .PARAMETER DaysBack
-    Pre-fills the look-back window. Default 30.
+    Explicitly pre-fills the look-back window. Without it, the last saved value is
+    used, falling back to 30 on a first launch.
 
     .PARAMETER AutoScan
     Start scanning as soon as the window appears.
@@ -40,9 +42,9 @@ $ErrorActionPreference = 'Stop'
 if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     $relaunch = @(
         '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass',
-        '-File', ('"{0}"' -f $PSCommandPath),
-        '-DaysBack', $DaysBack
+        '-File', ('"{0}"' -f $PSCommandPath)
     )
+    if ($PSBoundParameters.ContainsKey('DaysBack')) { $relaunch += @('-DaysBack', $DaysBack) }
     if ($AutoScan) { $relaunch += '-AutoScan' }
     Start-Process -FilePath 'powershell.exe' -ArgumentList $relaunch
     exit 0
@@ -57,7 +59,9 @@ if (-not (Test-Path -LiteralPath $modulePath)) {
 Import-Module $modulePath -Force -ErrorAction Stop
 
 try {
-    Show-LogVerdictGui -DaysBack $DaysBack -AutoScan:$AutoScan
+    $guiArgs = @{ AutoScan = $AutoScan }
+    if ($PSBoundParameters.ContainsKey('DaysBack')) { $guiArgs['DaysBack'] = $DaysBack }
+    Show-LogVerdictGui @guiArgs
     exit 0
 } catch {
     # A GUI that dies before it can paint has nowhere to show an error, so the detail

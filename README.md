@@ -41,7 +41,7 @@ LogVerdict is the missing middle: local, whole-machine, multi-source, deduplicat
 Collect  ->  Reduce  ->  Resolve  ->  Correlate  ->  Report
 ```
 
-1. **Collect** - read-only. Nothing on the machine is modified beyond the report folder.
+1. **Collect** - diagnostic sources are read-only. The window stores only its small preferences file under `%LOCALAPPDATA%\LogVerdict`; report files are written only when requested.
 2. **Reduce** - event records group by `Provider + EventID`. Text logs take two passes. First, typed slots mask timestamps, paths, SIDs, IPv4/IPv6 addresses, MAC addresses, URLs, FQDNs, UPNs, package identities, versions, GUIDs, hex and numbers. Then numeric, error-code and version slots with at most three distinct values in their template family are promoted back into the signature: two recurring HRESULTs remain two diagnoses, while a thousand transient operation ids remain one family. Identity and volatile slots are never promoted. Original token count participates in the hash, and reports show the reduction ratio before and after promotion.
 3. **Resolve** - each signature is matched against [`Data/verdicts.json`](Data/verdicts.json), a curated database of human-written rulings. Most-specific rule wins. Some rules escalate by rate: corrected hardware errors are noise at a trickle and a failing component at volume.
 4. **Correlate** - signatures that occurred within minutes of each other are reported together, above the flat list, with the window of time to look at. Corrected hardware errors and an unexpected restart are each easy to dismiss alone; together they name a cause. Correlations are curated, never inferred - on one machine the loudest signature co-occurs with everything, so a discovered correlation is mostly an artefact of volume.
@@ -61,6 +61,7 @@ Collect  ->  Reduce  ->  Resolve  ->  Correlate  ->  Report
 - **Activity** shows the live collect, reduce, correlate, resolve and report stages, the full run transcript and a compact run summary.
 - **Save report** writes the same text, JSON and HTML bundle the console tool produces.
 - The scan runs on a background thread, so the window stays responsive and can be cancelled mid-run.
+- Look-back, source switches, harmless-finding visibility, and window size are remembered per user in `%LOCALAPPDATA%\LogVerdict\settings.json`. A missing, corrupt, future, or unreadable settings file falls back to safe defaults.
 - Windows High Contrast changes the full interface to the active system colours, including verdict labels and keyboard focus, and switching it off restores the normal dark theme without restarting.
 
 Elevation is optional and never forced. Without it the Security channel and some setup logs are unreadable; the window says so in a banner and offers to restart elevated.
@@ -68,7 +69,7 @@ Elevation is optional and never forced. Without it the Security channel and some
 ```
 LogVerdict-GUI.exe                    open the window
 LogVerdict-GUI.exe -AutoScan          scan immediately on open
-LogVerdict-GUI.exe -DaysBack 7        pre-fill a narrower window
+LogVerdict-GUI.exe -DaysBack 7        explicitly override the saved look-back
 ```
 
 ### The executable

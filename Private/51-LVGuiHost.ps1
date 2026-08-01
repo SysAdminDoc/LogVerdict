@@ -17,6 +17,128 @@ $script:LVVerdictPalette = @{
 # Chip order in the sidebar, worst first, matching the report's ordering.
 $script:LVVerdictDisplayOrder = @('critical', 'actionable', 'investigate', 'unknown', 'informational', 'benign')
 
+function Get-LVGuiSettingsPath {
+    <#
+        .SYNOPSIS
+        Per-user location for GUI preferences.
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$LocalAppData = $env:LOCALAPPDATA)
+
+    if ([string]::IsNullOrWhiteSpace($LocalAppData)) { return $null }
+    return Join-Path (Join-Path $LocalAppData 'LogVerdict') 'settings.json'
+}
+
+function Get-LVGuiSetting {
+    <#
+        .SYNOPSIS
+        Read and validate GUI preferences, returning null for any unusable file.
+
+        .DESCRIPTION
+        Settings are convenience, never a launch dependency. A partial, future,
+        malformed, or unreadable file is ignored as a unit so no unvalidated value
+        reaches WPF.
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$Path = (Get-LVGuiSettingsPath))
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $null
+    }
+
+    try {
+        $data = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($data.schemaVersion -ne 1) { return $null }
+
+        $days = 0
+        if (-not [int]::TryParse([string]$data.daysBack, [ref]$days) -or $days -lt 1 -or $days -gt 3650) {
+            return $null
+        }
+        foreach ($name in @('allChannels', 'skipTextLogs', 'includeBenign')) {
+            if ($null -eq $data.PSObject.Properties[$name] -or $data.$name -isnot [bool]) { return $null }
+        }
+        foreach ($name in @('windowWidth', 'windowHeight')) {
+            if ($null -eq $data.PSObject.Properties[$name] -or $data.$name -is [string]) { return $null }
+        }
+
+        $width = [double]$data.windowWidth
+        $height = [double]$data.windowHeight
+        if ([double]::IsNaN($width) -or [double]::IsInfinity($width) -or $width -lt 1120 -or $width -gt 10000) {
+            return $null
+        }
+        if ([double]::IsNaN($height) -or [double]::IsInfinity($height) -or $height -lt 650 -or $height -gt 10000) {
+            return $null
+        }
+
+        return [pscustomobject]@{
+            DaysBack      = $days
+            AllChannels   = [bool]$data.allChannels
+            SkipTextLogs  = [bool]$data.skipTextLogs
+            IncludeBenign = [bool]$data.includeBenign
+            WindowWidth   = $width
+            WindowHeight  = $height
+        }
+    } catch {
+        Write-Verbose ("Ignoring unreadable GUI settings at {0}: {1}" -f $Path, $_.Exception.Message)
+        return $null
+    }
+}
+
+function Save-LVGuiSetting {
+    <#
+        .SYNOPSIS
+        Atomically save normalized per-user GUI preferences.
+
+        .OUTPUTS
+        Boolean. False means persistence was unavailable; the GUI must still close.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Settings,
+        [AllowEmptyString()][string]$Path = (Get-LVGuiSettingsPath)
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+
+    $days = 0
+    if (-not [int]::TryParse([string]$Settings.DaysBack, [ref]$days) -or $days -lt 1 -or $days -gt 3650) {
+        $days = 30
+    }
+    $width = [Math]::Max(1120, [Math]::Min(10000, [double]$Settings.WindowWidth))
+    $height = [Math]::Max(650, [Math]::Min(10000, [double]$Settings.WindowHeight))
+    $document = [ordered]@{
+        schemaVersion = 1
+        daysBack      = $days
+        allChannels   = [bool]$Settings.AllChannels
+        skipTextLogs  = [bool]$Settings.SkipTextLogs
+        includeBenign = [bool]$Settings.IncludeBenign
+        windowWidth   = [Math]::Round($width, 0)
+        windowHeight  = [Math]::Round($height, 0)
+    }
+
+    $directory = Split-Path -Parent $Path
+    $temp = '{0}.{1}.tmp' -f $Path, ([guid]::NewGuid().ToString('N'))
+    $backup = '{0}.{1}.bak' -f $Path, ([guid]::NewGuid().ToString('N'))
+    try {
+        if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+            $null = New-Item -ItemType Directory -Path $directory -Force
+        }
+        Write-LVTextFile -Path $temp -Content (($document | ConvertTo-Json) + [Environment]::NewLine)
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            [IO.File]::Replace($temp, $Path, $backup)
+        } else {
+            [IO.File]::Move($temp, $Path)
+        }
+        return $true
+    } catch {
+        Write-Verbose ("Could not save GUI settings at {0}: {1}" -f $Path, $_.Exception.Message)
+        return $false
+    } finally {
+        if (Test-Path -LiteralPath $temp -PathType Leaf) { Remove-Item -LiteralPath $temp -Force }
+        if (Test-Path -LiteralPath $backup -PathType Leaf) { Remove-Item -LiteralPath $backup -Force }
+    }
+}
+
 # Every brush the XAML treats as semantic rather than decorative. DynamicResource
 # references point at these keys, so replacing the resource objects repaints the
 # existing visual tree without rebuilding the window.

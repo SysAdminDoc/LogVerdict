@@ -1546,6 +1546,81 @@ Describe 'GUI markup' {
     }
 }
 
+Describe 'GUI settings persistence' {
+    It 'stores settings under the current user local app-data folder' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            Get-LVGuiSettingsPath -LocalAppData $Root |
+                Should -BeExactly (Join-Path (Join-Path $Root 'LogVerdict') 'settings.json')
+        }
+    }
+
+    It 'round-trips scan options and window size without a UTF-8 BOM' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $path = Join-Path $Root 'prefs/settings.json'
+            $value = [pscustomobject]@{
+                DaysBack=14; AllChannels=$true; SkipTextLogs=$true; IncludeBenign=$true
+                WindowWidth=1500.4; WindowHeight=820.4
+            }
+            Save-LVGuiSetting -Settings $value -Path $path | Should -BeTrue
+
+            $read = Get-LVGuiSetting -Path $path
+            $read.DaysBack | Should -Be 14
+            $read.AllChannels | Should -BeTrue
+            $read.SkipTextLogs | Should -BeTrue
+            $read.IncludeBenign | Should -BeTrue
+            $read.WindowWidth | Should -Be 1500
+            $read.WindowHeight | Should -Be 820
+
+            $bytes = [IO.File]::ReadAllBytes($path)
+            ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) |
+                Should -BeFalse
+        }
+    }
+
+    It 'ignores malformed, future, and invalid settings instead of failing launch' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $path = Join-Path $Root 'bad-settings.json'
+            foreach ($content in @(
+                '{ definitely not json',
+                '{"schemaVersion":2,"daysBack":30,"allChannels":false,"skipTextLogs":false,"includeBenign":false,"windowWidth":1440,"windowHeight":800}',
+                '{"schemaVersion":1,"daysBack":0,"allChannels":"false","skipTextLogs":false,"includeBenign":false,"windowWidth":100,"windowHeight":100}'
+            )) {
+                Set-Content -LiteralPath $path -Value $content -Encoding UTF8
+                { Get-LVGuiSetting -Path $path } | Should -Not -Throw
+                $null -eq (Get-LVGuiSetting -Path $path) | Should -BeTrue
+            }
+        }
+    }
+
+    It 'keeps an unwritable settings destination non-fatal' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $value = [pscustomobject]@{
+                DaysBack=30; AllChannels=$false; SkipTextLogs=$false; IncludeBenign=$false
+                WindowWidth=1440; WindowHeight=800
+            }
+            Save-LVGuiSetting -Settings $value -Path $Root | Should -BeFalse
+        }
+    }
+
+    It 'lets an explicit look-back override persisted state and saves restore bounds on close' {
+        $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Show-LogVerdictGui.ps1'
+        $text = Get-Content -LiteralPath $path -Raw
+        $text | Should -Match "PSBoundParameters\.ContainsKey\('DaysBack'\)"
+        $text | Should -Match 'Get-LVGuiSetting'
+        $text | Should -Match 'Save-LVGuiSetting'
+        $text | Should -Match '\$window\.RestoreBounds'
+
+        $entry = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'LogVerdict-GUI.ps1') -Raw
+        $entry | Should -Match "PSBoundParameters\.ContainsKey\('DaysBack'\)"
+        $entry | Should -Match '\$guiArgs\[''DaysBack''\]\s*=\s*\$DaysBack'
+        $entry | Should -Not -Match 'Show-LogVerdictGui\s+-DaysBack\s+\$DaysBack'
+    }
+}
+
 Describe 'GUI row projection' {
     It 'dates an undated signature to DateTime.MinValue rather than to now' {
         # Undated text-log lines must sort to the bottom of a last-seen sort, not to
