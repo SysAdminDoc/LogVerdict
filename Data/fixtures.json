@@ -2083,6 +2083,30 @@
         "Id": 5013,
         "SampleMessage": "Tamper protection blocked a Defender change event recorded by Microsoft-Windows-Windows Defender."
       }
+    },
+    {
+      "ruleId": "LV-0319",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "textlog",
+        "Channel": "WER",
+        "Provider": "Windows Error Reporting archive",
+        "Id": 0,
+        "SampleMessage": "Report.wer application crash: application=widget.exe; fault module=widget-core.dll; exception=c0000005"
+      }
+    },
+    {
+      "ruleId": "LV-0320",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "textlog",
+        "Channel": "Minidump",
+        "Provider": "Kernel dump header",
+        "Id": 0,
+        "SampleMessage": "Kernel minidump bug check 0x0000007E; parameters 0x0000000000000001, 0x0000000000000002, 0x0000000000000003, 0x0000000000000004"
+      }
     }
   ]
 }

@@ -622,6 +622,124 @@ Describe 'Text-log collection against fixtures' {
     }
 }
 
+Describe 'Crash artifact header decoding' {
+    BeforeAll {
+        $script:CrashFixtureDir = Join-Path $TestDrive 'crash-artifacts'
+        $script:WerFixtureRoot = Join-Path $script:CrashFixtureDir 'ReportArchive'
+        $script:WerFixtureDir = Join-Path $script:WerFixtureRoot 'AppCrash_widget.exe_test'
+        New-Item -ItemType Directory -Path $script:WerFixtureDir -Force | Out-Null
+        $script:WerFixturePath = Join-Path $script:WerFixtureDir 'Report.wer'
+        @(
+            'Version=1'
+            'EventType=APPCRASH'
+            'AppName=C:\Program Files\Widget\Widget.exe'
+            'Sig[0].Name=Application Name'
+            'Sig[0].Value=Widget.exe'
+            'Sig[1].Name=Application Version'
+            'Sig[1].Value=4.2.1.0'
+            'Sig[2].Name=Exception Code'
+            'Sig[2].Value=c0000005'
+            # Deliberately not P3: selection must follow the label, because indexes
+            # differ between WER event types.
+            'Sig[7].Name=Fault Module Name'
+            'Sig[7].Value=C:\Program Files\Widget\widget-core.dll'
+        ) | Set-Content -LiteralPath $script:WerFixturePath -Encoding Unicode
+
+        $script:DumpFixturePath = Join-Path $script:CrashFixtureDir 'kernel-x64.dmp'
+        $bytes = New-Object byte[] 0x60
+        [Text.Encoding]::ASCII.GetBytes('PAGEDU64').CopyTo($bytes, 0)
+        [BitConverter]::GetBytes([uint32]0x0000007E).CopyTo($bytes, 0x38)
+        [BitConverter]::GetBytes([uint64]1).CopyTo($bytes, 0x40)
+        [BitConverter]::GetBytes([uint64]2).CopyTo($bytes, 0x48)
+        [BitConverter]::GetBytes([uint64]3).CopyTo($bytes, 0x50)
+        [BitConverter]::GetBytes([uint64]4).CopyTo($bytes, 0x58)
+        [IO.File]::WriteAllBytes($script:DumpFixturePath, $bytes)
+
+        $script:Dump32FixturePath = Join-Path $script:CrashFixtureDir 'kernel-x86.dmp'
+        $bytes32 = New-Object byte[] 0x3c
+        [Text.Encoding]::ASCII.GetBytes('PAGEDUMP').CopyTo($bytes32, 0)
+        [BitConverter]::GetBytes([uint32]0x0000009F).CopyTo($bytes32, 0x28)
+        [BitConverter]::GetBytes([uint32]10).CopyTo($bytes32, 0x2c)
+        [BitConverter]::GetBytes([uint32]11).CopyTo($bytes32, 0x30)
+        [BitConverter]::GetBytes([uint32]12).CopyTo($bytes32, 0x34)
+        [BitConverter]::GetBytes([uint32]13).CopyTo($bytes32, 0x38)
+        [IO.File]::WriteAllBytes($script:Dump32FixturePath, $bytes32)
+
+        $script:BadDumpFixturePath = Join-Path $script:CrashFixtureDir 'not-a-kernel-dump.dmp'
+        [IO.File]::WriteAllBytes($script:BadDumpFixturePath, [Text.Encoding]::ASCII.GetBytes('MDMPbad!'))
+    }
+
+    It 'reads WER parameters by label and keys a signature on app plus faulting module' {
+        InModuleScope LogVerdict -Parameters @{ root = $script:WerFixtureRoot } {
+            param($root)
+            $artifacts = @(Get-LVCrashArtifact -DaysBack 1 -DumpPath @() -WerRoot $root)
+            $artifacts.Count | Should -Be 1
+            $artifact = $artifacts[0]
+            $artifact.Decoded | Should -BeTrue
+            $artifact.App | Should -BeExactly 'Widget.exe'
+            $artifact.Module | Should -BeExactly 'widget-core.dll'
+            $artifact.ExceptionCode | Should -BeExactly 'c0000005'
+
+            $record = ConvertTo-LVCrashRecord -Artifact $artifact
+            $signature = @(Group-LVSignature -Record @($record) -WindowDays 1)[0]
+            $signature.Key | Should -BeExactly 'WER/widget.exe/widget-core.dll'
+            $signature.SampleMessage | Should -Match 'application version=4\.2\.1\.0'
+        }
+    }
+
+    It 'reads the x64 stop code and all four fixed-width parameters' {
+        InModuleScope LogVerdict -Parameters @{ path = $script:DumpFixturePath } {
+            param($path)
+            $header = Get-LVKernelDumpHeader -Path $path
+            $header.Decoded | Should -BeTrue
+            $header.Architecture | Should -BeExactly 'x64'
+            $header.BugCheckCode | Should -BeExactly '0x0000007E'
+            $header.BugCheckParameters | Should -Be @(
+                '0x0000000000000001', '0x0000000000000002',
+                '0x0000000000000003', '0x0000000000000004'
+            )
+
+            $artifact = [pscustomobject]@{
+                Kind = 'minidump'; Decoded = $true; When = (Get-Date)
+                BugCheckCode = $header.BugCheckCode; BugCheckParameters = $header.BugCheckParameters
+            }
+            $record = ConvertTo-LVCrashRecord -Artifact $artifact
+            $record.SignatureKey | Should -BeExactly 'Minidump/0x0000007e'
+        }
+    }
+
+    It 'reads the x86 stop code and 32-bit parameters at their own offsets' {
+        InModuleScope LogVerdict -Parameters @{ path = $script:Dump32FixturePath } {
+            param($path)
+            $header = Get-LVKernelDumpHeader -Path $path
+            $header.Decoded | Should -BeTrue
+            $header.Architecture | Should -BeExactly 'x86'
+            $header.BugCheckCode | Should -BeExactly '0x0000009F'
+            $header.BugCheckParameters | Should -Be @(
+                '0x0000000A', '0x0000000B', '0x0000000C', '0x0000000D'
+            )
+        }
+    }
+
+    It 'leaves an unrecognized or truncated dump undecoded instead of guessing' {
+        InModuleScope LogVerdict -Parameters @{ path = $script:BadDumpFixturePath } {
+            param($path)
+            $header = Get-LVKernelDumpHeader -Path $path
+            $header.Decoded | Should -BeFalse
+            $header.BugCheckCode | Should -BeNullOrEmpty
+            $header.Reason | Should -Match 'Unrecognized dump signature'
+            ConvertTo-LVCrashRecord -Artifact ([pscustomobject]@{ Kind='minidump'; Decoded=$false }) |
+                Should -BeNullOrEmpty
+        }
+    }
+
+    It 'reports an absent crash source as skipped rather than as health' {
+        $scan = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $scan | Should -Match 'source was absent or empty, not a clean-health signal'
+        $scan | Should -Match 'were not checked'
+    }
+}
+
 Describe 'Event collection failure handling' {
     It 'treats an empty channel as empty, not as an error' {
         InModuleScope LogVerdict {
@@ -2091,10 +2209,17 @@ Describe 'Report redaction' {
         InModuleScope LogVerdict {
             $result = [pscustomobject]@{
                 MachineName = 'HOST-9'; Findings = @(); CoverageNotes = @()
-                CrashArtifacts = @([pscustomobject]@{ Kind = 'wer'; Path = 'C:\Users\bob\AppData\Local\CrashDumps'; App = 'bob-tool.exe' })
+                CrashArtifacts = @([pscustomobject]@{
+                    Kind = 'wer'; Path = 'C:\Users\bob\AppData\Local\CrashDumps'
+                    ReportPath = 'C:\Users\bob\AppData\Local\CrashDumps\Report.wer'
+                    App = 'HOST-9-tool.exe'; Module = 'HOST-9-helper.dll'
+                    DecodeStatus = 'Access denied at C:\Users\bob\AppData\Local\CrashDumps\Report.wer'
+                })
             }
             $redacted = ConvertTo-LVRedactedResult -Result $result
-            $redacted.CrashArtifacts[0].Path | Should -Not -Match '\\bob\\'
+            foreach ($name in @('Path', 'ReportPath', 'App', 'Module', 'DecodeStatus')) {
+                $redacted.CrashArtifacts[0].$name | Should -Not -Match 'bob|HOST-9'
+            }
         }
     }
 
@@ -2460,6 +2585,14 @@ Describe 'Rule regression fixtures' {
         InModuleScope LogVerdict {
             $set = Get-LVFixtureSet
             foreach ($f in @($set.fixtures | Where-Object { $_.signature.Source -eq 'textlog' })) {
+                if ($f.signature.Channel -eq 'WER') {
+                    $f.signature.SampleMessage | Should -Match '^Report\.wer application crash:' -Because "$($f.ruleId)'s sample must be a line the crash collector produces"
+                    continue
+                }
+                if ($f.signature.Channel -eq 'Minidump') {
+                    $f.signature.SampleMessage | Should -Match '^Kernel minidump bug check 0x[0-9A-Fa-f]{8}; parameters ' -Because "$($f.ruleId)'s sample must be a line the crash collector produces"
+                    continue
+                }
                 $target = $script:LVTextLogTarget | Where-Object { $_.Name -eq $f.signature.Channel }
                 $target | Should -Not -BeNullOrEmpty -Because "$($f.ruleId) names channel $($f.signature.Channel)"
                 $f.signature.SampleMessage | Should -Match $target.Pattern -Because "$($f.ruleId)'s sample must be a line the collector picks up"

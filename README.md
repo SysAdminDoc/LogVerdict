@@ -31,7 +31,7 @@ LogVerdict is the missing middle: local, whole-machine, multi-source, deduplicat
 | `setupapi.dev.log` | Every driver install and device enumeration |
 | `NetSetup.LOG` | Domain join and rename - survives in-place upgrades that wipe the event channels |
 | `Panther\setupact.log`, `MoSetup\BlueBox.log` | Setup, upgrade and compatibility blocks |
-| `Minidump\`, WER `ReportArchive` | Crash evidence, inventoried (not decoded) |
+| `Minidump\`, WER `ReportArchive` | `Report.wer` app/module/exception metadata and kernel dump stop-code headers; artifacts that cannot be read remain inventoried |
 | Reliability Monitor (`Win32_ReliabilityRecords`) | Microsoft's own curated view of what failed, plus the software install/removal history an error-only sweep never sees |
 
 ## How it works
@@ -207,7 +207,7 @@ Invoke-Pester -Path .\Tests
 ## Honest limitations
 
 - **Coverage is the roadmap.** 171 rules ship. A first scan will still report `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
-- **Crash dumps are inventoried, not decoded.** Reading a minidump needs a debugger and symbols.
+- **Crash-stack analysis is bounded.** LogVerdict reads the bug-check code and four parameters from supported kernel dump headers, but naming the responsible driver still needs a debugger and symbols. Unsupported, truncated or access-controlled dumps remain inventoried with the reason they were not decoded.
 - **A clean result is not proof of health.** An in-place upgrade or a cleared log resets the event channels, so the report states each channel's oldest surviving record and warns when that horizon falls inside the requested window.
 - Offline review is bounded by what the bundle captured. Exported event channels are re-read in full, while text logs and Reliability Monitor are re-evaluated from the signature summaries in the source report rather than copied wholesale.
 

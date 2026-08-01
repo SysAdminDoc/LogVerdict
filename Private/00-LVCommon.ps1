@@ -353,10 +353,14 @@ function ConvertTo-LVRedactedResult {
         foreach ($prop in $a.PSObject.Properties) {
             $c | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
         }
-        # A WER report directory is named after the crashing app and sits under a
-        # profile path, so both fields here name the machine and its user.
-        if ($c.PSObject.Properties['Path']) { $c.Path = ConvertTo-LVRedactedText -Text ([string]$c.Path) -MachineName $machine }
-        if ($c.PSObject.Properties['App'])  { $c.App  = ConvertTo-LVRedactedText -Text ([string]$c.App)  -MachineName $machine }
+        # WER paths and decode errors can carry profile paths; application and module
+        # leaves can also embed an account name. Redact every textual crash field that
+        # can originate in a path or in the report rather than only the primary path.
+        foreach ($name in @('Path', 'ReportPath', 'App', 'Module', 'DecodeStatus')) {
+            if ($c.PSObject.Properties[$name]) {
+                $c.$name = ConvertTo-LVRedactedText -Text ([string]$c.$name) -MachineName $machine
+            }
+        }
         $c
     }
 

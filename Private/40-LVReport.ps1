@@ -239,9 +239,16 @@ function ConvertTo-LVTextReport {
 
     if (@($Result.CrashArtifacts).Count -gt 0) {
         Add-LVLine $sb ('-' * 78)
-        Add-LVLine $sb 'Crash evidence on disk (collected, not decoded - decoding needs a debugger):'
+        Add-LVLine $sb 'Crash evidence on disk (header metadata decoded when supported):'
         foreach ($c in $Result.CrashArtifacts) {
             Add-LVLine $sb ('  {0,-10} {1:yyyy-MM-dd HH:mm}  {2}' -f $c.Kind, $c.When, $c.Path)
+            if ($c.Kind -eq 'minidump' -and $c.BugCheckCode) {
+                Add-LVLine $sb ('             bug check {0} ({1}); parameters {2}' -f $c.BugCheckCode, $c.Architecture, (@($c.BugCheckParameters) -join ', '))
+            } elseif ($c.Kind -eq 'wer' -and $c.Decoded) {
+                Add-LVLine $sb ('             application {0}; module {1}; exception {2}' -f $c.App, $c.Module, $c.ExceptionCode)
+            } elseif ($c.DecodeStatus) {
+                Add-LVLine $sb ('             not decoded: {0}' -f $c.DecodeStatus)
+            }
         }
         Add-LVLine $sb
     }
@@ -395,9 +402,16 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
 
     if (@($Result.CrashArtifacts).Count -gt 0) {
         Add-LVLine $sb '<div class="f" style="border-left-color:#cba6f7"><h2>Crash evidence on disk</h2>'
-        Add-LVLine $sb '<div class="meta">Collected, not decoded. Reading a minidump needs a debugger and symbols.</div>'
+        Add-LVLine $sb '<div class="meta">Report.wer fields and supported kernel dump headers are decoded. Naming a driver from a dump stack still needs a debugger and symbols.</div>'
         foreach ($c in $Result.CrashArtifacts) {
             Add-LVLine $sb ('<div class="row"><div class="lbl">{0}</div><div>{1:yyyy-MM-dd HH:mm} &middot; {2}</div></div>' -f $c.Kind, $c.When, (ConvertTo-LVHtmlEncoded $c.Path))
+            if ($c.Kind -eq 'minidump' -and $c.BugCheckCode) {
+                Add-LVLine $sb ('<div class="meta">Bug check {0} ({1}); parameters {2}</div>' -f (ConvertTo-LVHtmlEncoded $c.BugCheckCode), (ConvertTo-LVHtmlEncoded $c.Architecture), (ConvertTo-LVHtmlEncoded (@($c.BugCheckParameters) -join ', ')))
+            } elseif ($c.Kind -eq 'wer' -and $c.Decoded) {
+                Add-LVLine $sb ('<div class="meta">Application {0}; module {1}; exception {2}</div>' -f (ConvertTo-LVHtmlEncoded $c.App), (ConvertTo-LVHtmlEncoded $c.Module), (ConvertTo-LVHtmlEncoded $c.ExceptionCode))
+            } elseif ($c.DecodeStatus) {
+                Add-LVLine $sb ('<div class="meta">Not decoded: {0}</div>' -f (ConvertTo-LVHtmlEncoded $c.DecodeStatus))
+            }
         }
         Add-LVLine $sb '</div>'
     }

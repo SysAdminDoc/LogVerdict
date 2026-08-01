@@ -356,7 +356,14 @@ function Format-LVCrashArtifact {
 
     $lines = foreach ($a in $Artifact) {
         if ($null -eq $a) { continue }
-        '{0}  {1:yyyy-MM-dd HH:mm}  {2}' -f $a.Kind, $a.When, (Split-Path -Leaf ([string]$a.Path))
+        $detail = [string]$a.DecodeStatus
+        if ($a.Kind -eq 'minidump' -and $a.BugCheckCode) {
+            $detail = 'bug check {0} ({1})' -f $a.BugCheckCode, $a.Architecture
+        } elseif ($a.Kind -eq 'wer' -and $a.Decoded) {
+            $detail = '{0} in {1}' -f $a.App, $a.Module
+            if ($a.ExceptionCode) { $detail += ' - exception ' + $a.ExceptionCode }
+        }
+        '{0}  {1:yyyy-MM-dd HH:mm}  {2}  {3}' -f $a.Kind, $a.When, (Split-Path -Leaf ([string]$a.Path)), $detail
     }
     return ConvertTo-LVArrayOutput -Value @($lines)
 }

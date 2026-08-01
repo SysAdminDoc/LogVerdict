@@ -4282,6 +4282,59 @@
           "retrieved": "2026-08-01"
         }
       ]
+    },
+    {
+      "id": "LV-0319",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "textlog",
+        "channel": "WER"
+      },
+      "verdict": "investigate",
+      "title": "An application crash report names the faulting module",
+      "plain": "Windows Error Reporting preserved the crashed application, its version, the module where the exception surfaced and the exception code in Report.wer.",
+      "why": "This survives after the matching event rolls out of the Application log and separates crashes of the same program in different modules. The named module is the place the exception surfaced, not automatic proof that module caused it.",
+      "action": "Use the application and module named in the evidence to update or repair that component. If it recurs, collect the matching user-mode dump and inspect the stack before blaming or removing the module.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/win32/wer/about-wer"
+      ],
+      "falsepositives": [
+        "Security software and compatibility layers can appear as the faulting module because they were injected into the process, even when the application triggered the failure."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/win32/wer/about-wer",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0320",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "textlog",
+        "channel": "Minidump"
+      },
+      "verdict": "actionable",
+      "title": "A kernel minidump records the blue-screen stop code",
+      "plain": "The fixed kernel dump header contains the bug-check code and its four parameters, so the kind of blue screen is still identifiable without loading symbols or running a debugger.",
+      "why": "The stop code narrows the failed subsystem and remains available even when the matching BugCheck event has rolled out of the System log. It does not name the responsible driver; that conclusion needs the dump stack.",
+      "action": "Look up the stop code in the Microsoft Bug Check Code Reference and interpret its four parameters for that code. Use WinDbg or another debugger with symbols before attributing the crash to a driver.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/bug-check-code-reference2",
+        "https://github.com/volatilityfoundation/volatility/wiki/Crash-Address-Space"
+      ],
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://github.com/volatilityfoundation/volatility/wiki/Crash-Address-Space",
+          "retrieved": "2026-08-01"
+        }
+      ]
     }
   ],
   "correlations": [

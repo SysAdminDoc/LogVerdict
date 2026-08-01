@@ -24,7 +24,13 @@ function Group-LVSignature {
     $buckets = @{}
 
     foreach ($r in $Record) {
-        if ($r.Source -eq 'event') {
+        if ($r.PSObject.Properties['SignatureKey'] -and $r.SignatureKey) {
+            # Decoded crash artifacts already have a small, stable identity: WER uses
+            # application + faulting module, and a kernel dump uses its stop code.
+            # Hashing their prose would hide that identity and couple it to wording.
+            $key = [string]$r.SignatureKey
+            $template = ConvertTo-LVTemplate -Text $r.Message
+        } elseif ($r.Source -eq 'event') {
             $key = '{0}/{1}' -f $r.Provider, $r.Id
             $template = $null
         } elseif ($r.Source -eq 'reliability') {

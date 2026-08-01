@@ -101,9 +101,25 @@ function Invoke-LogVerdictScan {
     foreach ($r in (Get-LVEventRecord -Channel $channels -DaysBack $DaysBack -ChannelStatus $channelStatus)) { $records.Add($r) | Out-Null }
     Write-LVLog -Level ok -Message ('{0} event record(s)' -f $records.Count)
 
+    $crash = @()
+    $decodedCrashCount = 0
     if (-not $SkipTextLogs) {
         Write-LVLog -Level info -Message 'Reading plain-text logs...'
         foreach ($r in (Get-LVTextLogRecord -DaysBack $DaysBack)) { $records.Add($r) | Out-Null }
+
+        $crash = @(Get-LVCrashArtifact -DaysBack ([Math]::Max($DaysBack, 90)))
+        $decodedCrashCount = @($crash | Where-Object { $_.Decoded }).Count
+        $scanCutoff = $started.AddDays(-1 * [Math]::Abs($DaysBack))
+        foreach ($artifact in $crash) {
+            if ($artifact.When -lt $scanCutoff) { continue }
+            $record = ConvertTo-LVCrashRecord -Artifact $artifact
+            if ($record) { $records.Add($record) | Out-Null }
+        }
+        if ($crash.Count -gt 0) {
+            Write-LVLog -Level warn -Message ('{0} crash artifact(s) on disk; decoded header metadata from {1}' -f $crash.Count, $decodedCrashCount)
+        } else {
+            Write-LVLog -Level info -Message 'No readable Report.wer or kernel minidump was present; the crash-artifact source was skipped, not treated as clean.'
+        }
     }
 
     $stability = $null
@@ -165,12 +181,6 @@ function Invoke-LogVerdictScan {
     }
     if ($horizonWarning) { Write-LVLog -Level warn -Message $horizonWarning }
 
-    $crash = @()
-    if (-not $SkipTextLogs) { $crash = Get-LVCrashArtifact -DaysBack ([Math]::Max($DaysBack, 90)) }
-    if (@($crash).Count -gt 0) {
-        Write-LVLog -Level warn -Message ('{0} crash artifact(s) on disk (minidumps / WER reports) - collected, not decoded' -f @($crash).Count)
-    }
-
     # Everything the scan could NOT see, stated plainly. A finding list is only as
     # trustworthy as the coverage behind it, so the gaps travel with the results.
     $coverageNotes = New-Object System.Collections.Generic.List[string]
@@ -195,6 +205,13 @@ function Invoke-LogVerdictScan {
         $coverageNotes.Add('Reliability Monitor was skipped by request, so the software install and removal history was not read.') | Out-Null
     } elseif (-not $script:LVReliabilityAvailable) {
         $coverageNotes.Add(('Reliability Monitor could not be read, so the software install and removal history is missing from this scan. It is Group Policy gated and disabled by default on Windows Server. Reason: {0}' -f $script:LVReliabilitySkipReason)) | Out-Null
+    }
+    if ($SkipTextLogs) {
+        $coverageNotes.Add('Plain-text logs and crash artifacts were skipped by request, so Report.wer and minidump headers were not checked.') | Out-Null
+    } elseif ($crash.Count -eq 0) {
+        $coverageNotes.Add('No readable Report.wer or kernel minidump was present in the 90-day crash inventory. That source was absent or empty, not a clean-health signal.') | Out-Null
+    } elseif ($decodedCrashCount -eq 0) {
+        $coverageNotes.Add('Crash artifacts were inventoried, but none contained supported readable header metadata. They remain available by path and were not interpreted as health.') | Out-Null
     }
 
     # Precomputed here so callers (including the entry script) never need a private helper.
