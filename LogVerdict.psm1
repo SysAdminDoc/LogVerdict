@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Stop'
 
 $script:LVModuleRoot = $PSScriptRoot
-$script:LVVersion    = '0.5.0'
+$script:LVVersion    = '0.6.0'
 $script:LVDataDir    = Join-Path $PSScriptRoot 'Data'
 
 foreach ($scope in @('Private', 'Public')) {
