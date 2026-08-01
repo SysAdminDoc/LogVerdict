@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "name": "LogVerdict core verdict database",
   "updated": "2026-07-31",
   "notes": "Rules are evaluated most-specific first. A signature matching no rule is reported as 'unknown' with its raw evidence - never with a guessed cause. Each rule carries a 'verified' date because guidance ages, and a 'status' controlling whether it is used: stable and test rules match, experimental rules match, deprecated and unsupported rules are retained for traceability but never applied.",
@@ -22,7 +22,13 @@
       "references": [
         "https://learn.microsoft.com/en-us/answers/questions/3157934/how-to-resolve-distributedcom-event-id-10016"
       ],
-      "falsepositives": []
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-client/application-management/event-10016-logged-when-accessing-dcom",
+          "retrieved": "2026-07-31"
+        }
+      ]
     },
     {
       "id": "LV-0002",
@@ -105,6 +111,12 @@
       "references": [],
       "falsepositives": [
         "A deliberate hard power-off or a held power button produces this with no fault behind it."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/event-id-41-restart",
+          "retrieved": "2026-07-31"
+        }
       ]
     },
     {
@@ -635,7 +647,13 @@
       "action": "Run DISM /Online /Cleanup-Image /RestoreHealth, then sfc /scannow, then re-check. If DISM cannot repair from Windows Update, supply a matching install image with the Source parameter.",
       "confidence": "high",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-client/installing-updates-features-roles/analyze-sfc-program-log-file-entries",
+          "retrieved": "2026-07-31"
+        }
+      ]
     },
     {
       "id": "LV-0091",
@@ -654,6 +672,12 @@
       "references": [],
       "falsepositives": [
         "CBS logs many transient errors during entirely successful servicing operations."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-client/installing-updates-features-roles/analyze-sfc-program-log-file-entries",
+          "retrieved": "2026-07-31"
+        }
       ]
     },
     {
@@ -673,6 +697,12 @@
       "references": [],
       "falsepositives": [
         "Optional or superseded driver packages routinely fail to install without impact."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-hardware/drivers/install/setupapi-text-logs",
+          "retrieved": "2026-07-31"
+        }
       ]
     },
     {

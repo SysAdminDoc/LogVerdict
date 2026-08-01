@@ -189,7 +189,11 @@ function Show-LogVerdictGui {
             $ui.PnlFalsePositives.Visibility = 'Collapsed'
         }
 
-        $refs = @($f.References | Where-Object { $_ })
+        # Source URIs join the reference list so they are clickable; the licence and
+        # author go on the provenance line, because a hyperlink whose text carries a
+        # credit is no longer a usable URI.
+        $refs = @(@(@($f.References) + @($f.Sources | ForEach-Object { $_.uri })) |
+            Where-Object { $_ } | Select-Object -Unique)
         if ($refs.Count -gt 0) {
             $ui.LstRefs.ItemsSource = [string[]]$refs
             $ui.PnlRefs.Visibility = 'Visible'
@@ -207,7 +211,22 @@ function Show-LogVerdictGui {
             if ($f.Status)     { $prov.Add([string]$f.Status) }
             if ($f.Confidence) { $prov.Add(('{0} confidence' -f $f.Confidence)) }
             if ($f.Verified)   { $prov.Add(('last verified {0}' -f $f.Verified)) }
-            $ui.TxtProvenance.Text = ($prov -join ' - ') + '.'
+            $line = ($prov -join ' - ') + '.'
+
+            # CC-BY requires attribution and an indication of changes; DRL requires the
+            # author be shown wherever the rule matches. Rendering it here is what makes
+            # deriving from those corpora legal, not just the field in the database.
+            $credits = New-Object System.Collections.Generic.List[string]
+            foreach ($src in @($f.Sources)) {
+                $parts = @($src.author, $src.licence) | Where-Object { $_ }
+                if ($parts.Count -eq 0) { continue }
+                $credit = $parts -join ', '
+                if ($src.modified) { $credit += ', adapted' }
+                if (-not $credits.Contains($credit)) { $credits.Add($credit) }
+            }
+            if ($credits.Count -gt 0) { $line += ' Derived from ' + ($credits -join '; ') + '.' }
+
+            $ui.TxtProvenance.Text = $line
         } else {
             $ui.TxtProvenance.Text = 'No rule in the verdict database covers this signature. LogVerdict reports it as unrecognized rather than guessing at a cause.'
         }

@@ -4,24 +4,51 @@
   "title": "LogVerdict verdict database",
   "description": "Curated rulings on Windows log signatures. Editors that understand JSON Schema will validate and autocomplete against this; Test-LogVerdictDatabase enforces the same rules plus the ones a schema cannot express.",
   "type": "object",
-  "required": ["schemaVersion", "name", "updated", "rules"],
+  "required": [
+    "schemaVersion",
+    "name",
+    "updated",
+    "rules"
+  ],
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 2,
-      "description": "Loading a version this build does not understand is a hard failure, not a best effort."
+      "maximum": 3,
+      "description": "Loading a version this build does not understand is a hard failure, not a best effort. v3 adds per-rule sources[] so attribution obligations travel with the rule."
     },
-    "name": { "type": "string", "minLength": 1 },
-    "updated": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
-    "notes": { "type": "string" },
-    "rules": { "type": "array", "items": { "$ref": "#/definitions/rule" } }
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "updated": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/rule"
+      }
+    }
   },
   "definitions": {
     "rule": {
       "type": "object",
-      "required": ["id", "match", "verdict", "title", "plain", "why", "action", "confidence"],
+      "required": [
+        "id",
+        "match",
+        "verdict",
+        "title",
+        "plain",
+        "why",
+        "action",
+        "confidence"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -30,7 +57,13 @@
           "description": "Unique and stable. Shipped rules use LV-nnnn; site-local rules should use their own prefix so they cannot collide."
         },
         "status": {
-          "enum": ["stable", "test", "experimental", "deprecated", "unsupported"],
+          "enum": [
+            "stable",
+            "test",
+            "experimental",
+            "deprecated",
+            "unsupported"
+          ],
           "description": "Sigma-aligned lifecycle. deprecated and unsupported rules are retained for traceability but never applied to a signature."
         },
         "verified": {
@@ -43,39 +76,123 @@
           "pattern": "^[a-z]{2}(-[A-Za-z0-9]+)*$",
           "description": "Required when messagePattern matches event text, which Windows renders from localized resources. Compared on the language part only, so en-US also matches en-GB."
         },
-        "match": { "$ref": "#/definitions/match" },
+        "match": {
+          "$ref": "#/definitions/match"
+        },
         "verdict": {
-          "enum": ["benign", "informational", "unknown", "investigate", "actionable", "critical"],
+          "enum": [
+            "benign",
+            "informational",
+            "unknown",
+            "investigate",
+            "actionable",
+            "critical"
+          ],
           "description": "benign is suppressed by default. Do not reach for critical unless hardware or data integrity is genuinely at risk."
         },
-        "title": { "type": "string", "minLength": 1, "description": "One line, plain English, no jargon." },
-        "plain": { "type": "string", "minLength": 1, "description": "What actually happened, for someone who does not already know." },
-        "why": { "type": "string", "minLength": 1, "description": "Why it does or does not matter. This is where judgement belongs." },
-        "action": { "type": "string", "minLength": 1, "description": "The concrete next step. 'Ignore.' is a complete and often correct answer." },
-        "escalate": { "$ref": "#/definitions/escalate" },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "One line, plain English, no jargon."
+        },
+        "plain": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What actually happened, for someone who does not already know."
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why it does or does not matter. This is where judgement belongs."
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The concrete next step. 'Ignore.' is a complete and often correct answer."
+        },
+        "escalate": {
+          "$ref": "#/definitions/escalate"
+        },
         "confidence": {
-          "enum": ["high", "medium", "low"],
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ],
           "description": "How certain the ruling is. Restating a self-describing message is high; adding interpretation is medium."
         },
         "references": {
           "type": "array",
-          "items": { "type": "string", "format": "uri" },
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
           "description": "Sources backing the ruling. Strongly encouraged for anything asserting what a vendor recommends."
         },
         "falsepositives": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "When this ruling is wrong. The most valuable field in the file: a verdict is only useful if the reader can tell it does not apply to them."
         },
         "related": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["id", "type"],
+            "required": [
+              "id",
+              "type"
+            ],
             "additionalProperties": false,
             "properties": {
-              "id": { "type": "string" },
-              "type": { "enum": ["derived", "obsolete", "merged", "renamed", "similar"] }
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "derived",
+                  "obsolete",
+                  "merged",
+                  "renamed",
+                  "similar"
+                ]
+              }
+            }
+          }
+        },
+        "sources": {
+          "type": "array",
+          "description": "Where this ruling came from, and under what terms. Required for anything derived from a licensed corpus: CC-BY-4.0 obliges attribution and an indication of changes, and DRL-1.1 obliges the author be shown at match time.",
+          "items": {
+            "type": "object",
+            "required": [
+              "uri"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "uri": {
+                "type": "string",
+                "format": "uri",
+                "description": "Where the claim can be checked."
+              },
+              "licence": {
+                "type": "string",
+                "description": "Terms the source is published under, e.g. CC-BY-4.0, DRL-1.1, MIT. Omit for a source merely consulted rather than derived from."
+              },
+              "author": {
+                "type": "string",
+                "description": "Original rule author. DRL-1.1 requires this be displayed on every match."
+              },
+              "retrieved": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                "description": "ISO date the source was read."
+              },
+              "modified": {
+                "type": "boolean",
+                "description": "True when the prose was adapted rather than reproduced. CC-BY-4.0 requires changes be indicated."
+              }
             }
           }
         }
@@ -86,22 +203,58 @@
       "additionalProperties": false,
       "description": "More match keys means higher specificity, and the most specific matching rule wins.",
       "properties": {
-        "source": { "enum": ["event", "textlog"] },
-        "channel": { "type": "string", "description": "Event channel name, or the text-log target name such as CBS or SetupAPI." },
-        "provider": { "type": "string", "description": "Event provider. A trailing * matches a provider family." },
-        "eventId": { "type": "integer" },
-        "messagePattern": { "type": "string", "format": "regex", "description": "Regex against the sample message. For event sources this is locale-dependent, so declare 'locale' too." }
+        "source": {
+          "enum": [
+            "event",
+            "textlog"
+          ]
+        },
+        "channel": {
+          "type": "string",
+          "description": "Event channel name, or the text-log target name such as CBS or SetupAPI."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Event provider. A trailing * matches a provider family."
+        },
+        "eventId": {
+          "type": "integer"
+        },
+        "messagePattern": {
+          "type": "string",
+          "format": "regex",
+          "description": "Regex against the sample message. For event sources this is locale-dependent, so declare 'locale' too."
+        }
       }
     },
     "escalate": {
       "type": "object",
-      "required": ["perDay", "verdict", "why"],
+      "required": [
+        "perDay",
+        "verdict",
+        "why"
+      ],
       "additionalProperties": false,
       "description": "Rate-based escalation, for signatures that are noise at a trickle and a fault at volume.",
       "properties": {
-        "perDay": { "type": "number", "exclusiveMinimum": 0 },
-        "verdict": { "enum": ["benign", "informational", "unknown", "investigate", "actionable", "critical"] },
-        "why": { "type": "string", "minLength": 1 }
+        "perDay": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "verdict": {
+          "enum": [
+            "benign",
+            "informational",
+            "unknown",
+            "investigate",
+            "actionable",
+            "critical"
+          ]
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     }
   }

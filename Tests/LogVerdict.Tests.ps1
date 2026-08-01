@@ -135,7 +135,12 @@ Describe 'Verdict database' {
             ($ss -join ',') | Should -Be ((@($script:LVRuleStatus) | Sort-Object) -join ',')
         }
 
-        $schema.properties.schemaVersion.maximum | Should -Be 2
+        # Bound to the module's own ceiling rather than a literal, so the two cannot
+        # drift apart the next time the schema gains a version.
+        InModuleScope LogVerdict -Parameters @{ maxVer = $schema.properties.schemaVersion.maximum } {
+            param($maxVer)
+            $maxVer | Should -Be $script:LVSchemaVersionMax
+        }
     }
 
     It 'rejects a rule using an invalid verdict' {
@@ -1267,6 +1272,75 @@ Describe 'GUI accessibility' {
             # The defect this replaces: hex colours and the search haystack read aloud.
             $row.AutomationName | Should -Not -Match '#'
             $row.AutomationName | Should -Not -Match 'VerdictFill'
+        }
+    }
+}
+
+Describe 'Rule provenance' {
+    It 'accepts a schema v3 database and still accepts v2' {
+        InModuleScope LogVerdict {
+            $script:LVSchemaVersionMax | Should -BeGreaterOrEqual 3
+        }
+        (Get-LogVerdictDatabase).schemaVersion | Should -Be 3
+    }
+
+    It 'still refuses a schema newer than this build understands' {
+        $future = Join-Path $TestDrive 'v4.json'
+        '{ "schemaVersion": 4, "name": "future", "updated": "2026-07-31", "rules": [] }' |
+            Set-Content -LiteralPath $future -Encoding UTF8
+        { Get-LogVerdictDatabase -Path $future } | Should -Throw -ExpectedMessage '*schemaVersion 4*'
+    }
+
+    It 'reports an unsourced rule as a warning, not as invalid' {
+        # A documentation gap must not fail the same check as a broken regex, or the
+        # shipped database refuses to load over missing citations.
+        $bare = Join-Path $TestDrive 'bare.json'
+        '{ "schemaVersion": 3, "name": "bare", "updated": "2026-07-31", "rules": [ { "id":"B-1","status":"stable","verified":"2026-07-31","match":{"source":"event"},"verdict":"benign","title":"t","plain":"p","why":"w","action":"a","confidence":"high" } ] }' |
+            Set-Content -LiteralPath $bare -Encoding UTF8
+
+        Test-LogVerdictDatabase -Path $bare -Quiet | Should -BeTrue
+        @(Test-LogVerdictDatabase -Path $bare).Count | Should -Be 0
+        $all = @(Test-LogVerdictDatabase -Path $bare -IncludeWarnings)
+        @($all | Where-Object { $_.Severity -eq 'warning' }).Count | Should -Be 1
+    }
+
+    It 'does not invent a phantom source for a rule that has none' {
+        # @($null) is a one-element array holding null, so an unfiltered wrap reported
+        # every sourceless rule as having a source with no uri.
+        $bare = Join-Path $TestDrive 'bare2.json'
+        '{ "schemaVersion": 3, "name": "bare", "updated": "2026-07-31", "rules": [ { "id":"B-1","status":"stable","verified":"2026-07-31","match":{"source":"event"},"verdict":"benign","title":"t","plain":"p","why":"w","action":"a","confidence":"high" } ] }' |
+            Set-Content -LiteralPath $bare -Encoding UTF8
+        @(Test-LogVerdictDatabase -Path $bare -IncludeWarnings | Where-Object { $_.Problem -like '*without a uri*' }).Count | Should -Be 0
+    }
+
+    It 'rejects a DRL-licensed source that names no author' {
+        # DRL-1.1 requires the author be shown on every match, so a rule that cannot
+        # render one must not ship.
+        $drl = Join-Path $TestDrive 'drl.json'
+        '{ "schemaVersion": 3, "name": "drl", "updated": "2026-07-31", "rules": [ { "id":"D-1","status":"stable","verified":"2026-07-31","match":{"source":"event"},"verdict":"benign","title":"t","plain":"p","why":"w","action":"a","confidence":"high","sources":[{"uri":"https://example.invalid/r","licence":"DRL-1.1"}] } ] }' |
+            Set-Content -LiteralPath $drl -Encoding UTF8
+        Test-LogVerdictDatabase -Path $drl -Quiet | Should -BeFalse
+    }
+
+    It 'carries source attribution onto the finding, not just the rule' {
+        InModuleScope LogVerdict {
+            $db = [pscustomobject]@{
+                schemaVersion = 3
+                rules = @([pscustomobject]@{
+                    id = 'S-1'; status = 'stable'; verdict = 'investigate'
+                    title = 't'; plain = 'p'; why = 'w'; action = 'a'; confidence = 'high'
+                    lvOrdinal = 0
+                    match = [pscustomobject]@{ source = 'event'; provider = 'Contoso'; eventId = 7 }
+                    sources = @([pscustomobject]@{ uri = 'https://example.invalid/a'; licence = 'CC-BY-4.0'; modified = $true })
+                })
+            }
+            $sig = [pscustomobject]@{
+                Key = 'Contoso/7'; Source = 'event'; Channel = 'System'; Provider = 'Contoso'
+                Id = 7; Count = 1; PerDay = 1; SampleMessage = 'x'
+            }
+            $out = @(Resolve-LVVerdict -Signature @($sig) -Database $db)[0]
+            @($out.Sources).Count | Should -Be 1
+            $out.Sources[0].licence | Should -BeExactly 'CC-BY-4.0'
         }
     }
 }

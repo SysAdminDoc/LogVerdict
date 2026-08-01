@@ -36,6 +36,9 @@ If you are not sure what an event means, do not write the rule. Or write it with
      "action": "The concrete next step.",
      "confidence": "medium",
      "references": ["https://example.invalid/docs/4242"],
+     "sources": [
+       { "uri": "https://example.invalid/docs/4242", "retrieved": "2026-07-31" }
+     ],
      "falsepositives": ["Expected during agent upgrade, when it re-reads config."]
    }
    ```
@@ -57,6 +60,20 @@ If you are not sure what an event means, do not write the rule. Or write it with
 | `plain` | Does this explain what *happened*, not what the event is *called*? |
 | `why` | Does this help someone decide whether to care? |
 | `action` | Can someone actually do this? `Ignore.` is a complete answer and often the right one. |
+
+Every rule should carry at least one `sources` entry or a `references` URL. The
+validator reports an unsourced rule as a warning rather than an error, so it will not
+block a build, but a ruling nobody can check is an assertion and this tool asks people to
+act on it.
+
+Use `sources` when the terms matter and `references` for plain further reading. A source
+entry is `{ uri, licence, author, retrieved, modified }`; only `uri` is required. Fill
+`licence` **only** when you derived the wording from a licensed corpus, and then say so:
+CC-BY-4.0 requires attribution and that changes be indicated, so set `modified: true` when
+you adapted the prose. A `DRL-*` licence additionally requires the original `author`, and
+the validator rejects a DRL source without one because the licence obliges us to display it
+on every match. Do not copy prose from a source whose terms you have not checked - most
+event-ID encyclopaedias are proprietary.
 
 Always fill `falsepositives` when the ruling is "ignore this". That field is what stops the tool from talking someone out of investigating a real problem.
 

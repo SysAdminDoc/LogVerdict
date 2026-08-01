@@ -12,13 +12,23 @@ function Test-LogVerdictDatabase {
         .PARAMETER Quiet
         Return $true/$false instead of the problem list.
 
+        .PARAMETER IncludeWarnings
+        Also return quality warnings - a rule with no source, for instance. Warnings are
+        excluded by default because they describe a database that could be better, not
+        one that is malformed, and mixing the two would mean a documentation gap failed
+        the same check as a broken regex.
+
         .EXAMPLE
         Test-LogVerdictDatabase -Quiet
+
+        .EXAMPLE
+        Test-LogVerdictDatabase -IncludeWarnings | Where-Object Severity -eq 'warning'
     #>
     [CmdletBinding()]
     param(
         [string]$Path,
-        [switch]$Quiet
+        [switch]$Quiet,
+        [switch]$IncludeWarnings
     )
 
     $db = Get-LogVerdictDatabase -Path $Path
@@ -89,6 +99,33 @@ function Test-LogVerdictDatabase {
             $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'falsepositives must be a list' }) | Out-Null
         }
 
+        # Provenance. A ruling nobody can check is an assertion, and this tool exists to
+        # be trusted; a rule derived from a licensed corpus additionally carries legal
+        # obligations that only travel if they are recorded here.
+        # Filtered, not just wrapped: @($null) is a one-element array holding null, so a
+        # rule with no sources would otherwise iterate once over a phantom entry and be
+        # reported as having a source with no uri.
+        $ruleSources = @($rule.sources | Where-Object { $_ })
+        if ($ruleSources.Count -eq 0 -and @($rule.references | Where-Object { $_ }).Count -eq 0) {
+            # A warning, not an error. An unsourced ruling is weaker than a sourced one
+            # but it is still structurally sound and still loads; treating it as invalid
+            # would make the shipped database refuse to load over a documentation gap.
+            $problems.Add([pscustomobject]@{ RuleId = $id; Severity = 'warning'; Problem = 'no sources[] and no references; the ruling cannot be checked' }) | Out-Null
+        }
+        foreach ($source in $ruleSources) {
+            if (-not $source.uri) {
+                $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'sources[] entry without a uri' }) | Out-Null
+            }
+            if ($source.retrieved -and $source.retrieved -notmatch '^\d{4}-\d{2}-\d{2}$') {
+                $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("source retrieved '{0}' is not an ISO date (yyyy-MM-dd)" -f $source.retrieved) }) | Out-Null
+            }
+            # DRL-1.1 obliges the author be shown wherever the rule matches, so a rule
+            # that names that licence without naming an author cannot be rendered legally.
+            if ($source.licence -like 'DRL*' -and -not $source.author) {
+                $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'DRL-licensed source must name an author; the licence requires it be shown on every match' }) | Out-Null
+            }
+        }
+
         if ($rule.match -and $rule.match.messagePattern) {
             $src = $rule.match.source
             if ((-not $src -or $src -eq 'event') -and -not $rule.locale) {
@@ -109,12 +146,28 @@ function Test-LogVerdictDatabase {
         }
     }
 
-    if ($Quiet) { return ($problems.Count -eq 0) }
+    # Problems default to errors; only those explicitly marked otherwise are warnings.
+    foreach ($p in $problems) {
+        if (-not $p.PSObject.Properties['Severity']) {
+            $p | Add-Member -NotePropertyName 'Severity' -NotePropertyValue 'error' -Force
+        }
+    }
+    $errors = @($problems | Where-Object { $_.Severity -ne 'warning' })
+    $warnings = @($problems | Where-Object { $_.Severity -eq 'warning' })
 
-    if ($problems.Count -eq 0) {
+    # Validity is about structure. A warning says the database could be better, not that
+    # it cannot be trusted to load.
+    if ($Quiet) { return ($errors.Count -eq 0) }
+
+    if ($warnings.Count -gt 0) {
+        Write-LVLog -Level warn -Message ("{0} rule(s) carry no source; their rulings cannot be checked by a reader." -f $warnings.Count)
+    }
+
+    if ($errors.Count -eq 0) {
         Write-LVLog -Level ok -Message ("Verdict database valid: {0} rule(s)." -f @($db.rules).Count)
     } else {
-        Write-LVLog -Level error -Message ("Verdict database has {0} problem(s)." -f $problems.Count)
+        Write-LVLog -Level error -Message ("Verdict database has {0} problem(s)." -f $errors.Count)
     }
-    return ConvertTo-LVArrayOutput -Value @($problems.ToArray())
+    if ($IncludeWarnings) { return ConvertTo-LVArrayOutput -Value @($problems.ToArray()) }
+    return ConvertTo-LVArrayOutput -Value $errors
 }

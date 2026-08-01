@@ -179,6 +179,7 @@ function Resolve-LVVerdict {
             $sig | Add-Member -NotePropertyName 'Confidence' -NotePropertyValue 'none' -Force
             $sig | Add-Member -NotePropertyName 'Reference'  -NotePropertyValue $null -Force
             $sig | Add-Member -NotePropertyName 'References' -NotePropertyValue @() -Force
+            $sig | Add-Member -NotePropertyName 'Sources'    -NotePropertyValue @() -Force
             $sig | Add-Member -NotePropertyName 'Status'     -NotePropertyValue $null -Force
             $sig | Add-Member -NotePropertyName 'Verified'   -NotePropertyValue $null -Force
             $sig | Add-Member -NotePropertyName 'FalsePositives' -NotePropertyValue @() -Force
@@ -213,6 +214,10 @@ function Resolve-LVVerdict {
         $sig | Add-Member -NotePropertyName 'Confidence' -NotePropertyValue $hit.confidence -Force
         $sig | Add-Member -NotePropertyName 'Reference'  -NotePropertyValue (@($refs) | Select-Object -First 1) -Force
         $sig | Add-Member -NotePropertyName 'References' -NotePropertyValue @($refs) -Force
+        # Provenance travels with the finding, not just with the rule: attribution that
+        # only exists in the database is attribution the reader never sees, and CC-BY
+        # and DRL both require it be visible wherever the ruling is.
+        $sig | Add-Member -NotePropertyName 'Sources'    -NotePropertyValue @($hit.sources) -Force
         $sig | Add-Member -NotePropertyName 'Status'     -NotePropertyValue $hit.status -Force
         $sig | Add-Member -NotePropertyName 'Verified'   -NotePropertyValue $hit.verified -Force
         $sig | Add-Member -NotePropertyName 'FalsePositives' -NotePropertyValue @($hit.falsepositives) -Force

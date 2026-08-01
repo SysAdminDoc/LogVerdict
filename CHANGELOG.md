@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Verdict database schema v3: rules record where their ruling came from.** A `sources` list on each rule carries `uri`, and optionally `licence`, `author`, `retrieved` and `modified`. Attribution renders next to the finding in the console, text, HTML and JSON output, and in the window's detail pane - which is what makes deriving from a licensed corpus lawful, since CC-BY-4.0 requires attribution and an indication of changes and DRL-1.1 requires the author be shown wherever the rule matches.
+- `Test-LogVerdictDatabase` now separates errors from warnings. A rule with no source is a warning: it does not make the database invalid, but `-IncludeWarnings` lists them and the summary line counts them. A `DRL-*` source with no author is an error, because the licence obliges us to display one.
+- Schema v2 databases continue to load unchanged; a v4 database is still refused outright rather than partially read.
+
 ### Accessibility
 
 - **The window was unusable with a screen reader.** Every findings row was announced as the underlying object graph - hex colour codes and the whole search haystack read aloud - because nothing supplied an accessible name. Rows now announce as a sentence: "ACTIONABLE. An update failed to install. Seen 12 time(s), 0.55 per day, last 2 days ago. Source Microsoft-Windows-WindowsUpdateClient 20."

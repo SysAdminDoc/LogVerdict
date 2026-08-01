@@ -158,6 +158,17 @@ function ConvertTo-LVTextReport {
         Add-LVLine $sb ('  Matters     : {0}' -f $f.Why)
         Add-LVLine $sb ('  Do this     : {0}' -f $f.Action)
         if ($f.Reference) { Add-LVLine $sb ('  Reference   : {0}' -f $f.Reference) }
+        foreach ($src in @($f.Sources)) {
+            if (-not $src.uri) { continue }
+            # Attribution is rendered next to the ruling it backs, because that is where
+            # a reader decides whether to believe it - and where CC-BY and DRL require it.
+            $credit = @($src.author, $src.licence) | Where-Object { $_ }
+            if ($credit.Count -gt 0) {
+                Add-LVLine $sb ('  Source      : {0} ({1})' -f $src.uri, ($credit -join ', '))
+            } else {
+                Add-LVLine $sb ('  Source      : {0}' -f $src.uri)
+            }
+        }
         Add-LVLine $sb ('  Evidence    : {0}' -f $f.SampleMessage)
         Add-LVLine $sb
     }
@@ -266,6 +277,14 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         if (@($f.FalsePositives).Count -gt 0) {
             $fpItems = ((@($f.FalsePositives) | ForEach-Object { '<li>' + (ConvertTo-LVHtmlEncoded $_) + '</li>' }) -join '')
             Add-LVLine $sb ('<div class="row"><div class="lbl">Not this if</div><div><ul class="fp">{0}</ul></div></div>' -f $fpItems)
+        }
+        foreach ($src in @($f.Sources)) {
+            if (-not $src.uri) { continue }
+            $uri = ConvertTo-LVHtmlEncoded $src.uri
+            $credit = @($src.author, $src.licence) | Where-Object { $_ }
+            $suffix = ''
+            if ($credit.Count -gt 0) { $suffix = ' ' + (ConvertTo-LVHtmlEncoded (('({0})' -f ($credit -join ', ')))) }
+            Add-LVLine $sb ('<div class="row"><div class="lbl">Source</div><div><a href="{0}">{1}</a>{2}</div></div>' -f $uri, $uri, $suffix)
         }
         if ($f.Reference) {
             $ref = ConvertTo-LVHtmlEncoded $f.Reference
