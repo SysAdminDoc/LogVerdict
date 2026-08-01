@@ -23,6 +23,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - **The window is now a four-page diagnostics workspace.** Overview owns scan setup and the last-run summary; Findings combines filters, the signature table and full ruling detail; Coverage surfaces readable sources, evidence horizons, gaps, crash artifacts and correlations; Activity keeps the live pipeline and transcript visible. The scan and report engines are unchanged, so the console and GUI still cannot disagree about a verdict.
 - The GUI now uses a purpose-built deep-navy observability palette, a persistent navigation rail, compact metric cards, a dark active caption and page-specific empty states. Keyboard focus, screen-reader names and the existing WCAG contrast checks remain part of the release gate.
+- **The window now follows Windows High Contrast mode.** Semantic colours are dynamic resources that switch to the user's `SystemColors` palette at runtime, data-bound verdict pills use the system highlight colours, and WPF's framework focus visual replaces the custom dark-theme ring. Switching High Contrast off restores the original resource objects without restarting the app.
 
 ### Fixed
 

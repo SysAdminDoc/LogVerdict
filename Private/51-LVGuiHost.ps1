@@ -17,6 +17,139 @@ $script:LVVerdictPalette = @{
 # Chip order in the sidebar, worst first, matching the report's ordering.
 $script:LVVerdictDisplayOrder = @('critical', 'actionable', 'investigate', 'unknown', 'informational', 'benign')
 
+# Every brush the XAML treats as semantic rather than decorative. DynamicResource
+# references point at these keys, so replacing the resource objects repaints the
+# existing visual tree without rebuilding the window.
+$script:LVGuiThemeBrushKey = @(
+    'Base', 'Mantle', 'Crust',
+    'Surface0', 'Surface1', 'Surface2', 'Overlay0', 'Overlay1',
+    'Text', 'Subtext1', 'Subtext0', 'TextMuted',
+    'Blue', 'Lavender', 'Mauve', 'Red', 'Peach', 'Yellow', 'Green', 'Sky',
+    'AccentInk', 'AccentPressed', 'RowDivider', 'RowHover', 'NavBorder',
+    'SoftPanel', 'BluePanel', 'NavIconActive', 'SuccessPanel', 'ElevationPanel',
+    'StatusIcon', 'WarningBorder', 'WarningCard', 'WarningIcon', 'InfoPanel',
+    'CoveragePanel', 'SuccessLine', 'SuccessIcon', 'LogBackground'
+)
+
+function Test-LVGuiHighContrast {
+    <#
+        .SYNOPSIS
+        Return the current Windows High Contrast state.
+
+        .DESCRIPTION
+        The environment override exists only so visual verification can exercise the
+        same theme path on the isolated display without changing the user's global
+        desktop theme. Production launches leave it unset and follow SystemParameters.
+    #>
+    # Get-LVVerdictStyle is also used by non-GUI tests and row projection, before the
+    # window entry point has loaded WPF. Load the one assembly that owns SystemParameters
+    # here so those otherwise headless callers keep working.
+    if (-not ('System.Windows.SystemParameters' -as [type])) {
+        Add-Type -AssemblyName PresentationFramework
+    }
+
+    if ($env:LOGVERDICT_TEST_HIGH_CONTRAST -eq '1') { return $true }
+    if ($env:LOGVERDICT_TEST_HIGH_CONTRAST -eq '0') { return $false }
+    return [bool][System.Windows.SystemParameters]::HighContrast
+}
+
+function Get-LVGuiThemeSnapshot {
+    <#
+        .SYNOPSIS
+        Capture the original window resources so a theme change can be reversed.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Window)
+
+    $snapshot = @{}
+    foreach ($key in @($script:LVGuiThemeBrushKey) + @('LVFocusVisual')) {
+        if (-not $Window.Resources.Contains($key)) {
+            throw ("LogVerdict markup is missing the theme resource '{0}'." -f $key)
+        }
+        $snapshot[$key] = $Window.Resources[$key]
+    }
+    return $snapshot
+}
+
+function Sync-LVGuiTheme {
+    <#
+        .SYNOPSIS
+        Apply or remove the Windows High Contrast resource palette.
+
+        .DESCRIPTION
+        High Contrast uses only SystemColors brushes. Leaving High Contrast restores
+        the exact resource objects captured from XAML, including the custom focus ring.
+        While it is active, LVFocusVisual resolves to WPF's framework focus style so
+        the user's configured focus treatment wins over the application's template.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Window,
+        [Parameter(Mandatory)][hashtable]$Snapshot,
+        [bool]$HighContrast = (Test-LVGuiHighContrast)
+    )
+
+    if (-not $HighContrast) {
+        foreach ($key in @($script:LVGuiThemeBrushKey) + @('LVFocusVisual')) {
+            $Window.Resources[$key] = $Snapshot[$key]
+        }
+        return $false
+    }
+
+    $systemBrush = @{
+        Base           = [System.Windows.SystemColors]::WindowBrush
+        Mantle         = [System.Windows.SystemColors]::WindowBrush
+        Crust          = [System.Windows.SystemColors]::WindowBrush
+        Surface0       = [System.Windows.SystemColors]::ControlBrush
+        Surface1       = [System.Windows.SystemColors]::ControlDarkBrush
+        Surface2       = [System.Windows.SystemColors]::ControlTextBrush
+        Overlay0       = [System.Windows.SystemColors]::ControlTextBrush
+        Overlay1       = [System.Windows.SystemColors]::ControlTextBrush
+        Text           = [System.Windows.SystemColors]::WindowTextBrush
+        Subtext1       = [System.Windows.SystemColors]::WindowTextBrush
+        Subtext0       = [System.Windows.SystemColors]::WindowTextBrush
+        TextMuted      = [System.Windows.SystemColors]::WindowTextBrush
+        Blue           = [System.Windows.SystemColors]::HighlightBrush
+        Lavender       = [System.Windows.SystemColors]::HighlightBrush
+        Mauve          = [System.Windows.SystemColors]::HighlightBrush
+        Red            = [System.Windows.SystemColors]::HighlightBrush
+        Peach          = [System.Windows.SystemColors]::HighlightBrush
+        Yellow         = [System.Windows.SystemColors]::HighlightBrush
+        Green          = [System.Windows.SystemColors]::HighlightBrush
+        Sky            = [System.Windows.SystemColors]::HighlightBrush
+        AccentInk      = [System.Windows.SystemColors]::HighlightTextBrush
+        AccentPressed  = [System.Windows.SystemColors]::HighlightBrush
+        RowDivider     = [System.Windows.SystemColors]::ControlTextBrush
+        RowHover       = [System.Windows.SystemColors]::ControlBrush
+        NavBorder      = [System.Windows.SystemColors]::ControlTextBrush
+        SoftPanel      = [System.Windows.SystemColors]::ControlBrush
+        BluePanel      = [System.Windows.SystemColors]::ControlBrush
+        NavIconActive  = [System.Windows.SystemColors]::ControlBrush
+        SuccessPanel   = [System.Windows.SystemColors]::ControlBrush
+        ElevationPanel = [System.Windows.SystemColors]::ControlBrush
+        StatusIcon     = [System.Windows.SystemColors]::ControlBrush
+        WarningBorder  = [System.Windows.SystemColors]::ControlTextBrush
+        WarningCard    = [System.Windows.SystemColors]::WindowBrush
+        WarningIcon    = [System.Windows.SystemColors]::ControlBrush
+        InfoPanel      = [System.Windows.SystemColors]::ControlBrush
+        CoveragePanel  = [System.Windows.SystemColors]::ControlBrush
+        SuccessLine    = [System.Windows.SystemColors]::ControlTextBrush
+        SuccessIcon    = [System.Windows.SystemColors]::ControlBrush
+        LogBackground  = [System.Windows.SystemColors]::WindowBrush
+    }
+
+    foreach ($key in $script:LVGuiThemeBrushKey) {
+        $Window.Resources[$key] = $systemBrush[$key]
+    }
+
+    $frameworkFocus = $Window.TryFindResource([System.Windows.SystemParameters]::FocusVisualStyleKey)
+    if ($null -eq $frameworkFocus) {
+        throw 'Windows did not provide its High Contrast focus visual style.'
+    }
+    $Window.Resources['LVFocusVisual'] = $frameworkFocus
+    return $true
+}
+
 # Every named element the window code reaches for. Show-LogVerdictGui resolves all of
 # them up front and fails loudly on the first missing one, and the test suite checks
 # this list against the markup - so a renamed x:Name is caught before a build rather
@@ -86,6 +219,14 @@ function Get-LVVerdictStyle {
 
     $key = $Verdict
     if (-not $key -or -not $script:LVVerdictPalette.ContainsKey($key)) { $key = 'unknown' }
+    if (Test-LVGuiHighContrast) {
+        return @{
+            Label  = $script:LVVerdictPalette[$key].Label
+            Fill   = [System.Windows.SystemColors]::HighlightBrush
+            Ink    = [System.Windows.SystemColors]::HighlightTextBrush
+            Accent = [System.Windows.SystemColors]::HighlightBrush
+        }
+    }
     return $script:LVVerdictPalette[$key]
 }
 
@@ -442,9 +583,19 @@ public static extern int DwmSetWindowAttribute(System.IntPtr hwnd, int attr, ref
         $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($Window)).Handle
         if ($hwnd -eq [IntPtr]::Zero) { return }
 
-        $enabled = 1
+        $highContrast = Test-LVGuiHighContrast
+        $enabled = $(if ($highContrast) { 0 } else { 1 })
         foreach ($attr in @(20, 19)) {
             if ([LVNative.Dwm]::DwmSetWindowAttribute($hwnd, $attr, [ref]$enabled, 4) -eq 0) { break }
+        }
+
+        if ($highContrast) {
+            # -1 is DWMWA_COLOR_DEFAULT. Undo any application colour that was applied
+            # before High Contrast switched on and let Windows own the caption again.
+            $defaultColour = -1
+            $null = [LVNative.Dwm]::DwmSetWindowAttribute($hwnd, 35, [ref]$defaultColour, 4)
+            $null = [LVNative.Dwm]::DwmSetWindowAttribute($hwnd, 36, [ref]$defaultColour, 4)
+            return
         }
 
         # Windows 11 otherwise honours the user's bright accent colour for an active

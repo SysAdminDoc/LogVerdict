@@ -60,6 +60,7 @@ Collect  ->  Reduce  ->  Resolve  ->  Correlate  ->  Report
 - **Activity** shows the live collect, reduce, correlate, resolve and report stages, the full run transcript and a compact run summary.
 - **Save report** writes the same text, JSON and HTML bundle the console tool produces.
 - The scan runs on a background thread, so the window stays responsive and can be cancelled mid-run.
+- Windows High Contrast changes the full interface to the active system colours, including verdict labels and keyboard focus, and switching it off restores the normal dark theme without restarting.
 
 Elevation is optional and never forced. Without it the Security channel and some setup logs are unreadable; the window says so in a banner and offers to restart elevated.
 

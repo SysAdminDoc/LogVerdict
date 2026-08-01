@@ -1403,8 +1403,14 @@ Describe 'GUI colour contrast' {
             # Every background the window actually paints text on.
             $surfaces = @($brush['Base'], $brush['Mantle'], $brush['Crust'])
 
-            $used = @([regex]::Matches($xaml, 'Foreground="\{StaticResource (\w+)\}"') |
-                ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+            # AccentInk is intentionally dark because it is used only on light accent
+            # fills. These four brushes are the ones that carry body text on the dark
+            # page surfaces measured below.
+            $bodyBrush = @('Text', 'TextMuted', 'Subtext0', 'Subtext1')
+            $used = @([regex]::Matches($xaml, 'Foreground="\{DynamicResource (\w+)\}"') |
+                ForEach-Object { $_.Groups[1].Value } |
+                Where-Object { $_ -in $bodyBrush } |
+                Sort-Object -Unique)
             $used.Count | Should -BeGreaterThan 3
 
             foreach ($name in $used) {
@@ -1423,9 +1429,60 @@ Describe 'GUI colour contrast' {
             $xaml = Get-LVGuiXaml
             $xaml | Should -Match 'x:Key="LVFocusVisual"'
             # Button, accent button, chip toggle, checkbox, text box.
-            ([regex]::Matches($xaml, 'FocusVisualStyle" Value="\{StaticResource LVFocusVisual\}"')).Count |
+            ([regex]::Matches($xaml, 'FocusVisualStyle" Value="\{DynamicResource LVFocusVisual\}"')).Count |
                 Should -BeGreaterOrEqual 5
         }
+    }
+
+    It 'uses dynamic resources for every semantic colour reference' {
+        InModuleScope LogVerdict {
+            $xaml = Get-LVGuiXaml
+            $xaml | Should -Not -Match '(Background|Foreground|BorderBrush|Stroke|Tag)="\{StaticResource (Base|Mantle|Crust|Surface\d|Overlay\d|Text|TextMuted|Subtext\d|Blue|Lavender|Mauve|Red|Peach|Yellow|Green|Sky|Accent\w*|Row\w*|Nav\w*|SoftPanel|BluePanel|Success\w*|ElevationPanel|StatusIcon|Warning\w*|InfoPanel|CoveragePanel|LogBackground)\}"'
+            ([regex]::Matches($xaml, '\{DynamicResource \w+\}')).Count | Should -BeGreaterThan 100
+        }
+    }
+
+    It 'maps High Contrast to SystemColors and restores the original resource objects' {
+        InModuleScope LogVerdict {
+            Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
+            $window = [Windows.Markup.XamlReader]::Parse((Get-LVGuiXaml))
+            $snapshot = Get-LVGuiThemeSnapshot -Window $window
+            $base = $snapshot['Base']
+            $focus = $snapshot['LVFocusVisual']
+            $frameworkFocus = $window.TryFindResource([System.Windows.SystemParameters]::FocusVisualStyleKey)
+
+            Sync-LVGuiTheme -Window $window -Snapshot $snapshot -HighContrast $true | Should -BeTrue
+            [object]::ReferenceEquals($window.Resources['Base'], [System.Windows.SystemColors]::WindowBrush) | Should -BeTrue
+            [object]::ReferenceEquals($window.Resources['Blue'], [System.Windows.SystemColors]::HighlightBrush) | Should -BeTrue
+            [object]::ReferenceEquals($window.Resources['AccentInk'], [System.Windows.SystemColors]::HighlightTextBrush) | Should -BeTrue
+            [object]::ReferenceEquals($window.Resources['LVFocusVisual'], $frameworkFocus) | Should -BeTrue
+
+            Sync-LVGuiTheme -Window $window -Snapshot $snapshot -HighContrast $false | Should -BeFalse
+            [object]::ReferenceEquals($window.Resources['Base'], $base) | Should -BeTrue
+            [object]::ReferenceEquals($window.Resources['LVFocusVisual'], $focus) | Should -BeTrue
+            $window.Close()
+        }
+    }
+
+    It 'uses system highlight colours for data-bound verdict pills in High Contrast' {
+        InModuleScope LogVerdict {
+            $before = $env:LOGVERDICT_TEST_HIGH_CONTRAST
+            try {
+                $env:LOGVERDICT_TEST_HIGH_CONTRAST = '1'
+                $style = Get-LVVerdictStyle -Verdict 'critical'
+                [object]::ReferenceEquals($style.Fill, [System.Windows.SystemColors]::HighlightBrush) | Should -BeTrue
+                [object]::ReferenceEquals($style.Ink, [System.Windows.SystemColors]::HighlightTextBrush) | Should -BeTrue
+            } finally {
+                $env:LOGVERDICT_TEST_HIGH_CONTRAST = $before
+            }
+        }
+    }
+
+    It 'subscribes to High Contrast changes and unsubscribes when the window closes' {
+        $gui = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1') -Raw
+        $gui | Should -Match 'SystemParameters\]::add_StaticPropertyChanged'
+        $gui | Should -Match 'SystemParameters\]::remove_StaticPropertyChanged'
+        $gui | Should -Match "PropertyName -ne 'HighContrast'"
     }
 }
 

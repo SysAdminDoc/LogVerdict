@@ -59,6 +59,9 @@ function Show-LogVerdictGui {
         $ui[$name] = $element
     }
 
+    $themeSnapshot = Get-LVGuiThemeSnapshot -Window $window
+    $null = Sync-LVGuiTheme -Window $window -Snapshot $themeSnapshot
+
     # All mutable state lives on one object. Assigning to a plain variable inside an
     # event handler would create a handler-local copy and silently lose the write;
     # mutating a hashtable's keys does not have that problem.
@@ -543,9 +546,9 @@ function Show-LogVerdictGui {
 
     if (Test-LVElevated) {
         $ui.TxtElevation.Text = 'Administrator'
-        $ui.TxtElevation.Foreground = '#5dd39e'
+        $ui.TxtElevation.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'Green')
         $ui.TxtSideElevation.Text = 'Administrator access'
-        $ui.TxtSideElevation.Foreground = '#5dd39e'
+        $ui.TxtSideElevation.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'Green')
         $ui.BtnCoverageElevate.Visibility = 'Collapsed'
     } else {
         $ui.TxtElevation.Text = 'Standard user'
@@ -555,6 +558,19 @@ function Show-LogVerdictGui {
     }
 
     $window.Add_SourceInitialized({ Enable-LVDarkTitleBar -Window $window })
+
+    $systemThemeChanged = [System.ComponentModel.PropertyChangedEventHandler] {
+        param($SenderObject, $ThemeEventArgs)
+        if ($ThemeEventArgs.PropertyName -ne 'HighContrast') { return }
+
+        $null = Sync-LVGuiTheme -Window $window -Snapshot $themeSnapshot
+        Enable-LVDarkTitleBar -Window $window
+
+        # Verdict colours are projected into bound row objects rather than resource
+        # references, so rebuild those objects when the system palette changes.
+        if ($state.Result) { & $renderResult $state.Result }
+    }
+    [System.Windows.SystemParameters]::add_StaticPropertyChanged($systemThemeChanged)
 
     # Checked, not Click: TogglePattern is how assistive automation activates a
     # ToggleButton. Mouse, keyboard and UI Automation must all navigate identically.
@@ -878,6 +894,7 @@ function Show-LogVerdictGui {
 
     $window.Add_Closing({
         $timer.Stop()
+        [System.Windows.SystemParameters]::remove_StaticPropertyChanged($systemThemeChanged)
         if ($state.Job) {
             Stop-LVScanJob -Job $state.Job -Confirm:$false
             $state.Job = $null
