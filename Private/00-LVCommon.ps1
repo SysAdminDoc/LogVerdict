@@ -293,8 +293,13 @@ function ConvertTo-LVRedactedText {
     # Ahead of the account name on purpose - see the ordering note above.
     $t = $t -replace '[\w.+-]+@[\w-]+\.[\w.-]+', '<UPN>'
 
-    if ($MachineName) { $t = $t -replace ('(?i)(?<!\w)' + [regex]::Escape($MachineName) + '(?!\w)'), '<MACHINE>' }
-    if ($UserName)    { $t = $t -replace ('(?i)(?<!\w)' + [regex]::Escape($UserName) + '(?!\w)'), '<USER>' }
+    # Alphanumeric lookarounds, NOT \w. \w includes the underscore, and the report
+    # folder is named LogVerdict_<MACHINE>_<timestamp> - so a \w boundary refuses to
+    # match the machine name in exactly the place it most reliably appears. The run
+    # transcript is full of that path.
+    $edge = '[\p{L}\p{N}]'
+    if ($MachineName) { $t = $t -replace ('(?i)(?<!' + $edge + ')' + [regex]::Escape($MachineName) + '(?!' + $edge + ')'), '<MACHINE>' }
+    if ($UserName)    { $t = $t -replace ('(?i)(?<!' + $edge + ')' + [regex]::Escape($UserName) + '(?!' + $edge + ')'), '<USER>' }
 
     # Any other account's profile directory, whoever it belongs to. Only the account
     # segment is replaced, so the rest of the path survives and stays diagnostic.

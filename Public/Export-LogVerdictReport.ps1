@@ -19,18 +19,28 @@ function Export-LogVerdictReport {
         to a ticket or a vendor. The reports state that redaction was applied, so a
         reader never mistakes a masked report for a complete one.
 
+        .PARAMETER IncludeEvidence
+        Also write a zip containing the reports, the matching text-log lines, and the
+        scanned event channels as .evtx - the artifact to attach to a ticket. Combined
+        with -Redact the channel exports are deliberately omitted, because .evtx is a
+        binary format carrying the identifiers redaction strips out of the text.
+
         .EXAMPLE
         Invoke-LogVerdictScan | Export-LogVerdictReport
 
         .EXAMPLE
         Invoke-LogVerdictScan | Export-LogVerdictReport -Redact
+
+        .EXAMPLE
+        Invoke-LogVerdictScan | Export-LogVerdictReport -IncludeEvidence
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, ValueFromPipeline)]$Result,
         [string]$OutputDir,
         [ValidateSet('Text', 'Json', 'Html', 'All')][string[]]$Format = @('All'),
-        [switch]$Redact
+        [switch]$Redact,
+        [switch]$IncludeEvidence
     )
 
     process {
@@ -77,17 +87,29 @@ function Export-LogVerdictReport {
             $written.Add($p) | Out-Null
         }
 
+        # The run transcript is a report artifact and has to be redacted with the rest.
+        # It is built from log lines rather than from the result object, so redacting
+        # the result does not touch it - and it names the machine on almost every line.
         $logPath = Join-Path $OutputDir 'LogVerdict-Run.log'
-        Write-LVTextFile -Path $logPath -Content ((Get-LVLogTranscript) -join [Environment]::NewLine)
+        $transcript = (Get-LVLogTranscript) -join [Environment]::NewLine
+        if ($Redact) { $transcript = ConvertTo-LVRedactedText -Text $transcript -MachineName $folderMachine }
+        Write-LVTextFile -Path $logPath -Content $transcript
         $written.Add($logPath) | Out-Null
 
         foreach ($w in $written) {
             Write-LVLog -Level ok -Message ('Wrote {0}' -f $w)
         }
 
+        $bundle = $null
+        if ($IncludeEvidence) {
+            $bundle = New-LVEvidenceBundle -Result $Result -OutputDir $OutputDir `
+                -ReportFile @($written.ToArray()) -Redact:$Redact
+        }
+
         return [pscustomobject]@{
-            OutputDir = $OutputDir
-            Files     = @($written.ToArray())
+            OutputDir      = $OutputDir
+            Files          = @($written.ToArray())
+            EvidenceBundle = $bundle
         }
     }
 }

@@ -1473,6 +1473,121 @@ Describe 'GUI coverage surfacing' {
     }
 }
 
+Describe 'Evidence bundle' {
+    BeforeAll {
+        $script:Scan = Invoke-LogVerdictScan -DaysBack 2 -SkipReliability 6>$null
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        function Get-ZipEntry {
+            param([string]$Path)
+            $zip = [IO.Compression.ZipFile]::OpenRead($Path)
+            try { return @($zip.Entries | ForEach-Object { $_.Name }) } finally { $zip.Dispose() }
+        }
+        function Get-ZipText {
+            param([string]$Path, [string]$Entry)
+            $zip = [IO.Compression.ZipFile]::OpenRead($Path)
+            try {
+                $e = $zip.Entries | Where-Object { $_.Name -eq $Entry } | Select-Object -First 1
+                if (-not $e) { return $null }
+                $r = New-Object IO.StreamReader($e.Open())
+                try { return $r.ReadToEnd() } finally { $r.Close() }
+            } finally { $zip.Dispose() }
+        }
+    }
+
+    It 'writes a zip carrying the reports and a manifest' {
+        $dir = Join-Path $TestDrive 'bundle-plain'
+        $out = Export-LogVerdictReport -Result $script:Scan -OutputDir $dir -IncludeEvidence 6>$null
+        $out.EvidenceBundle | Should -Not -BeNullOrEmpty
+        Test-Path -LiteralPath $out.EvidenceBundle | Should -BeTrue
+
+        $names = Get-ZipEntry -Path $out.EvidenceBundle
+        $names | Should -Contain 'MANIFEST.txt'
+        $names | Should -Contain 'LogVerdict-Report.json'
+    }
+
+    It 'omits the channel exports when the bundle is redacted' {
+        # .evtx is binary and carries the account names, hostnames and SIDs that
+        # redaction strips out of the text. A bundle that claimed to be sanitized while
+        # shipping them would be worse than one that never claimed it.
+        $dir = Join-Path $TestDrive 'bundle-redacted'
+        $out = Export-LogVerdictReport -Result $script:Scan -OutputDir $dir -IncludeEvidence -Redact 6>$null
+
+        $names = Get-ZipEntry -Path $out.EvidenceBundle
+        @($names | Where-Object { $_ -like '*.evtx' }).Count | Should -Be 0
+    }
+
+    It 'says in the manifest why the channel exports are missing' {
+        # An omission nobody is told about reads as an absence of evidence. Somebody
+        # opening this months later must not conclude those channels were clean.
+        $dir = Join-Path $TestDrive 'bundle-manifest'
+        $out = Export-LogVerdictReport -Result $script:Scan -OutputDir $dir -IncludeEvidence -Redact 6>$null
+
+        $manifest = Get-ZipText -Path $out.EvidenceBundle -Entry 'MANIFEST.txt'
+        $manifest | Should -Match 'Redacted  : yes'
+        $manifest | Should -Match 'WHAT IS DELIBERATELY NOT HERE'
+        $manifest | Should -Match '(?s)Event channel exports.*sanitized'
+    }
+
+    It 'leaks no hostname into any text member of a redacted bundle' {
+        $dir = Join-Path $TestDrive 'bundle-leak'
+        $out = Export-LogVerdictReport -Result $script:Scan -OutputDir $dir -IncludeEvidence -Redact 6>$null
+
+        $zip = [IO.Compression.ZipFile]::OpenRead($out.EvidenceBundle)
+        try {
+            foreach ($e in $zip.Entries) {
+                $r = New-Object IO.StreamReader($e.Open())
+                try { $text = $r.ReadToEnd() } finally { $r.Close() }
+                $text | Should -Not -Match ([regex]::Escape($env:COMPUTERNAME)) -Because "$($e.Name) must not name the machine"
+            }
+        } finally { $zip.Dispose() }
+    }
+
+    It 'writes no bundle unless asked' {
+        $dir = Join-Path $TestDrive 'bundle-none'
+        $out = Export-LogVerdictReport -Result $script:Scan -OutputDir $dir 6>$null
+        $out.EvidenceBundle | Should -BeNullOrEmpty
+        @(Get-ChildItem -LiteralPath $dir -Filter '*.zip').Count | Should -Be 0
+    }
+
+    It 'removes the staging directory once the zip exists' {
+        $dir = Join-Path $TestDrive 'bundle-staging'
+        Export-LogVerdictReport -Result $script:Scan -OutputDir $dir -IncludeEvidence 6>$null | Out-Null
+        Test-Path -LiteralPath (Join-Path $dir 'evidence') | Should -BeFalse
+    }
+
+    It 'carries the matching text-log lines rather than the whole log' {
+        # CBS.log alone routinely runs to hundreds of megabytes and almost none of it is
+        # evidence. An excerpt file must never approach the size of its source.
+        InModuleScope LogVerdict -Parameters @{ Scan = $script:Scan; Drive = $TestDrive } {
+            param($Scan, $Drive)
+            $dest = Join-Path $Drive 'excerpt'
+            New-Item -ItemType Directory -Path $dest -Force | Out-Null
+            $written = @(Export-LVTextLogEvidence -Result $Scan -Destination $dest)
+            foreach ($w in $written) {
+                (Get-Item -LiteralPath $w).Length | Should -BeLessThan 2MB
+            }
+        }
+    }
+
+    It 'redacts the text-log excerpts too, not only the reports' {
+        InModuleScope LogVerdict -Parameters @{ Drive = $TestDrive } {
+            param($Drive)
+            $dest = Join-Path $Drive 'excerpt-redacted'
+            New-Item -ItemType Directory -Path $dest -Force | Out-Null
+            $result = [pscustomobject]@{
+                MachineName = 'HOST-9'
+                Findings = @([pscustomobject]@{
+                    Source = 'textlog'; Channel = 'CBS'; Key = 'CBS/abc'; Count = 1
+                    FirstSeen = (Get-Date); LastSeen = (Get-Date)
+                    Samples = @('HOST-9 failed to stage a package')
+                })
+            }
+            $written = @(Export-LVTextLogEvidence -Result $result -Destination $dest -Redact)
+            (Get-Content -LiteralPath $written[0] -Raw) | Should -Not -Match 'HOST-9'
+        }
+    }
+}
+
 Describe 'Correlation' {
     BeforeAll {
         # The test data is built here, in the test's own scope, and handed to the module
@@ -1724,6 +1839,18 @@ Describe 'Report redaction' {
             $clean | Should -Match '<USER>'
             $clean | Should -Match '<MACHINE>'
             $clean | Should -Match '<UPN>'
+        }
+    }
+
+    It 'masks a name sitting between underscores' {
+        # The report folder is named LogVerdict_<MACHINE>_<timestamp>, and that path is
+        # all over the run transcript. A \w boundary treats the underscore as a word
+        # character and refuses to match there - so the machine name survived redaction
+        # in the one place it most reliably appears.
+        InModuleScope LogVerdict {
+            $clean = ConvertTo-LVRedactedText -Text 'wrote C:\out\LogVerdict_HOST-9_20260801-113216\report.txt' -UserName 'u' -MachineName 'HOST-9'
+            $clean | Should -Not -Match 'HOST-9'
+            $clean | Should -Match 'LogVerdict_<MACHINE>_20260801'
         }
     }
 

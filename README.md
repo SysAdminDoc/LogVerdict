@@ -80,7 +80,10 @@ LogVerdict.exe -NoReport                        console only, write nothing
 LogVerdict.exe -OutputDir C:\Temp\lv             choose where reports land
 LogVerdict.exe -Redact                          mask identifiers before writing
 LogVerdict.exe -SkipReliability                 skip Reliability Monitor
+LogVerdict.exe -IncludeEvidence                 also zip the evidence for a ticket
 ```
+
+`-IncludeEvidence` writes a zip beside the report holding the reports, the matching text-log lines and the scanned event channels as `.evtx`. The report says what LogVerdict concluded; the bundle carries what it concluded it *from*. Combined with `-Redact` the channel exports are deliberately left out - `.evtx` is binary and carries the identifiers redaction removes from the text, and the manifest says so, so a withheld channel is never mistaken for a clean one.
 
 `-Redact` masks the account name, machine name, profile paths, SIDs and mail addresses out of the captured log messages before they are written. Use it when the report is going to a ticket or a vendor - the default report keeps everything, because locally that is the evidence. The reports say when they were redacted, and say that an identifier Windows wrote in a form this tool does not recognize may still be in there: read before sending.
 

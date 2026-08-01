@@ -8,6 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **`Export-LogVerdictReport -IncludeEvidence`** writes a zip beside the report holding the reports, the matching text-log lines and the scanned event channels as `.evtx` - the artifact to attach to a ticket. The report says what LogVerdict concluded; the bundle carries what it concluded it from, so somebody else can check the working.
+- Combined with `-Redact` the channel exports are deliberately omitted. `.evtx` is a binary format carrying the same account names, hostnames and SIDs that redaction strips out of the text, and a bundle that claimed to be sanitized while shipping them would be worse than one that never claimed it. The manifest states the omission, so a reader months later cannot mistake a withheld channel for a clean one.
+- The bundle carries the matching log lines rather than the log files. `CBS.log` alone routinely runs to hundreds of megabytes and almost none of it is evidence.
 - **Signatures that happened together are now reported together.** An Application Error 1000 and a Service Control Manager 7031 thirty seconds apart are one incident described twice, not two findings - but sorted into a list by volume they land in different places and nothing connects them. Correlated findings render above the flat list in the console, text and HTML reports, with the concrete window of time to look at rather than the signature spans, and they count toward the exit code.
 - Correlation rules live in a new `correlations` array in the verdict database and use the Sigma Correlation Rules Specification's vocabulary - `temporal`, `temporal_ordered`, `rules`, `timespan`, `group-by` - so anyone who can read a Sigma correlation can read one of these. Five ship.
 - **The window slides rather than bucketing, which is where this departs from Sigma.** Sigma cuts time into fixed intervals: with a one-hour timespan a crash at 09:59 and the service death it caused at 10:01 fall in different buckets and never correlate, while two unrelated events at 09:01 and 09:56 do. Both behaviours are backwards for a single machine. Tests pin both directions.
@@ -15,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- **Redaction missed any identifier sitting between underscores**, which included the one place the machine name most reliably appears: the report folder is named `LogVerdict_<MACHINE>_<timestamp>` and that path is all over the run transcript. The word-boundary lookaround treated `_` as a word character and refused to match there. Boundaries are now alphanumeric.
+- The run transcript was written unredacted even under `-Redact`. It is built from log lines rather than from the result object, so redacting the result never touched it - and it names the machine on almost every line.
 - The report writers crashed on a scan result that carried no `Correlations` property - an older result object, or one round-tripped through JSON. `@()` around a missing property yields a one-element array holding null, not an empty one.
 - The roadmap's list of uncovered events named two events that do not exist as written. `Microsoft-Windows-WUDFRd/219` is really `Kernel-PnP/219`, covered since 0.2.0 - the "driver failed to load" message names WudfRd in its text, not in its provider. And `Perflib/108` is really Perflib **1008**. Both were corrected rather than covered, since a rule for a provider or id nothing logs is a rule that can never fire.
 

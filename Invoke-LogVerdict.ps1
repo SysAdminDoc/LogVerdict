@@ -47,6 +47,7 @@ param(
     [string]$OutputDir,
     [switch]$NoReport,
     [switch]$Redact,
+    [switch]$IncludeEvidence,
     [switch]$Pause,
     [switch]$NoPause
 )
@@ -106,7 +107,7 @@ try {
     Show-LogVerdictReport -Result $result
 
     if (-not $NoReport) {
-        $exportArgs = @{ Result = $result; Redact = $Redact }
+        $exportArgs = @{ Result = $result; Redact = $Redact; IncludeEvidence = $IncludeEvidence }
         if ($OutputDir) { $exportArgs['OutputDir'] = $OutputDir }
         $out = Export-LogVerdictReport @exportArgs
         Write-Host ''
