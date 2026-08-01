@@ -188,92 +188,37 @@ function Show-LogVerdictGui {
             return
         }
 
-        $f = $Row.Finding
-        $style = Get-LVVerdictStyle -Verdict $f.Verdict
+        $detail = ConvertTo-LVGuiDetail -Finding $Row.Finding
 
         $ui.TxtNoSelection.Visibility = 'Collapsed'
         $ui.ScrDetail.Visibility = 'Visible'
         $ui.BtnCopy.IsEnabled = $true
 
-        $ui.TxtDetailVerdict.Text = $style.Label
-        $ui.PillDetail.Background = $style.Fill
-        $ui.TxtDetailVerdict.Foreground = $style.Ink
-        $ui.TxtDetailTitle.Text = [string]$f.Title
+        $ui.TxtDetailVerdict.Text = $detail.VerdictLabel
+        $ui.PillDetail.Background = $detail.VerdictFill
+        $ui.TxtDetailVerdict.Foreground = $detail.VerdictInk
+        $ui.TxtDetailTitle.Text = $detail.Title
+        $ui.TxtDetailMeta.Text = $detail.Meta
+        $ui.TxtPlain.Text  = $detail.Plain
+        $ui.TxtWhy.Text    = $detail.Why
+        $ui.TxtAction.Text = $detail.Action
 
-        # Built as a list and joined: '-f' inside a method call's parentheses treats
-        # the comma as an argument separator and starves the format operator.
-        $meta = New-Object System.Collections.Generic.List[string]
-        $meta.Add(('{0} occurrence(s)' -f $f.Count))
-        $meta.Add(('{0}/day' -f $f.PerDay))
-        if ($f.Source -eq 'event') {
-            $meta.Add(('{0} event {1}' -f $f.Provider, $f.Id))
-            $meta.Add(('{0} channel' -f $f.Channel))
-        } else {
-            $meta.Add(('{0} log' -f $f.Channel))
-        }
-        $meta.Add(('last seen {0}' -f (Format-LVGuiWhen -When $f.LastSeen)))
-        if ($f.UndatedCount -gt 0) {
-            $meta.Add(('{0} line(s) carried no timestamp' -f $f.UndatedCount))
-        }
-        $ui.TxtDetailMeta.Text = ($meta -join '  |  ')
-
-        $ui.TxtPlain.Text  = [string]$f.Plain
-        $ui.TxtWhy.Text    = [string]$f.Why
-        $ui.TxtAction.Text = [string]$f.Action
-
-        # The @() goes around the WHOLE pipeline, and the assignment re-wraps. A string
-        # is itself IEnumerable, so an ItemsSource that received one bare string would
-        # bind to its characters and render a rule's caveat one letter per line - which
-        # is exactly what a single-element filter result produces without this.
-        $fps = @($f.FalsePositives | Where-Object { $_ })
-        if ($fps.Count -gt 0) {
-            $ui.LstFalsePositives.ItemsSource = [string[]]$fps
+        if ($detail.FalsePositive.Count -gt 0) {
+            $ui.LstFalsePositives.ItemsSource = [string[]]$detail.FalsePositive
             $ui.PnlFalsePositives.Visibility = 'Visible'
         } else {
             $ui.PnlFalsePositives.Visibility = 'Collapsed'
         }
 
-        # Source URIs join the reference list so they are clickable; the licence and
-        # author go on the provenance line, because a hyperlink whose text carries a
-        # credit is no longer a usable URI.
-        $refs = @(@(@($f.References) + @($f.Sources | ForEach-Object { $_.uri })) |
-            Where-Object { $_ } | Select-Object -Unique)
-        if ($refs.Count -gt 0) {
-            $ui.LstRefs.ItemsSource = [string[]]$refs
+        if ($detail.Reference.Count -gt 0) {
+            $ui.LstRefs.ItemsSource = [string[]]$detail.Reference
             $ui.PnlRefs.Visibility = 'Visible'
         } else {
             $ui.PnlRefs.Visibility = 'Collapsed'
         }
 
-        $samples = @($f.Samples | Where-Object { $_ })
-        if ($samples.Count -eq 0) { $samples = @([string]$f.SampleMessage) }
-        $ui.TxtSample.Text = (($samples | Select-Object -Unique) -join ([Environment]::NewLine * 2))
-
-        if ($f.RuleId) {
-            $prov = New-Object System.Collections.Generic.List[string]
-            $prov.Add(('Rule {0}' -f $f.RuleId))
-            if ($f.Status)     { $prov.Add([string]$f.Status) }
-            if ($f.Confidence) { $prov.Add(('{0} confidence' -f $f.Confidence)) }
-            if ($f.Verified)   { $prov.Add(('last verified {0}' -f $f.Verified)) }
-            $line = ($prov -join ' - ') + '.'
-
-            # CC-BY requires attribution and an indication of changes; DRL requires the
-            # author be shown wherever the rule matches. Rendering it here is what makes
-            # deriving from those corpora legal, not just the field in the database.
-            $credits = New-Object System.Collections.Generic.List[string]
-            foreach ($src in @($f.Sources)) {
-                $parts = @($src.author, $src.licence) | Where-Object { $_ }
-                if ($parts.Count -eq 0) { continue }
-                $credit = $parts -join ', '
-                if ($src.modified) { $credit += ', adapted' }
-                if (-not $credits.Contains($credit)) { $credits.Add($credit) }
-            }
-            if ($credits.Count -gt 0) { $line += ' Derived from ' + ($credits -join '; ') + '.' }
-
-            $ui.TxtProvenance.Text = $line
-        } else {
-            $ui.TxtProvenance.Text = 'No rule in the verdict database covers this signature. LogVerdict reports it as unrecognized rather than guessing at a cause.'
-        }
+        $ui.TxtSample.Text = $detail.SampleText
+        $ui.TxtProvenance.Text = $detail.Provenance
     }
 
     $appendLog = {
@@ -363,9 +308,7 @@ function Show-LogVerdictGui {
         $view = [System.Windows.Data.CollectionViewSource]::GetDefaultView($observable)
         $view.Filter = [Predicate[object]] {
             param($Item)
-            if (-not $state.Chips[$Item.Verdict]) { return $false }
-            if ($state.Search -and $Item.Haystack -notlike ('*{0}*' -f $state.Search)) { return $false }
-            return $true
+            return Test-LVGuiFindingVisible -Row $Item -EnabledVerdict $state.Chips -Search $state.Search
         }
         $state.View = $view
         $ui.LvFindings.ItemsSource = $view
@@ -374,12 +317,7 @@ function Show-LogVerdictGui {
 
         # Counts are of everything found, not of what the filter is showing, so
         # switching a chip off never makes its own number change under the cursor.
-        $counts = @{}
-        foreach ($v in $script:LVVerdictDisplayOrder) { $counts[$v] = 0 }
-        foreach ($f in @($Result.Findings)) {
-            $key = [string]$f.Verdict
-            if ($counts.ContainsKey($key)) { $counts[$key]++ } else { $counts['unknown']++ }
-        }
+        $counts = Get-LVGuiVerdictCount -Finding @($Result.Findings)
         foreach ($v in $script:LVVerdictDisplayOrder) {
             $style = Get-LVVerdictStyle -Verdict $v
             $chip = $chipControl[$v]

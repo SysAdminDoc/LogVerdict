@@ -492,6 +492,126 @@ function ConvertTo-LVGuiRow {
     return ConvertTo-LVArrayOutput -Value @($rows)
 }
 
+function Test-LVGuiFindingVisible {
+    <#
+        .SYNOPSIS
+        Pure predicate for the findings collection view.
+
+        .DESCRIPTION
+        Search is a literal substring, not a PowerShell wildcard. Event messages often
+        contain brackets and question marks; treating those as wildcard syntax makes a
+        search appear to match text the user did not type.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Row,
+        [Parameter(Mandatory)][hashtable]$EnabledVerdict,
+        [AllowEmptyString()][AllowNull()][string]$Search
+    )
+
+    $verdict = [string]$Row.Verdict
+    if (-not $EnabledVerdict.ContainsKey($verdict) -or -not [bool]$EnabledVerdict[$verdict]) {
+        return $false
+    }
+
+    $needle = [string]$Search
+    if (-not $needle) { return $true }
+    return ([string]$Row.Haystack).IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0
+}
+
+function Get-LVGuiVerdictCount {
+    <#
+        .SYNOPSIS
+        Count findings into the six display categories.
+
+        .DESCRIPTION
+        An unrecognized verdict value is counted as unknown rather than disappearing
+        from the overview. This function knows no WPF types and is directly testable.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Finding)
+
+    $count = @{}
+    foreach ($verdict in $script:LVVerdictDisplayOrder) { $count[$verdict] = 0 }
+    foreach ($item in @($Finding)) {
+        $key = [string]$item.Verdict
+        if (-not $count.ContainsKey($key)) { $key = 'unknown' }
+        $count[$key]++
+    }
+    return $count
+}
+
+function ConvertTo-LVGuiDetail {
+    <#
+        .SYNOPSIS
+        Project one finding into the text and collections the detail pane displays.
+
+        .DESCRIPTION
+        Attribution, reference merging, sample fallback, timestamp wording, and the
+        unknown-rule explanation are presentation decisions, not event-handler work.
+        The returned object contains no WPF controls and can be tested headlessly.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Finding)
+
+    $style = Get-LVVerdictStyle -Verdict $Finding.Verdict
+    $meta = New-Object System.Collections.Generic.List[string]
+    $meta.Add(('{0} occurrence(s)' -f $Finding.Count))
+    $meta.Add(('{0}/day' -f $Finding.PerDay))
+    if ($Finding.Source -eq 'event') {
+        $meta.Add(('{0} event {1}' -f $Finding.Provider, $Finding.Id))
+        $meta.Add(('{0} channel' -f $Finding.Channel))
+    } else {
+        $meta.Add(('{0} log' -f $Finding.Channel))
+    }
+    $meta.Add(('last seen {0}' -f (Format-LVGuiWhen -When $Finding.LastSeen)))
+    if ($Finding.UndatedCount -gt 0) {
+        $meta.Add(('{0} line(s) carried no timestamp' -f $Finding.UndatedCount))
+    }
+
+    $falsePositive = @($Finding.FalsePositives | Where-Object { $_ })
+    $reference = @(@(@($Finding.References) + @($Finding.Sources | ForEach-Object { $_.uri })) |
+        Where-Object { $_ } | Select-Object -Unique)
+    $sample = @($Finding.Samples | Where-Object { $_ })
+    if ($sample.Count -eq 0) { $sample = @([string]$Finding.SampleMessage) }
+
+    if ($Finding.RuleId) {
+        $provenancePart = New-Object System.Collections.Generic.List[string]
+        $provenancePart.Add(('Rule {0}' -f $Finding.RuleId))
+        if ($Finding.Status)     { $provenancePart.Add([string]$Finding.Status) }
+        if ($Finding.Confidence) { $provenancePart.Add(('{0} confidence' -f $Finding.Confidence)) }
+        if ($Finding.Verified)   { $provenancePart.Add(('last verified {0}' -f $Finding.Verified)) }
+        $provenance = ($provenancePart -join ' - ') + '.'
+
+        $credit = New-Object System.Collections.Generic.List[string]
+        foreach ($source in @($Finding.Sources)) {
+            $part = @($source.author, $source.licence) | Where-Object { $_ }
+            if ($part.Count -eq 0) { continue }
+            $line = $part -join ', '
+            if ($source.modified) { $line += ', adapted' }
+            if (-not $credit.Contains($line)) { $credit.Add($line) }
+        }
+        if ($credit.Count -gt 0) { $provenance += ' Derived from ' + ($credit -join '; ') + '.' }
+    } else {
+        $provenance = 'No rule in the verdict database covers this signature. LogVerdict reports it as unrecognized rather than guessing at a cause.'
+    }
+
+    return [pscustomobject]@{
+        VerdictLabel  = $style.Label
+        VerdictFill   = $style.Fill
+        VerdictInk    = $style.Ink
+        Title         = [string]$Finding.Title
+        Meta          = $meta -join '  |  '
+        Plain         = [string]$Finding.Plain
+        Why           = [string]$Finding.Why
+        Action        = [string]$Finding.Action
+        FalsePositive = [string[]]$falsePositive
+        Reference     = [string[]]$reference
+        SampleText    = (@($sample | Select-Object -Unique) -join ([Environment]::NewLine * 2))
+        Provenance    = $provenance
+    }
+}
+
 function Get-LVStaleRuleCount {
     <#
         .SYNOPSIS

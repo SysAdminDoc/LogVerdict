@@ -1656,6 +1656,95 @@ Describe 'GUI and console feature parity' {
     }
 }
 
+Describe 'GUI pure presentation logic' {
+    It 'filters by enabled verdict and literal case-insensitive text' {
+        InModuleScope LogVerdict {
+            $row = [pscustomobject]@{ Verdict='investigate'; Haystack='Disk [2] Failure' }
+            $enabled = @{ investigate=$true }
+            Test-LVGuiFindingVisible -Row $row -EnabledVerdict $enabled -Search '[2]' | Should -BeTrue
+            Test-LVGuiFindingVisible -Row $row -EnabledVerdict $enabled -Search 'DISK' | Should -BeTrue
+            Test-LVGuiFindingVisible -Row $row -EnabledVerdict $enabled -Search '[3]' | Should -BeFalse
+            Test-LVGuiFindingVisible -Row $row -EnabledVerdict $enabled -Search '*' | Should -BeFalse
+            $enabled.investigate = $false
+            Test-LVGuiFindingVisible -Row $row -EnabledVerdict $enabled -Search '' | Should -BeFalse
+        }
+    }
+
+    It 'counts every display verdict and maps unexpected values to unknown' {
+        InModuleScope LogVerdict {
+            $count = Get-LVGuiVerdictCount -Finding @(
+                [pscustomobject]@{ Verdict='critical' },
+                [pscustomobject]@{ Verdict='actionable' },
+                [pscustomobject]@{ Verdict='actionable' },
+                [pscustomobject]@{ Verdict='future-value' }
+            )
+            $count.critical | Should -Be 1
+            $count.actionable | Should -Be 2
+            $count.unknown | Should -Be 1
+            $count.investigate | Should -Be 0
+            @($count.Keys).Count | Should -Be 6
+        }
+    }
+
+    It 'projects detail text, arrays, evidence, and attribution without WPF controls' {
+        InModuleScope LogVerdict {
+            $oldContrast = $env:LOGVERDICT_TEST_HIGH_CONTRAST
+            $env:LOGVERDICT_TEST_HIGH_CONTRAST = '0'
+            try {
+                $finding = [pscustomobject]@{
+                    Verdict='investigate'; Title='Disk delayed'; Count=2; PerDay=0.5
+                    Source='event'; Provider='Disk'; Id=153; Channel='System'
+                    LastSeen=[datetime]'2026-08-01T12:00:00'; UndatedCount=1
+                    Plain='plain'; Why='why'; Action='act'; FalsePositives=@('snapshot')
+                    References=@('https://example.test/rule')
+                    Sources=@([pscustomobject]@{
+                        uri='https://example.test/rule'; author='Example'; licence='CC-BY-4.0'; modified=$true
+                    })
+                    Samples=@('sample one', 'sample one'); SampleMessage='fallback'
+                    RuleId='LV-TEST'; Status='stable'; Confidence='high'; Verified='2026-08-01'
+                }
+
+                $detail = ConvertTo-LVGuiDetail -Finding $finding
+                $detail.VerdictLabel | Should -BeExactly 'INVESTIGATE'
+                $detail.Meta | Should -Match 'Disk event 153.*System channel.*1 line\(s\) carried no timestamp'
+                @($detail.FalsePositive) | Should -Be @('snapshot')
+                @($detail.Reference) | Should -Be @('https://example.test/rule')
+                $detail.SampleText | Should -BeExactly 'sample one'
+                $detail.Provenance | Should -Match '^Rule LV-TEST - stable - high confidence - last verified 2026-08-01\.'
+                $detail.Provenance | Should -Match 'Derived from Example, CC-BY-4\.0, adapted\.'
+                $detail.PSObject.Properties.Name | Should -Not -Contain 'Control'
+            } finally {
+                $env:LOGVERDICT_TEST_HIGH_CONTRAST = $oldContrast
+            }
+        }
+    }
+
+    It 'projects an unknown finding with raw-message fallback and explicit provenance' {
+        InModuleScope LogVerdict {
+            $finding = [pscustomobject]@{
+                Verdict='unknown'; Title='Unknown'; Count=1; PerDay=0.03
+                Source='textlog'; Channel='CBS'; LastSeen=$null; UndatedCount=0
+                Plain='plain'; Why='why'; Action='act'; SampleMessage='raw line'
+            }
+            $detail = ConvertTo-LVGuiDetail -Finding $finding
+            $detail.Meta | Should -Match 'CBS log.*last seen undated'
+            $detail.SampleText | Should -BeExactly 'raw line'
+            $detail.Provenance | Should -Match '^No rule in the verdict database covers this signature'
+            @($detail.FalsePositive).Count | Should -Be 0
+            @($detail.Reference).Count | Should -Be 0
+        }
+    }
+
+    It 'keeps the public window file as wiring over the pure helpers' {
+        $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Show-LogVerdictGui.ps1'
+        $text = Get-Content -LiteralPath $path -Raw
+        $text | Should -Match 'Test-LVGuiFindingVisible'
+        $text | Should -Match 'Get-LVGuiVerdictCount'
+        $text | Should -Match 'ConvertTo-LVGuiDetail'
+        $text | Should -Not -Match '\$state\.Chips\[\$Item\.Verdict\]'
+    }
+}
+
 Describe 'GUI row projection' {
     It 'dates an undated signature to DateTime.MinValue rather than to now' {
         # Undated text-log lines must sort to the bottom of a last-seen sort, not to
