@@ -1344,3 +1344,62 @@ Describe 'Rule provenance' {
         }
     }
 }
+
+Describe 'GUI colour contrast' {
+    It 'renders every text element at WCAG AA against every surface it sits on' {
+        # Computed from the markup rather than eyeballed. Only the attribute form is
+        # checked: a Foreground set through a Setter is almost always a disabled state,
+        # and disabled controls are explicitly exempt from the contrast minimum.
+        InModuleScope LogVerdict {
+            $xaml = Get-LVGuiXaml
+
+            $brush = @{}
+            foreach ($m in [regex]::Matches($xaml, '<SolidColorBrush x:Key="(\w+)"\s+Color="(#[0-9a-fA-F]{6})"')) {
+                $brush[$m.Groups[1].Value] = $m.Groups[2].Value
+            }
+
+            function Get-Channel([double]$v) {
+                if ($v -le 0.03928) { return $v / 12.92 }
+                return [Math]::Pow(($v + 0.055) / 1.055, 2.4)
+            }
+            function Get-Luminance([string]$hex) {
+                $r = Get-Channel ([Convert]::ToInt32($hex.Substring(1, 2), 16) / 255)
+                $g = Get-Channel ([Convert]::ToInt32($hex.Substring(3, 2), 16) / 255)
+                $b = Get-Channel ([Convert]::ToInt32($hex.Substring(5, 2), 16) / 255)
+                return (0.2126 * $r + 0.7152 * $g + 0.0722 * $b)
+            }
+            function Get-Ratio([string]$fg, [string]$bg) {
+                $a = Get-Luminance $fg
+                $b = Get-Luminance $bg
+                $hi = [Math]::Max($a, $b); $lo = [Math]::Min($a, $b)
+                return (($hi + 0.05) / ($lo + 0.05))
+            }
+
+            # Every background the window actually paints text on.
+            $surfaces = @($brush['Base'], $brush['Mantle'], $brush['Crust'])
+
+            $used = @([regex]::Matches($xaml, 'Foreground="\{StaticResource (\w+)\}"') |
+                ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+            $used.Count | Should -BeGreaterThan 3
+
+            foreach ($name in $used) {
+                $hex = $brush[$name]
+                $hex | Should -Not -BeNullOrEmpty -Because "brush '$name' must be defined"
+                foreach ($bg in $surfaces) {
+                    $ratio = Get-Ratio $hex $bg
+                    $ratio | Should -BeGreaterThan 4.5 -Because "$name ($hex) on $bg is only $([Math]::Round($ratio,2)):1 and carries body text"
+                }
+            }
+        }
+    }
+
+    It 'draws a visible focus ring on every interactive control' {
+        InModuleScope LogVerdict {
+            $xaml = Get-LVGuiXaml
+            $xaml | Should -Match 'x:Key="LVFocusVisual"'
+            # Button, accent button, chip toggle, checkbox, text box.
+            ([regex]::Matches($xaml, 'FocusVisualStyle" Value="\{StaticResource LVFocusVisual\}"')).Count |
+                Should -BeGreaterOrEqual 5
+        }
+    }
+}

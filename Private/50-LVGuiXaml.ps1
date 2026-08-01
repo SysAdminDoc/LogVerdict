@@ -55,6 +55,30 @@ function Get-LVGuiXaml {
     <SolidColorBrush x:Key="Green"    Color="#a6e3a1"/>
     <SolidColorBrush x:Key="Sky"      Color="#89dceb"/>
 
+    <!-- Muted TEXT. Overlay0 and Overlay1 are dim enough to fail WCAG AA for body text
+         (measured 3.36:1 and 4.44:1 on base), so they are now used only for borders and
+         dividers, where the 3:1 non-text threshold applies. This tone measures 5.81:1 on
+         base, 6.22:1 on mantle and 6.64:1 on crust - it clears AA on every surface the
+         window actually paints text on. Same value the HTML report uses, so the two
+         outputs stay visually consistent. -->
+    <SolidColorBrush x:Key="TextMuted" Color="#9399b2"/>
+
+    <!-- A custom ControlTemplate keeps the framework's dotted focus adorner, which is
+         effectively invisible on a dark surface. WCAG 2.4.7 wants focus visible and
+         1.4.11 wants it at 3:1, so keyboard focus draws an accent ring instead.
+         Unrelated to the no-keyboard-shortcuts policy: this is focus visibility, not
+         an accelerator. -->
+    <Style x:Key="LVFocusVisual">
+      <Setter Property="Control.Template">
+        <Setter.Value>
+          <ControlTemplate>
+            <Rectangle Margin="-3" StrokeThickness="2" Stroke="#89b4fa"
+                       RadiusX="7" RadiusY="7" SnapsToDevicePixels="True"/>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <!-- Scrollbars. The stock ones are light grey slabs that survive any amount of
          window recolouring, so they are replaced outright. -->
     <Style x:Key="ScrollThumb" TargetType="Thumb">
@@ -110,6 +134,7 @@ function Get-LVGuiXaml {
 
     <!-- Buttons -->
     <Style x:Key="BaseButton" TargetType="Button">
+      <Setter Property="FocusVisualStyle" Value="{StaticResource LVFocusVisual}"/>
       <Setter Property="Foreground" Value="{StaticResource Text}"/>
       <Setter Property="Background" Value="{StaticResource Surface0}"/>
       <Setter Property="BorderBrush" Value="{StaticResource Surface1}"/>
@@ -148,6 +173,7 @@ function Get-LVGuiXaml {
     </Style>
 
     <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource BaseButton}">
+      <Setter Property="FocusVisualStyle" Value="{StaticResource LVFocusVisual}"/>
       <Setter Property="Foreground" Value="#11111b"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Padding" Value="14,9"/>
@@ -178,6 +204,7 @@ function Get-LVGuiXaml {
 
     <!-- Verdict chips double as the filter. Checked = that verdict is visible. -->
     <Style x:Key="ChipToggle" TargetType="ToggleButton">
+      <Setter Property="FocusVisualStyle" Value="{StaticResource LVFocusVisual}"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Margin" Value="0,0,0,6"/>
       <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -217,6 +244,7 @@ function Get-LVGuiXaml {
     </Style>
 
     <Style TargetType="CheckBox">
+      <Setter Property="FocusVisualStyle" Value="{StaticResource LVFocusVisual}"/>
       <Setter Property="Foreground" Value="{StaticResource Subtext1}"/>
       <Setter Property="Margin" Value="0,0,0,9"/>
       <Setter Property="Cursor" Value="Hand"/>
@@ -253,6 +281,7 @@ function Get-LVGuiXaml {
     </Style>
 
     <Style TargetType="TextBox">
+      <Setter Property="FocusVisualStyle" Value="{StaticResource LVFocusVisual}"/>
       <Setter Property="Foreground" Value="{StaticResource Text}"/>
       <Setter Property="CaretBrush" Value="{StaticResource Blue}"/>
       <Setter Property="SelectionBrush" Value="{StaticResource Blue}"/>
@@ -282,7 +311,7 @@ function Get-LVGuiXaml {
 
     <!-- Section heading inside the detail pane -->
     <Style x:Key="SectionLabel" TargetType="TextBlock">
-      <Setter Property="Foreground" Value="{StaticResource Overlay1}"/>
+      <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
       <Setter Property="FontSize" Value="10.5"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Margin" Value="0,16,0,5"/>
@@ -295,7 +324,7 @@ function Get-LVGuiXaml {
     </Style>
 
     <Style x:Key="PanelLabel" TargetType="TextBlock">
-      <Setter Property="Foreground" Value="{StaticResource Overlay1}"/>
+      <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
       <Setter Property="FontSize" Value="10.5"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Margin" Value="0,0,0,9"/>
@@ -334,7 +363,7 @@ function Get-LVGuiXaml {
     </Style>
 
     <Style TargetType="GridViewColumnHeader">
-      <Setter Property="Foreground" Value="{StaticResource Overlay1}"/>
+      <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
       <Setter Property="FontSize" Value="10.5"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="HorizontalContentAlignment" Value="Left"/>
@@ -401,11 +430,11 @@ function Get-LVGuiXaml {
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="LogVerdict" Foreground="{StaticResource Text}" FontSize="17"
                          FontWeight="SemiBold"/>
-              <TextBlock x:Name="TxtVersion" Foreground="{StaticResource Overlay1}" FontSize="11"
+              <TextBlock x:Name="TxtVersion" Foreground="{StaticResource TextMuted}" FontSize="11"
                          Margin="8,0,0,0" VerticalAlignment="Bottom" Text="v0.0.0"/>
             </StackPanel>
             <TextBlock Text="What your logs actually say, in plain English"
-                       Foreground="{StaticResource Overlay1}" FontSize="11.5" Margin="0,1,0,0"/>
+                       Foreground="{StaticResource TextMuted}" FontSize="11.5" Margin="0,1,0,0"/>
           </StackPanel>
         </StackPanel>
 
@@ -474,7 +503,7 @@ function Get-LVGuiXaml {
             <!-- ==== Summary ==== -->
             <StackPanel x:Name="PnlSummary" Visibility="Collapsed">
               <TextBlock Text="VERDICTS" Style="{StaticResource PanelLabel}" Margin="0,26,0,9"/>
-              <TextBlock Foreground="{StaticResource Overlay0}" FontSize="11" TextWrapping="Wrap"
+              <TextBlock Foreground="{StaticResource TextMuted}" FontSize="11" TextWrapping="Wrap"
                          Margin="0,-4,0,9" Text="Click to show or hide a verdict."/>
 
               <ToggleButton x:Name="ChipCritical"    Style="{StaticResource ChipToggle}" Tag="#f38ba8" IsChecked="True"/>
@@ -488,22 +517,22 @@ function Get-LVGuiXaml {
               <Border Background="{StaticResource Base}" CornerRadius="6" Padding="12,10">
                 <StackPanel>
                   <Grid Margin="0,0,0,5">
-                    <TextBlock Text="Records read" Foreground="{StaticResource Overlay1}" FontSize="11.5"/>
+                    <TextBlock Text="Records read" Foreground="{StaticResource TextMuted}" FontSize="11.5"/>
                     <TextBlock x:Name="TxtRecords" HorizontalAlignment="Right"
                                Foreground="{StaticResource Text}" FontSize="11.5" Text="-"/>
                   </Grid>
                   <Grid Margin="0,0,0,5">
-                    <TextBlock Text="Distinct signatures" Foreground="{StaticResource Overlay1}" FontSize="11.5"/>
+                    <TextBlock Text="Distinct signatures" Foreground="{StaticResource TextMuted}" FontSize="11.5"/>
                     <TextBlock x:Name="TxtSignatures" HorizontalAlignment="Right"
                                Foreground="{StaticResource Text}" FontSize="11.5" Text="-"/>
                   </Grid>
                   <Grid Margin="0,0,0,5">
-                    <TextBlock Text="Noise removed" Foreground="{StaticResource Overlay1}" FontSize="11.5"/>
+                    <TextBlock Text="Noise removed" Foreground="{StaticResource TextMuted}" FontSize="11.5"/>
                     <TextBlock x:Name="TxtReduction" HorizontalAlignment="Right"
                                Foreground="{StaticResource Green}" FontSize="11.5" Text="-"/>
                   </Grid>
                   <Grid>
-                    <TextBlock Text="Rules applied" Foreground="{StaticResource Overlay1}" FontSize="11.5"/>
+                    <TextBlock Text="Rules applied" Foreground="{StaticResource TextMuted}" FontSize="11.5"/>
                     <TextBlock x:Name="TxtRules" HorizontalAlignment="Right"
                                Foreground="{StaticResource Text}" FontSize="11.5" Text="-"/>
                   </Grid>
@@ -549,10 +578,10 @@ function Get-LVGuiXaml {
                    AutomationProperties.Name="Filter findings by title, provider, event id or message"/>
           <TextBlock x:Name="TxtSearchHint" Grid.Column="0" IsHitTestVisible="False"
                      Margin="10,0,0,0" VerticalAlignment="Center"
-                     Foreground="{StaticResource Overlay0}" FontSize="12.5"
+                     Foreground="{StaticResource TextMuted}" FontSize="12.5"
                      Text="Filter by title, provider, event id or message"/>
           <TextBlock x:Name="TxtShown" Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center"
-                     Foreground="{StaticResource Overlay1}" FontSize="11.5" Text=""/>
+                     Foreground="{StaticResource TextMuted}" FontSize="11.5" Text=""/>
         </Grid>
 
         <ListView x:Name="LvFindings" Grid.Row="1" Background="Transparent" BorderThickness="0"
@@ -608,7 +637,7 @@ function Get-LVGuiXaml {
                   <DataTemplate>
                     <TextBlock Text="{Binding Origin}" TextTrimming="CharacterEllipsis"
                                ToolTip="{Binding Origin}" FontFamily="Consolas" FontSize="11.5"
-                               Foreground="{StaticResource Overlay1}"/>
+                               Foreground="{StaticResource TextMuted}"/>
                   </DataTemplate>
                 </GridViewColumn.CellTemplate>
               </GridViewColumn>
@@ -623,7 +652,7 @@ function Get-LVGuiXaml {
                      Foreground="{StaticResource Subtext0}" Text="Nothing scanned yet"/>
           <TextBlock x:Name="TxtEmptyBody" HorizontalAlignment="Center" Margin="0,7,0,0"
                      MaxWidth="420" TextAlignment="Center" TextWrapping="Wrap" LineHeight="19"
-                     Foreground="{StaticResource Overlay0}" FontSize="12.5"
+                     Foreground="{StaticResource TextMuted}" FontSize="12.5"
                      Text="Press Run scan. LogVerdict reads this machine's event channels and setup logs, collapses the repeats, and rules on what is left. Nothing is modified."/>
         </StackPanel>
       </Grid>
@@ -641,7 +670,7 @@ function Get-LVGuiXaml {
 
           <TextBlock x:Name="TxtNoSelection" Grid.Row="0" VerticalAlignment="Center"
                      HorizontalAlignment="Center" Margin="30" TextAlignment="Center"
-                     TextWrapping="Wrap" Foreground="{StaticResource Overlay0}" FontSize="12.5"
+                     TextWrapping="Wrap" Foreground="{StaticResource TextMuted}" FontSize="12.5"
                      Text="Select a finding to see what it means and what to do about it."/>
 
           <ScrollViewer x:Name="ScrDetail" Grid.Row="0" VerticalScrollBarVisibility="Auto"
@@ -655,7 +684,7 @@ function Get-LVGuiXaml {
               <TextBlock x:Name="TxtDetailTitle" Margin="0,11,0,0" FontSize="16" FontWeight="SemiBold"
                          TextWrapping="Wrap" LineHeight="22" Foreground="{StaticResource Text}" Text=""/>
               <TextBlock x:Name="TxtDetailMeta" Margin="0,7,0,0" FontSize="11.5" TextWrapping="Wrap"
-                         Foreground="{StaticResource Overlay1}" FontFamily="Consolas" Text=""/>
+                         Foreground="{StaticResource TextMuted}" FontFamily="Consolas" Text=""/>
 
               <TextBlock Text="IN PLAIN ENGLISH" Style="{StaticResource SectionLabel}"/>
               <TextBlock x:Name="TxtPlain" Style="{StaticResource BodyText}" Text=""/>
@@ -710,7 +739,7 @@ function Get-LVGuiXaml {
               </Border>
 
               <TextBlock x:Name="TxtProvenance" Margin="0,14,0,0" FontSize="11" TextWrapping="Wrap"
-                         Foreground="{StaticResource Overlay0}" LineHeight="16" Text=""/>
+                         Foreground="{StaticResource TextMuted}" LineHeight="16" Text=""/>
             </StackPanel>
           </ScrollViewer>
 
@@ -746,10 +775,10 @@ function Get-LVGuiXaml {
           <Button x:Name="BtnToggleLog" Grid.Column="0" Style="{StaticResource BaseButton}"
                   Background="Transparent" BorderBrush="Transparent" Padding="0"
                   HorizontalAlignment="Left" VerticalAlignment="Center" Content="Show activity log"
-                  Foreground="{StaticResource Overlay1}" FontSize="11.5"/>
+                  Foreground="{StaticResource TextMuted}" FontSize="11.5"/>
           <TextBlock x:Name="TxtLastLine" Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center"
                      TextTrimming="CharacterEllipsis" FontFamily="Consolas" FontSize="11"
-                     Foreground="{StaticResource Overlay0}" Text=""/>
+                     Foreground="{StaticResource TextMuted}" Text=""/>
         </Grid>
 
         <TextBox x:Name="TxtLog" Grid.Row="1" Margin="20,0,20,12" IsReadOnly="True"
@@ -775,7 +804,7 @@ function Get-LVGuiXaml {
                      TextTrimming="CharacterEllipsis" Foreground="{StaticResource Subtext0}"
                      Text="Ready."/>
           <TextBlock x:Name="TxtFooter" Grid.Column="1" VerticalAlignment="Center" FontSize="11"
-                     Foreground="{StaticResource Overlay0}" Text=""/>
+                     Foreground="{StaticResource TextMuted}" Text=""/>
         </Grid>
       </StackPanel>
     </Border>

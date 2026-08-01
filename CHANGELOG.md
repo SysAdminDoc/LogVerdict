@@ -17,6 +17,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **The window was unusable with a screen reader.** Every findings row was announced as the underlying object graph - hex colour codes and the whole search haystack read aloud - because nothing supplied an accessible name. Rows now announce as a sentence: "ACTIONABLE. An update failed to install. Seen 12 time(s), 0.55 per day, last 2 days ago. Source Microsoft-Windows-WindowsUpdateClient 20."
 - The look-back and filter boxes, the six verdict chips, the findings list, the evidence pane and the activity log all carry accessible names. The chips also state their count, so the summary is available without reading the sidebar.
 - Verdict is now spoken as well as coloured, so the severity of a finding no longer depends on seeing it.
+- **Muted text failed WCAG AA.** Two palette tones carried body text at 3.36:1 and 4.44:1 against the window background, below the 4.5:1 minimum. Text now uses a tone measuring 5.81:1 on the main surface, 6.22:1 on the sidebar and 6.64:1 on the log panel; the dimmer tones are kept for borders and dividers, where the 3:1 non-text threshold applies. Disabled controls keep the dim tone deliberately - they are exempt, and brightening them removed the cue that they were disabled.
+- **Keyboard focus was invisible.** Replacing the stock control templates left only the framework's dotted adorner, which disappears on a dark surface. Buttons, verdict chips, checkboxes and text boxes now draw an accent focus ring. This is focus visibility, not a keyboard shortcut - the tool still has none.
+- A test computes the contrast of every text colour against every surface it is painted on and fails below 4.5:1, so this cannot regress silently a third time.
 
 ### Fixed
 
