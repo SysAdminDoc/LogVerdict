@@ -219,8 +219,70 @@ Describe 'Template masking' {
     It 'masks the variable parts so repeats collapse' {
         InModuleScope LogVerdict {
             $a = ConvertTo-LVTemplate -Text 'Failed to open C:\Users\alice\thing.dat after 42 tries (0x80070005)'
-            $b = ConvertTo-LVTemplate -Text 'Failed to open C:\Users\bob\other.dat after 7 tries (0x8007000E)'
+            $b = ConvertTo-LVTemplate -Text 'Failed to open C:\Users\bob\other.dat after 7 tries (0x80070005)'
             $a | Should -Be $b
+        }
+    }
+
+    It 'never merges two different error codes' {
+        # This test previously asserted the opposite. On CBS and DISM the HRESULT is
+        # the diagnosis, so collapsing 0x800f081f (no source) with 0x80073712 (store
+        # corrupt) reported two unrelated problems, with two unrelated fixes, as one
+        # finding.
+        InModuleScope LogVerdict {
+            $codes = @('0x800f081f', '0x80073712', '0x800f0922')
+            $templates = $codes | ForEach-Object {
+                ConvertTo-LVTemplate -Text ('2026-07-31 10:00:00, Error CSI 00000123 Failed to stage package. Status = {0}' -f $_)
+            }
+            (@($templates | Sort-Object -Unique)).Count | Should -Be 3
+        }
+    }
+
+    It 'normalizes error code casing so it is one signature, not two' {
+        InModuleScope LogVerdict {
+            $upper = ConvertTo-LVTemplate -Text 'Operation failed 0x800F081F'
+            $lower = ConvertTo-LVTemplate -Text 'Operation failed 0x800f081f'
+            $upper | Should -Be $lower
+            $upper | Should -Match '<HEX:800f081f>'
+        }
+    }
+
+    It 'keeps an all-digit error code intact instead of re-masking it' {
+        # The preserved value sits between non-word characters, so a code with no
+        # letters is exposed to the number mask unless the order is right.
+        InModuleScope LogVerdict {
+            ConvertTo-LVTemplate -Text 'Failed 0x12345678' | Should -BeExactly 'Failed <HEX:12345678>'
+        }
+    }
+
+    It 'masks a long hex value as an address rather than preserving it' {
+        InModuleScope LogVerdict {
+            ConvertTo-LVTemplate -Text 'Faulting offset 0x00007ff8abcd1234' | Should -BeExactly 'Faulting offset <ADDR>'
+        }
+    }
+
+    It 'collapses the same servicing failure across different updates' {
+        # Package identity carries the KB, the arch and the version. Left unmasked, one
+        # recurring failure became one finding per update installed.
+        InModuleScope LogVerdict {
+            $a = ConvertTo-LVTemplate -Text 'Package_for_KB5034441~31bf3856ad364e35~amd64~~10.0.1.3 failed'
+            $b = ConvertTo-LVTemplate -Text 'Package_for_KB5055523~31bf3856ad364e35~amd64~~10.0.1.7 failed'
+            $a | Should -Be $b
+            $a | Should -BeExactly '<PKG> failed'
+        }
+    }
+
+    It 'does not report a build number as an IP address' {
+        InModuleScope LogVerdict {
+            $t = ConvertTo-LVTemplate -Text 'Servicing stack 10.0.26100.1234 loaded'
+            $t | Should -Match '<VER>'
+            $t | Should -Not -Match '<IP>'
+        }
+    }
+
+    It 'still recognises a real IPv4 address' {
+        InModuleScope LogVerdict {
+            ConvertTo-LVTemplate -Text 'Could not reach 192.168.1.20' | Should -BeExactly 'Could not reach <IP>'
         }
     }
 
@@ -277,12 +339,28 @@ Describe 'Signature reduction' {
                 [pscustomobject]@{
                     Source = 'textlog'; Channel = 'CBS'; Provider = 'CBS'; Id = 0
                     Level = 2; LevelName = 'Error'; TimeCreated = $now; MachineName = 'TESTPC'
-                    RecordId = $_; Message = "Failed to stage package $_ with error 0x8007000$_"
+                    # The error code is held constant on purpose. It is no longer a
+                    # variable part: ten different codes are ten different problems.
+                    RecordId = $_; Message = "Failed to stage package $_ from C:\pkg\p$_.cab with error 0x8007000e"
                 }
             }
             $sigs = Group-LVSignature -Record $records -WindowDays 30
             @($sigs).Count | Should -Be 1
             $sigs[0].Count | Should -Be 10
+        }
+    }
+
+    It 'splits a text-log signature when only the error code differs' {
+        InModuleScope LogVerdict {
+            $now = Get-Date
+            $records = @('0x800f081f', '0x80073712') | ForEach-Object {
+                [pscustomobject]@{
+                    Source = 'textlog'; Channel = 'CBS'; Provider = 'CBS'; Id = 0
+                    Level = 2; LevelName = 'Error'; TimeCreated = $now; MachineName = 'TESTPC'
+                    RecordId = 1; Message = "Failed to stage package with error $_"
+                }
+            }
+            @(Group-LVSignature -Record $records -WindowDays 30).Count | Should -Be 2
         }
     }
 

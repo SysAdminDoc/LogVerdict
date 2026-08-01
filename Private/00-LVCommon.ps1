@@ -180,19 +180,52 @@ function ConvertTo-LVTemplate {
         .DESCRIPTION
         Order matters: longer/more specific patterns are masked before shorter ones,
         otherwise the number mask eats the insides of GUIDs and paths.
+
+        One value is deliberately NOT masked. On CBS, DISM and Windows Update the error
+        code IS the diagnosis - 0x800f081f (no source), 0x80073712 (component store
+        corrupt) and 0x800f0922 (system partition full) are three different problems
+        with three different fixes. Masking them reported all three as one finding,
+        which defeated the whole point of the tool on the log families it is most
+        useful for. Short hex is therefore preserved inside the placeholder; long hex
+        is an address or a handle and stays masked.
     #>
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
 
     $t = $Text
+
+    # Structured identities first. Each contains digits, hex and dots that the generic
+    # masks below would otherwise chew apart from the inside out.
     $t = $t -replace '\{?[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}?', '<GUID>'
+    # Windows package identity: name~publicKeyToken~arch~language~version. Masked whole
+    # so one servicing failure recurring across thirty updates is one signature and not
+    # thirty. The trailing version is consumed here, which is also what stops it being
+    # misread as an IP address below.
+    $t = $t -replace '[\w.\-]+~[0-9A-Fa-f]{16}~\w*~\w*~[\d.]+', '<PKG>'
+    $t = $t -replace '\bKB\d{5,}\b', '<KB>'
     $t = $t -replace '\b[A-Za-z]:\\[^\s,;"'')]*', '<PATH>'
     $t = $t -replace '\\\\[^\s,;"'')]+', '<UNC>'
-    $t = $t -replace '\b\d{1,3}(\.\d{1,3}){3}\b', '<IP>'
-    $t = $t -replace '\b0x[0-9A-Fa-f]+\b', '<HEX>'
-    $t = $t -replace '\b[0-9A-Fa-f]{16,}\b', '<HEX>'
+
+    # A build number and an IPv4 address are both dotted integers, so the octet range
+    # is what separates them: no octet can exceed 255, but a version segment routinely
+    # does. Anything dotted that fails the address test is treated as a version.
+    $t = $t -replace '\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b', '<IP>'
+    $t = $t -replace '\b\d+(?:\.\d+){2,}\b', '<VER>'
+
     $t = $t -replace '\b\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}:\d{2}\S*)?', '<TIME>'
     $t = $t -replace '\b\d{2}:\d{2}:\d{2}(\.\d+)?\b', '<TIME>'
     $t = $t -replace '\b\d+\b', '<NUM>'
+
+    # Error codes run AFTER the number mask, not before. The preserved value sits
+    # between non-word characters, so an all-digit code such as 0x12345678 would
+    # otherwise be re-masked into <HEX:<NUM>>. Normalized to lower case so 0x800F081F
+    # and 0x800f081f are the same signature.
+    $t = [regex]::Replace($t, '\b0x([0-9A-Fa-f]{1,8})\b', {
+        param($Match)
+        '<HEX:' + $Match.Groups[1].Value.ToLowerInvariant() + '>'
+    })
+    $t = $t -replace '\b0x[0-9A-Fa-f]{9,}\b', '<ADDR>'
+    $t = $t -replace '\b[0-9A-Fa-f]{16,}\b', '<ADDR>'
+
     $t = $t -replace '\s+', ' '
     return $t.Trim()
 }

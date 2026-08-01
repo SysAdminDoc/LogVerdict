@@ -4,6 +4,14 @@ All notable changes to LogVerdict are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The signature masker was destroying the diagnosis on CBS, DISM and Windows Update.** Error codes were masked away, so `0x800f081f` (no repair source), `0x80073712` (component store corrupt) and `0x800f0922` (system partition full) - three different problems with three different fixes - were reported as a single finding. Short error codes are now preserved inside the placeholder and normalized to lower case; long hex is still masked as an address.
+- The same failure recurring across different updates produced one finding per update, because Windows package identity (`Package_for_KB...~token~arch~~version`) was left unmasked. It now collapses to `<PKG>`.
+- Build numbers were reported as IP addresses: the address mask matched any four dotted integers. Octets are now range-checked, and dotted numbers that cannot be an address are masked as `<VER>`.
+
 ## [0.4.0] - 2026-07-31
 
 ### Added
