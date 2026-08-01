@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "LogVerdict rule regression fixtures",
-  "updated": "2026-07-31",
+  "updated": "2026-08-01",
   "notes": "One minimal signature per rule, resolved against the shipped database by the test suite. origin=observed means the signature was captured from a real machine; origin=constructed means it was built from the rule match keys because nothing on the authoring machine exercised the rule.",
   "fixtures": [
     {
@@ -76,6 +76,18 @@
         "Provider": "Microsoft-Windows-WHEA-Logger",
         "Id": 18,
         "SampleMessage": "A fatal hardware error has occurred. Reported by component: Processor Core. Error Source: Machine Check Exception."
+      }
+    },
+    {
+      "ruleId": "LV-0012",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-WHEA-Logger",
+        "Id": 19,
+        "SampleMessage": "A corrected hardware error has occurred. Reported by component: Processor Core. Error Source: Corrected Machine Check. Error Type: Cache Hierarchy Error. Processor APIC ID: 4"
       }
     },
     {
@@ -462,6 +474,42 @@
         "Provider": "VSS",
         "Id": 8193,
         "SampleMessage": "Volume Shadow Copy Service error: Unexpected error calling routine ConvertStringSidToSid.  hr = 0x80070005, Access is denied."
+      }
+    },
+    {
+      "ruleId": "LV-0084",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "ESENT",
+        "Id": 486,
+        "SampleMessage": "svchost (1948) SRUJet: An attempt to move the file \"C:\\Windows\\system32\\SRU\\SRU.log\" to \"C:\\Windows\\system32\\SRU\\SRU00597.log\" failed with system error 5 (0x00000005): \"Access is denied. \". The move file operation will fail with error -1032 (0xfffffbf8)."
+      }
+    },
+    {
+      "ruleId": "LV-0085",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "ESENT",
+        "Id": 326,
+        "SampleMessage": "wuaueng.dll (3204) SUS20ClientDataStore: The database engine attached a database (1, C:\\ProgramData\\USOShared\\Logs\\datastore.edb). (Time=0 seconds)"
+      }
+    },
+    {
+      "ruleId": "LV-0086",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-Perflib",
+        "Id": 1008,
+        "SampleMessage": "The Open Procedure for service \"BITS\" in DLL \"C:\\Windows\\System32\\bitsperf.dll\" failed. Performance data for this service will not be available. The first four bytes (DWORD) of the Data section contains the error code."
       }
     },
     {
@@ -870,6 +918,66 @@
         "Provider": "Microsoft-Windows-WMI-Activity",
         "Id": 5861,
         "SampleMessage": "Namespace = root\\CIMV2, Provider = WmiPerfClass, operation failed."
+      }
+    },
+    {
+      "ruleId": "LV-0129",
+      "origin": "constructed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-DeviceSetupManager/Admin",
+        "Provider": "Microsoft-Windows-DeviceSetupManager",
+        "Id": 200,
+        "SampleMessage": "A connection to the Windows Update service could not be established."
+      }
+    },
+    {
+      "ruleId": "LV-0130",
+      "origin": "constructed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-DeviceSetupManager/Admin",
+        "Provider": "Microsoft-Windows-DeviceSetupManager",
+        "Id": 201,
+        "SampleMessage": "A connection to the Windows Metadata and Internet Services (WMIS) could not be established."
+      }
+    },
+    {
+      "ruleId": "LV-0131",
+      "origin": "constructed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-DeviceSetupManager/Admin",
+        "Provider": "Microsoft-Windows-DeviceSetupManager",
+        "Id": 202,
+        "SampleMessage": "The Network List Manager reports no connectivity to the internet."
+      }
+    },
+    {
+      "ruleId": "LV-0132",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-TPM-WMI",
+        "Id": 1796,
+        "SampleMessage": "The Secure Boot update failed to update a Secure Boot variable with error Secure Boot is not enabled on this machine.."
+      }
+    },
+    {
+      "ruleId": "LV-0133",
+      "origin": "observed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-AppReadiness/Admin",
+        "Provider": "Microsoft-Windows-AppReadiness",
+        "Id": 214,
+        "SampleMessage": "'MicrosoftWindows.59379618.InpApp_cw5n1h2txyewy' install failed for S-1-5-21-<SID>. Error: 'Package could not be registered.' (0.1633583 seconds)"
       }
     },
     {

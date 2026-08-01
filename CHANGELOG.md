@@ -4,6 +4,17 @@ All notable changes to LogVerdict are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Nine rules completing the community-verified list of high-traffic events**, closing the worklist begun in 0.6.0. `WHEA-Logger/19` (the processor's own corrected-error channel, escalating by rate), `TPM-WMI/1796` (a Secure Boot key update the firmware refused), `AppReadiness/214`, `Perflib/1008`, the `DeviceSetupManager/200/201/202` boot-order cluster, and two for `ESENT`. 85 rules ship.
+- ESENT is ruled as a family rather than per event id. Its events read as system database errors and are routinely mistaken for them; in fact each one belongs to whichever component the message names first. One rule covers the `-1032` access-denied file-operation family that `486` and `522` both report, and a provider-wide rule explains the rest without claiming a cause for an id nobody has documented. Together they cover 4 signatures here that previously reported as `unknown`.
+
+### Fixed
+
+- The roadmap's list of uncovered events named two events that do not exist as written. `Microsoft-Windows-WUDFRd/219` is really `Kernel-PnP/219`, covered since 0.2.0 - the "driver failed to load" message names WudfRd in its text, not in its provider. And `Perflib/108` is really Perflib **1008**. Both were corrected rather than covered, since a rule for a provider or id nothing logs is a rule that can never fire.
+
 ## [0.6.0] - 2026-07-31
 
 ### Added

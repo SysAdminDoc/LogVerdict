@@ -116,6 +116,34 @@
       "falsepositives": []
     },
     {
+      "id": "LV-0012",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-WHEA-Logger",
+        "eventId": 19
+      },
+      "verdict": "investigate",
+      "title": "The processor caught and corrected an internal error",
+      "plain": "The CPU detected an error inside itself - typically in a cache or an internal parity check - and corrected it without losing data. Nothing failed. The event names the processor core that reported it.",
+      "why": "This is the corrected machine check channel, and it is specifically about the processor rather than the wider platform that event 17 covers. A trickle is normal on many machines. What matters is the rate and whether it tracks something: errors that appear only under load, only when overclocked, or only after a BIOS change are the ones that mean something. Left running, a rising rate of corrected processor errors is the usual prelude to an uncorrected one, which is a bugcheck rather than a warning.",
+      "action": "Note the rate. If it is steady and the machine is stable, record it and move on. If it is climbing, appears under load, or started after a change: remove any overclock or undervolt, update BIOS and chipset, and test memory. Persisting at stock settings makes the CPU or board the suspect.",
+      "escalate": {
+        "perDay": 20,
+        "verdict": "actionable",
+        "why": "At this rate the processor is correcting errors continuously rather than occasionally, which is how failing silicon, an unstable overclock or inadequate power delivery announces itself before it starts crashing."
+      },
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/3300056/whea-logger-event-19-a-corrected-hardware-error-ha"
+      ],
+      "falsepositives": [
+        "Some platforms report a low steady trickle of corrected cache errors for their whole service life without ever failing.",
+        "An aggressive memory profile or a mild overclock produces these by design; they are a tuning signal rather than a hardware fault."
+      ]
+    },
+    {
       "id": "LV-0020",
       "status": "stable",
       "verified": "2026-07-31",
@@ -765,6 +793,71 @@
           "uri": "https://learn.microsoft.com/en-us/previous-versions/troubleshoot/windows-server/volume-shadow-copy-service-events",
           "retrieved": "2026-07-31"
         }
+      ]
+    },
+    {
+      "id": "LV-0084",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "locale": "en",
+      "match": {
+        "source": "event",
+        "provider": "ESENT",
+        "messagePattern": "(?i)(-1032|0xfffffbf8|access is denied)"
+      },
+      "verdict": "investigate",
+      "title": "A component could not write to its own database",
+      "plain": "ESENT is the small database engine that many Windows components keep their state in. One of them was refused access to its database or its log file. The name at the very start of the message is the component that owns the database, not ESENT itself.",
+      "why": "Error -1032 with system error 5 is a plain access denial on a file, and it shows up under several different ESENT event ids for the same underlying cause. The component named first in the message is what is actually broken; ESENT is only reporting on its behalf. Common causes are a security product holding the file open, a profile whose permissions were changed, or a database left behind by an app that was removed uncleanly.",
+      "action": "Read the process name at the start of the message and the file path it names. Check who owns that path and whether anything else has the file open. If the owning component is one you removed, the leftover database can be deleted with it.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/4074544/a-fix-for-esent-error-1032-event-id-413-486"
+      ],
+      "falsepositives": [
+        "Transient during a backup or a shadow copy, when the file is briefly locked and the component retries successfully.",
+        "Expected for a per-user database while that user is not logged on."
+      ]
+    },
+    {
+      "id": "LV-0085",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "provider": "ESENT"
+      },
+      "verdict": "informational",
+      "title": "A component's internal database logged an event",
+      "plain": "ESENT is a database engine Windows components use for their own storage - Windows Update, Search, the Start menu tile store and system resource usage all keep state in one. This entry came from one of those databases. The name at the very start of the message is the component that owns it.",
+      "why": "ESENT events read as system-level database errors and are routinely mistaken for them. They are not: each one belongs to whichever component the message names first, and the overwhelming majority are that component's own maintenance - a log rotating, a cache being rebuilt, a version store filling during a long operation. No rule here covers this specific event id, so no cause is claimed for it.",
+      "action": "Read the process name at the start of the message. If that component is working correctly, this is its housekeeping. If it is not, the event id and the component name together are what to search on - not ESENT alone.",
+      "confidence": "low",
+      "references": [],
+      "falsepositives": [
+        "Windows Update, Search and the Start menu generate these routinely on a perfectly healthy machine."
+      ]
+    },
+    {
+      "id": "LV-0086",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-Perflib",
+        "eventId": 1008
+      },
+      "verdict": "informational",
+      "title": "Performance counters for one service could not be loaded",
+      "plain": "Windows tried to load the performance-counter provider for the service named in the message and the DLL refused or was missing. Only that service's counters are unavailable; the service itself is unaffected and keeps running.",
+      "why": "This is monitoring plumbing, not the workload. It is common after an uninstall that left a counter registration behind, and it fires repeatedly because something keeps asking for counters that no longer resolve. It only matters if you actually collect performance data for the named service - otherwise it is a stale registry entry generating noise.",
+      "action": "Ignore unless you monitor that service's counters. If you do, or if you want the noise gone, rebuild the counter registration with 'lodctr /R' from an elevated prompt; the first four bytes of the event's Data section carry the underlying error code if you need it.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/1035945/how-to-use-lodctr-to-resolve-event-id-1008-or-3009"
+      ],
+      "falsepositives": [
+        "Left behind by software that was uninstalled without removing its counter registration; the named service may no longer exist at all."
       ]
     },
     {
@@ -1455,6 +1548,120 @@
       "references": [],
       "falsepositives": [
         "Inventory and monitoring agents generate these continuously while healthy."
+      ]
+    },
+    {
+      "id": "LV-0129",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-DeviceSetupManager",
+        "eventId": 200
+      },
+      "verdict": "benign",
+      "title": "Device metadata lookup ran before the network was up",
+      "plain": "The service that fetches friendly names and icons for your devices tried to reach Windows Update and could not. Windows carries on; the device works, it may just show a generic name.",
+      "why": "This service starts early in boot and asks for the network before the network is ready, so it logs the failure and retries later. It is one of the most common warnings on a healthy machine and it fires in a cluster with events 201 and 202, which are the same boot-order race reported by two other components.",
+      "action": "Ignore. If device names or icons are genuinely wrong and you want them fixed, the metadata refresh happens on its own once the machine has been online for a while.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/2574568/event-id-200-201-202-source-devicesetupmanager"
+      ],
+      "falsepositives": [
+        "Expected on every boot on a machine with no internet access, or one behind a proxy that blocks Windows Update."
+      ]
+    },
+    {
+      "id": "LV-0130",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-DeviceSetupManager",
+        "eventId": 201
+      },
+      "verdict": "benign",
+      "title": "Device metadata service could not reach its web service",
+      "plain": "The same device-naming service could not reach Windows Metadata and Internet Services. Purely cosmetic: it supplies device icons and friendly names.",
+      "why": "The companion to event 200 and caused by the same thing - the service asking for the network before the network exists. Nothing functional depends on it.",
+      "action": "Ignore.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/2574568/event-id-200-201-202-source-devicesetupmanager"
+      ],
+      "falsepositives": [
+        "Expected on any machine without internet access."
+      ]
+    },
+    {
+      "id": "LV-0131",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-DeviceSetupManager",
+        "eventId": 202
+      },
+      "verdict": "benign",
+      "title": "No internet connectivity at the moment metadata was requested",
+      "plain": "Windows reported no internet connection when the device metadata service asked for one.",
+      "why": "The third event in the boot-order cluster with 200 and 201. It reports the state of the network at one instant early in boot, not a network fault - which is why it appears on machines whose networking is demonstrably fine.",
+      "action": "Ignore. Only worth reading if the machine genuinely has no network, in which case you already know.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/2574568/event-id-200-201-202-source-devicesetupmanager"
+      ],
+      "falsepositives": [
+        "Normal at boot, and normal on a laptop that wakes before its wireless associates."
+      ]
+    },
+    {
+      "id": "LV-0132",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-TPM-WMI",
+        "eventId": 1796
+      },
+      "verdict": "investigate",
+      "title": "A Secure Boot key update did not apply",
+      "plain": "Windows tried to update one of the Secure Boot certificate lists held in firmware - the list of trusted signers, or the list of revoked ones - and the firmware refused. The message carries the specific error.",
+      "why": "Microsoft is rolling new Secure Boot certificates out through Windows Update, so this is being seen far more widely than it used to be. The error in the message decides what it means: 'Secure Boot is not enabled on this machine' is expected and harmless, while 'Access is denied' or 'The parameter is incorrect' means the update genuinely failed and the firmware is still carrying the old lists. Nothing breaks today either way. It matters because the machine stays on revoked keys, which is a security exposure rather than a stability one, and because the current certificates expire.",
+      "action": "Read the error text in the message. If it says Secure Boot is not enabled, that is the explanation - enable it in firmware if the machine is meant to have it. Otherwise apply the latest firmware update from the board or laptop vendor, which is what usually clears it. Do not clear the TPM to make the event stop: that destroys BitLocker and Windows Hello keys and does not address this.",
+      "confidence": "medium",
+      "references": [
+        "https://learn.microsoft.com/en-us/answers/questions/2188623/tpm-wmi-error-id-1796-in-event-viewer-after-win11"
+      ],
+      "falsepositives": [
+        "Expected and harmless on a machine that deliberately runs with Secure Boot disabled, or in a virtual machine with no Secure Boot support."
+      ],
+      "sources": [
+        {
+          "uri": "https://support.microsoft.com/en-us/topic/secure-boot-db-and-dbx-variable-update-events-37e47cf8-608b-4a87-8175-bdead630eb69",
+          "retrieved": "2026-08-01"
+        }
+      ]
+    },
+    {
+      "id": "LV-0133",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "event",
+        "provider": "Microsoft-Windows-AppReadiness",
+        "eventId": 214
+      },
+      "verdict": "investigate",
+      "title": "An app failed to install for a user at sign-in",
+      "plain": "App Readiness is the component that finishes installing the built-in Windows apps for each user account the first time they sign in. One of those installs failed. The message names the package and the reason.",
+      "why": "A single failure for one package usually means that app is simply unavailable for that account, and most users never notice. It matters when the same package fails for every account, or when the failure is 'Package could not be registered' repeatedly, because that points at a damaged app package store rather than at the app - and the same damage is what makes Start menu and Settings misbehave later.",
+      "action": "Note which package is named. If one package fails, ignore it or reinstall that app from the Store. If many fail, or the same one fails for every user, check the AppXDeployment-Server channel for the underlying error and consider that the package store needs repair.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "Expected for provisioned apps that were deliberately removed from the image - Windows still tries to stage them for a new user and logs the failure."
       ]
     },
     {
