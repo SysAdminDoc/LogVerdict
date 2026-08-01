@@ -1442,6 +1442,242 @@ Describe 'GUI coverage surfacing' {
     }
 }
 
+Describe 'Correlation' {
+    BeforeAll {
+        # The test data is built here, in the test's own scope, and handed to the module
+        # through -Parameters. Helper functions cannot simply be declared for
+        # InModuleScope to use: every InModuleScope call is its own scope, so a function
+        # defined in one is gone by the next.
+        function Build-Sig {
+            param($RuleId, $Key, [datetime[]]$Times, $Verdict = 'investigate')
+            [pscustomobject]@{
+                Key = $Key; RuleId = $RuleId; Verdict = $Verdict; Title = "t $RuleId"
+                Times = @($Times); Count = @($Times).Count
+            }
+        }
+        function Build-CorrDb {
+            param($Type = 'temporal', $Rules = @('R-1', 'R-2'), $Timespan = '5m', $Verdict = 'actionable')
+            [pscustomobject]@{
+                schemaVersion = 5; name = 'test'; updated = '2026-08-01'; rules = @()
+                correlations = @([pscustomobject]@{
+                    id = 'C-1'; status = 'stable'; verified = '2026-08-01'
+                    correlation = [pscustomobject]@{ type = $Type; rules = $Rules; timespan = $Timespan }
+                    verdict = $Verdict; title = 'together'; plain = 'p'; why = 'w'; action = 'a'; confidence = 'medium'
+                })
+            }
+        }
+        function Invoke-Correlate {
+            param($Finding, $Database)
+            InModuleScope LogVerdict -Parameters @{ F = @($Finding); D = $Database } {
+                param($F, $D)
+                @(Resolve-LVCorrelation -Finding $F -Database $D)
+            }
+        }
+    }
+
+    Context 'duration parsing' {
+        It 'parses <Text> as <Seconds> seconds' -ForEach @(
+            @{ Text = '30s'; Seconds = 30 }
+            @{ Text = '5m';  Seconds = 300 }
+            @{ Text = '2h';  Seconds = 7200 }
+            @{ Text = '1d';  Seconds = 86400 }
+        ) {
+            InModuleScope LogVerdict -Parameters @{ Text = $Text; Seconds = $Seconds } {
+                param($Text, $Seconds)
+                (ConvertFrom-LVTimespan -Text $Text).TotalSeconds | Should -Be $Seconds
+            }
+        }
+
+        It 'returns null for <Text> rather than guessing a default' -ForEach @(
+            @{ Text = '' }, @{ Text = '5' }, @{ Text = 'soon' }, @{ Text = '0m' }, @{ Text = '-5m' }, @{ Text = '5 minutes' }
+        ) {
+            # A window that silently became a default would make the rule fire on the
+            # wrong span; a window that silently became zero would make it never fire,
+            # which looks exactly like a healthy machine.
+            InModuleScope LogVerdict -Parameters @{ Text = $Text } {
+                param($Text)
+                ConvertFrom-LVTimespan -Text $Text | Should -BeNullOrEmpty
+            }
+        }
+    }
+
+    It 'matches a pair that straddles an hour boundary' {
+        # The reason this slides rather than bucketing. Sigma's fixed intervals put
+        # 09:59 and 10:01 in different buckets and never correlate them, which is
+        # precisely the pair a human would call obviously related.
+        $findings = @(
+            Build-Sig -RuleId 'R-1' -Key 'a' -Times @([datetime]'2026-06-20 09:59:30')
+            Build-Sig -RuleId 'R-2' -Key 'b' -Times @([datetime]'2026-06-20 10:01:00')
+        )
+        $got = Invoke-Correlate -Finding $findings -Database (Build-CorrDb)
+        @($got).Count | Should -Be 1
+        @($got[0].Windows).Count | Should -Be 1
+    }
+
+    It 'does not match a pair at opposite ends of one bucket' {
+        # The inverse of the boundary case, and the other half of why bucketing is wrong:
+        # 09:01 and 09:56 share a bucket but are 55 minutes apart.
+        $findings = @(
+            Build-Sig -RuleId 'R-1' -Key 'a' -Times @([datetime]'2026-06-20 09:01:00')
+            Build-Sig -RuleId 'R-2' -Key 'b' -Times @([datetime]'2026-06-20 09:56:00')
+        )
+        @(Invoke-Correlate -Finding $findings -Database (Build-CorrDb)).Count | Should -Be 0
+    }
+
+    It 'does not fire when only one of the referenced rules is present' {
+        $findings = @(Build-Sig -RuleId 'R-1' -Key 'a' -Times @([datetime]'2026-06-20 09:00:00'))
+        @(Invoke-Correlate -Finding $findings -Database (Build-CorrDb)).Count | Should -Be 0
+    }
+
+    It 'collapses a burst into one incident rather than one match per occurrence' {
+        # Twenty crashes beside twenty service deaths is one episode. Emitting a match
+        # per sliding-window position would replace the two findings this feature
+        # merges with several hundred, which is worse than not correlating at all.
+        $base = [datetime]'2026-06-20 09:00:00'
+        $a = 0..19 | ForEach-Object { $base.AddSeconds($_ * 2) }
+        $b = 0..19 | ForEach-Object { $base.AddSeconds(1 + $_ * 2) }
+        $findings = @(
+            Build-Sig -RuleId 'R-1' -Key 'a' -Times $a
+            Build-Sig -RuleId 'R-2' -Key 'b' -Times $b
+        )
+        $got = Invoke-Correlate -Finding $findings -Database (Build-CorrDb)
+        @($got[0].Windows).Count | Should -Be 1
+    }
+
+    It 'separates two genuinely distinct incidents' {
+        $findings = @(
+            Build-Sig -RuleId 'R-1' -Key 'a' -Times @([datetime]'2026-06-20 09:00:00', [datetime]'2026-06-24 05:00:00')
+            Build-Sig -RuleId 'R-2' -Key 'b' -Times @([datetime]'2026-06-20 09:00:30', [datetime]'2026-06-24 05:00:30')
+        )
+        $got = Invoke-Correlate -Finding $findings -Database (Build-CorrDb)
+        @($got[0].Windows).Count | Should -Be 2
+    }
+
+    It 'enforces order for temporal_ordered and ignores it for temporal' {
+        # R-2 occurs BEFORE R-1, so the declared order R-1 then R-2 is violated.
+        $findings = @(
+            Build-Sig -RuleId 'R-1' -Key 'a' -Times @([datetime]'2026-06-20 09:00:30')
+            Build-Sig -RuleId 'R-2' -Key 'b' -Times @([datetime]'2026-06-20 09:00:00')
+        )
+        @(Invoke-Correlate -Finding $findings -Database (Build-CorrDb -Type 'temporal_ordered')).Count | Should -Be 0
+        @(Invoke-Correlate -Finding $findings -Database (Build-CorrDb -Type 'temporal')).Count | Should -Be 1
+    }
+
+    It 'skips a correlation whose window is unreadable instead of defaulting it' {
+        $findings = @(
+            Build-Sig -RuleId 'R-1' -Key 'a' -Times @([datetime]'2026-06-20 09:00:00')
+            Build-Sig -RuleId 'R-2' -Key 'b' -Times @([datetime]'2026-06-20 09:00:10')
+        )
+        @(Invoke-Correlate -Finding $findings -Database (Build-CorrDb -Timespan 'whenever') 3>$null).Count | Should -Be 0
+    }
+
+    It 'reports the window bounds, not the signature spans' {
+        # The reader needs the moment to look at. A signature span can be weeks wide
+        # while the incident inside it lasted twelve seconds.
+        $findings = @(
+            Build-Sig -RuleId 'R-1' -Key 'a' -Times @([datetime]'2026-05-01 00:00:00', [datetime]'2026-06-20 09:00:00')
+            Build-Sig -RuleId 'R-2' -Key 'b' -Times @([datetime]'2026-06-20 09:00:12')
+        )
+        $w = @(Invoke-Correlate -Finding $findings -Database (Build-CorrDb))[0].Windows[0]
+        $w.Start | Should -Be ([datetime]'2026-06-20 09:00:00')
+        $w.End   | Should -Be ([datetime]'2026-06-20 09:00:12')
+    }
+
+    It 'keeps every occurrence time on a signature so correlation has something to read' {
+        InModuleScope LogVerdict {
+            $now = [datetime]'2026-06-20 09:00:00'
+            $records = 0..4 | ForEach-Object {
+                [pscustomobject]@{
+                    Source = 'event'; Channel = 'System'; Provider = 'P'; Id = 1
+                    Level = 2; LevelName = 'Error'; TimeCreated = $now.AddMinutes($_); Message = 'm'
+                }
+            }
+            $sig = @(Group-LVSignature -Record @($records) -WindowDays 30)[0]
+            @($sig.Times).Count | Should -Be 5
+            # Sorted here so the sliding window is correct; records arrive channel by
+            # channel, each sorted within itself but not across channels.
+            @($sig.Times)[0] | Should -BeLessThan @($sig.Times)[-1]
+        }
+    }
+
+    It 'never lets one runaway signature retain unbounded timestamps' {
+        InModuleScope LogVerdict {
+            $now = [datetime]'2026-06-20 09:00:00'
+            $n = $script:LVMaxSignatureTimes + 50
+            $records = 0..($n - 1) | ForEach-Object {
+                [pscustomobject]@{
+                    Source = 'event'; Channel = 'System'; Provider = 'P'; Id = 1
+                    Level = 2; LevelName = 'Error'; TimeCreated = $now.AddSeconds($_); Message = 'm'
+                }
+            }
+            $sig = @(Group-LVSignature -Record @($records) -WindowDays 30)[0]
+            $sig.Count | Should -Be $n
+            @($sig.Times).Count | Should -Be $script:LVMaxSignatureTimes
+        }
+    }
+
+    It 'ships correlations that reference rules which actually exist' {
+        # A correlation naming a deleted or renamed rule can never fire, and nothing
+        # else in the suite would notice.
+        $db = Get-LogVerdictDatabase
+        $ids = @($db.rules.id)
+        @($db.correlations).Count | Should -BeGreaterThan 0
+        foreach ($c in @($db.correlations)) {
+            foreach ($ref in @($c.correlation.rules)) {
+                $ids | Should -Contain $ref -Because "$($c.id) references $ref"
+            }
+        }
+    }
+
+    It 'ships correlations whose windows all parse' {
+        InModuleScope LogVerdict {
+            foreach ($c in @((Get-LogVerdictDatabase).correlations)) {
+                ConvertFrom-LVTimespan -Text $c.correlation.timespan |
+                    Should -Not -BeNullOrEmpty -Because "$($c.id) declares timespan '$($c.correlation.timespan)'"
+                $script:LVCorrelationType | Should -Contain $c.correlation.type -Because "$($c.id) declares type $($c.correlation.type)"
+            }
+        }
+    }
+
+    It 'correlates before benign suppression, so a benign signature still counts as evidence' {
+        # A benign signature is perfectly good evidence of WHEN something happened.
+        # Dropping it first would silently stop any pairing involving one from firing,
+        # for a reason nothing in the output could explain.
+        $findings = @(
+            Build-Sig -RuleId 'R-1' -Key 'a' -Verdict 'benign' -Times @([datetime]'2026-06-20 09:00:00')
+            Build-Sig -RuleId 'R-2' -Key 'b' -Times @([datetime]'2026-06-20 09:00:10')
+        )
+        @(Invoke-Correlate -Finding $findings -Database (Build-CorrDb)).Count | Should -Be 1
+    }
+
+    It 'renders correlations above the flat findings list in the text report' {
+        InModuleScope LogVerdict {
+            $result = [pscustomobject]@{
+                Version = '0.7.0'; MachineName = 'M'; ScanTime = (Get-Date); DaysBack = 30
+                Elevated = $false; Channels = @('System'); Reduction = [pscustomobject]@{ RecordCount = 1; SignatureCount = 1; Ratio = 1 }
+                DatabaseName = 'db'; RuleCount = 1; DatabaseDate = '2026-08-01'; WorstVerdict = 'critical'
+                CoverageNotes = @(); Horizon = @{}; HorizonWarning = $null; Stability = $null
+                Findings = @([pscustomobject]@{
+                    Verdict = 'investigate'; Title = 'lone signature'; Key = 'K'; Count = 1; PerDay = 1
+                    FirstSeen = (Get-Date); LastSeen = (Get-Date); RuleId = 'R-1'; Confidence = 'high'
+                    Plain = 'p'; Why = 'w'; Action = 'a'; SampleMessage = 'm'; Samples = @('m')
+                    References = @(); Sources = @(); FalsePositives = @(); Status = 'stable'; Verified = '2026-08-01'
+                })
+                Correlations = @([pscustomobject]@{
+                    Id = 'C-1'; Type = 'temporal'; Timespan = '5m'; RuleIds = @('R-1', 'R-2')
+                    Verdict = 'critical'; Title = 'the paired finding'; Plain = 'p'; Why = 'w'; Action = 'a'
+                    Confidence = 'medium'; References = @(); Sources = @(); FalsePositives = @()
+                    InvolvedKeys = @('K'); InvolvedTitles = @('lone signature'); OccurrenceCount = 2
+                    Windows = @([pscustomobject]@{ Start = (Get-Date); End = (Get-Date); Occurrences = @() })
+                })
+            }
+            $text = ConvertTo-LVTextReport -Result $result
+            $text | Should -Match 'THINGS THAT HAPPENED TOGETHER'
+            $text.IndexOf('the paired finding') | Should -BeLessThan $text.IndexOf('lone signature')
+        }
+    }
+}
+
 Describe 'Report redaction' {
     BeforeAll {
         $script:Dirty = 'User MACHINE-01\jsmith SID S-1-5-21-1691094572-189533642-593899815-1000 opened C:\Users\jsmith\AppData\Local\app.log as jsmith@contoso.com'

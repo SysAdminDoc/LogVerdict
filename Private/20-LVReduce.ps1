@@ -56,6 +56,11 @@ function Group-LVSignature {
                 LevelName     = $r.LevelName
                 SampleMessage = $r.Message
                 Samples       = (New-Object System.Collections.Generic.List[string])
+                # Every occurrence time, capped. FirstSeen and LastSeen describe the span
+                # but say nothing about what happened INSIDE it, and correlation is
+                # entirely a question about the inside: two signatures whose spans overlap
+                # may still never have occurred within minutes of each other.
+                Times         = (New-Object System.Collections.Generic.List[datetime])
                 Area          = $r.PSObject.Properties['Area'] | ForEach-Object { $_.Value }
             }
         }
@@ -72,6 +77,11 @@ function Group-LVSignature {
         } else {
             if ($null -eq $b.FirstSeen -or $r.TimeCreated -lt $b.FirstSeen) { $b.FirstSeen = $r.TimeCreated }
             if ($null -eq $b.LastSeen  -or $r.TimeCreated -gt $b.LastSeen)  { $b.LastSeen  = $r.TimeCreated }
+            # Capped so one runaway signature cannot hold a hundred thousand timestamps.
+            # The cap is a correctness statement, not just a memory one: past this many
+            # occurrences the signature is a continuous stream, and "did it coincide with
+            # something" stops being a meaningful question about it.
+            if ($b.Times.Count -lt $script:LVMaxSignatureTimes) { $b.Times.Add($r.TimeCreated) | Out-Null }
         }
         # Windows levels run 1=Critical .. 4=Information, so the lower number wins.
         if ($r.Level -gt 0 -and $r.Level -lt $b.WorstLevel) {
@@ -104,6 +114,10 @@ function Group-LVSignature {
         $b | Add-Member -NotePropertyName 'PerDay'   -NotePropertyValue ([Math]::Round($b.Count / $denominator, 2)) -Force
         $b | Add-Member -NotePropertyName 'SpanDays' -NotePropertyValue ([Math]::Round($spanDays, 1)) -Force
         $b | Add-Member -NotePropertyName 'Samples'  -NotePropertyValue (@($b.Samples.ToArray())) -Force
+        # Sorted once here rather than by every consumer. The correlator's sliding window
+        # is only correct over an ordered sequence, and records do not arrive in time
+        # order - channels are read one after another, each already sorted within itself.
+        $b | Add-Member -NotePropertyName 'Times'    -NotePropertyValue (@($b.Times.ToArray() | Sort-Object)) -Force
         $b
     }
 

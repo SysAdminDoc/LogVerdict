@@ -8,12 +8,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- **Nine rules completing the community-verified list of high-traffic events**, closing the worklist begun in 0.6.0. `WHEA-Logger/19` (the processor's own corrected-error channel, escalating by rate), `TPM-WMI/1796` (a Secure Boot key update the firmware refused), `AppReadiness/214`, `Perflib/1008`, the `DeviceSetupManager/200/201/202` boot-order cluster, and two for `ESENT`. 85 rules ship.
-- ESENT is ruled as a family rather than per event id. Its events read as system database errors and are routinely mistaken for them; in fact each one belongs to whichever component the message names first. One rule covers the `-1032` access-denied file-operation family that `486` and `522` both report, and a provider-wide rule explains the rest without claiming a cause for an id nobody has documented. Together they cover 4 signatures here that previously reported as `unknown`.
+- **Signatures that happened together are now reported together.** An Application Error 1000 and a Service Control Manager 7031 thirty seconds apart are one incident described twice, not two findings - but sorted into a list by volume they land in different places and nothing connects them. Correlated findings render above the flat list in the console, text and HTML reports, with the concrete window of time to look at rather than the signature spans, and they count toward the exit code.
+- Correlation rules live in a new `correlations` array in the verdict database and use the Sigma Correlation Rules Specification's vocabulary - `temporal`, `temporal_ordered`, `rules`, `timespan`, `group-by` - so anyone who can read a Sigma correlation can read one of these. Five ship.
+- **The window slides rather than bucketing, which is where this departs from Sigma.** Sigma cuts time into fixed intervals: with a one-hour timespan a crash at 09:59 and the service death it caused at 10:01 fall in different buckets and never correlate, while two unrelated events at 09:01 and 09:56 do. Both behaviours are backwards for a single machine. Tests pin both directions.
+- Correlation is deliberately curated and never inferred. Checked against this machine, the top discovered co-occurrences were all high-volume noise signatures pairing with everything - a constantly-firing signature is near everything by construction, so an inferred correlation is mostly an artefact of volume rather than a cause.
 
 ### Fixed
 
+- The report writers crashed on a scan result that carried no `Correlations` property - an older result object, or one round-tripped through JSON. `@()` around a missing property yields a one-element array holding null, not an empty one.
 - The roadmap's list of uncovered events named two events that do not exist as written. `Microsoft-Windows-WUDFRd/219` is really `Kernel-PnP/219`, covered since 0.2.0 - the "driver failed to load" message names WudfRd in its text, not in its provider. And `Perflib/108` is really Perflib **1008**. Both were corrected rather than covered, since a rule for a provider or id nothing logs is a rule that can never fire.
+
+### Rules
+
+- **Nine rules completing the community-verified list of high-traffic events**, closing the worklist begun in 0.6.0. `WHEA-Logger/19` (the processor's own corrected-error channel, escalating by rate), `TPM-WMI/1796` (a Secure Boot key update the firmware refused), `AppReadiness/214`, `Perflib/1008`, the `DeviceSetupManager/200/201/202` boot-order cluster, and two for `ESENT`. 85 rules ship.
+- ESENT is ruled as a family rather than per event id. Its events read as system database errors and are routinely mistaken for them; in fact each one belongs to whichever component the message names first. One rule covers the `-1032` access-denied file-operation family that `486` and `522` both report, and a provider-wide rule explains the rest without claiming a cause for an id nobody has documented. Together they cover 4 signatures here that previously reported as `unknown`.
 
 ## [0.6.0] - 2026-07-31
 

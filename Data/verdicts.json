@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "name": "LogVerdict core verdict database",
   "updated": "2026-07-31",
   "notes": "Rules are evaluated most-specific first. A signature matching no rule is reported as 'unknown' with its raw evidence - never with a guessed cause. Each rule carries a 'verified' date because guidance ages, and a 'status' controlling whether it is used: stable and test rules match, experimental rules match, deprecated and unsupported rules are retained for traceability but never applied.",
@@ -1805,6 +1805,104 @@
       "falsepositives": [
         "Third-party installers and updaters write to Reliability Monitor routinely while working correctly."
       ]
+    }
+  ],
+  "correlations": [
+    {
+      "id": "LVC-0001",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "correlation": {
+        "type": "temporal",
+        "rules": ["LV-0010", "LV-0020"],
+        "timespan": "10m"
+      },
+      "verdict": "critical",
+      "title": "The machine died within minutes of the hardware reporting an error",
+      "plain": "Corrected hardware errors and an unexpected restart were recorded within the same few minutes. Separately each is common. Together they describe hardware that stopped correcting.",
+      "why": "A corrected hardware error on its own is background noise on many machines, and an unexpected restart on its own has a dozen innocent causes including a power cut. The pairing removes both explanations: the component reporting recoverable errors is the one that was live when the machine went down. This is the most valuable thing correlation buys here, because reading the two findings separately is exactly what leads people to dismiss the WHEA entries as noise. Note the timestamps will usually show the restart FIRST and the hardware errors a few seconds later - that is not the order things happened in. Both are written at the next boot, when the firmware hands its error records from the previous session over to Windows, so the errors are older than the restart even though they are logged after it. This pairing is deliberately not order-sensitive for that reason.",
+      "action": "Treat the hardware as suspect rather than the software. Read which component the WHEA entries name, then test memory, check temperatures and power delivery, and remove any overclock or undervolt. If the machine is under warranty this pairing is the evidence to send.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "A genuine power loss produces the unexpected restart, and a machine that logs corrected errors continuously will have some inside any ten-minute window by chance. Check whether the WHEA rate is steady - if it is the same before and after, the timing may be coincidence."
+      ]
+    },
+    {
+      "id": "LVC-0002",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "correlation": {
+        "type": "temporal_ordered",
+        "rules": ["LV-0050", "LV-0040"],
+        "timespan": "5m"
+      },
+      "verdict": "actionable",
+      "title": "An application crash took a service down with it",
+      "plain": "A program crashed, and a Windows service terminated unexpectedly within the next few minutes. The order matters here: the crash came first.",
+      "why": "Reported separately these sit in different parts of a list sorted by volume, and nothing connects them. The ordering is what makes this a cause rather than a coincidence - a service that died first and an application that crashed afterwards is the opposite story, and needs the opposite fix.",
+      "action": "Read the faulting module in the Application Error entry, then check whether the service that died depends on it. Fixing the crashing component usually fixes both; restarting the service treats the symptom.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "A machine shutting down crashes applications and stops services within the same window, in that order, entirely normally."
+      ]
+    },
+    {
+      "id": "LVC-0003",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "correlation": {
+        "type": "temporal",
+        "rules": ["LV-0021", "LV-0020"],
+        "timespan": "15m"
+      },
+      "verdict": "actionable",
+      "title": "The unexpected restart was a blue screen, and the stop code is here",
+      "plain": "An unexpected shutdown was recorded, and a bugcheck was logged in the same window. They are one event: the machine blue-screened, and the stop code in the bugcheck entry says why.",
+      "why": "Kernel-Power 41 is famously uninformative - it says the machine went down without saying how - and it is the entry people find first. The bugcheck record carries the actual stop code and its parameters. Pairing them turns 'it restarted and I do not know why' into a specific fault to look up.",
+      "action": "Read the stop code from the bugcheck entry rather than researching Kernel-Power 41, which will not tell you anything. The minidump the report inventories, if present, names the driver.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": []
+    },
+    {
+      "id": "LVC-0004",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "correlation": {
+        "type": "temporal_ordered",
+        "rules": ["LV-0030", "LV-0032"],
+        "timespan": "1h"
+      },
+      "verdict": "critical",
+      "title": "File system damage followed a disk error, so the disk is the cause",
+      "plain": "The storage device reported an error, and NTFS then found structural damage on a volume within the hour. The disk failed first.",
+      "why": "The usual response to NTFS corruption is to run chkdsk and consider it handled. That is the wrong response when a hardware error preceded it, because the damage will simply come back - and every chkdsk pass on a failing drive is more read and write load on the thing that is failing. The order is what distinguishes a file system problem from a disk problem.",
+      "action": "Get the data off first. Do not run repeated chkdsk passes on a drive that is reporting hardware errors - check its SMART data and replace it. Repair the file system after the disk is known good, not before.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": [
+        "An external drive unplugged mid-write produces both, in this order, without the drive being faulty."
+      ]
+    },
+    {
+      "id": "LVC-0005",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "correlation": {
+        "type": "temporal",
+        "rules": ["LV-0072", "LV-0090"],
+        "timespan": "30m"
+      },
+      "verdict": "actionable",
+      "title": "The update failed because the component store is damaged",
+      "plain": "A Windows update failed to install, and the component servicing log recorded store corruption in the same window. The update did not fail on its own - it failed because the store it installs into is damaged.",
+      "why": "An update failure alone usually gets retried, and retrying is reasonable. Paired with store corruption it will not succeed no matter how many times it is retried, and the retries are what people spend days on. The pairing changes the action completely.",
+      "action": "Repair the component store before retrying the update: DISM /Online /Cleanup-Image /RestoreHealth, then sfc /scannow, then retry. If DISM cannot repair it, it needs a source - a matching install image - which is the case the CBS finding in this report describes.",
+      "confidence": "medium",
+      "references": [],
+      "falsepositives": []
     }
   ]
 }

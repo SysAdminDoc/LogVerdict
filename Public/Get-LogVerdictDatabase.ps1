@@ -80,10 +80,22 @@ function Get-LogVerdictDatabase {
         $ordinal++
     }
 
+    # Correlations merge the same way rules do, local first, so a site can add its own
+    # pairings. They carry no ordinal because nothing resolves between two competing
+    # correlations - every one that fires is reported.
+    $correlations = New-Object System.Collections.Generic.List[object]
+    foreach ($p in $extra) {
+        if (-not (Test-Path -LiteralPath $p)) { continue }
+        $addl = Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($c in @($addl.correlations | Where-Object { $_ })) { $correlations.Add($c) | Out-Null }
+    }
+    foreach ($c in @($db.correlations | Where-Object { $_ })) { $correlations.Add($c) | Out-Null }
+
     return [pscustomobject]@{
         schemaVersion = $db.schemaVersion
         name          = $db.name
         updated       = $db.updated
         rules         = @($rules.ToArray())
+        correlations  = @($correlations.ToArray())
     }
 }

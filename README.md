@@ -37,13 +37,14 @@ LogVerdict is the missing middle: local, whole-machine, multi-source, deduplicat
 ## How it works
 
 ```
-Collect  ->  Reduce  ->  Resolve  ->  Report
+Collect  ->  Reduce  ->  Resolve  ->  Correlate  ->  Report
 ```
 
 1. **Collect** - read-only. Nothing on the machine is modified beyond the report folder.
 2. **Reduce** - event records group by `Provider + EventID`. Text-log lines group by a masked template (GUIDs, paths, hex, numbers and timestamps replaced), so the same failure recurring with different parameters collapses to one entry. On a typical machine this is a **26:1 reduction**, rising to **311:1** across every populated channel.
 3. **Resolve** - each signature is matched against [`Data/verdicts.json`](Data/verdicts.json), a curated database of human-written rulings. Most-specific rule wins. Some rules escalate by rate: corrected hardware errors are noise at a trickle and a failing component at volume.
-4. **Report** - console, plain text, JSON, and a self-contained dark HTML page that opens anywhere with no network access.
+4. **Correlate** - signatures that occurred within minutes of each other are reported together, above the flat list, with the window of time to look at. Corrected hardware errors and an unexpected restart are each easy to dismiss alone; together they name a cause. Correlations are curated, never inferred - on one machine the loudest signature co-occurs with everything, so a discovered correlation is mostly an artefact of volume.
+5. **Report** - console, plain text, JSON, and a self-contained dark HTML page that opens anywhere with no network access.
 
 **No language model is involved.** Every explanation is a curated rule written by a human. A signature with no matching rule is reported as `unknown` with its raw evidence and **no guess at a cause** - because a confidently wrong fix is worse than no fix.
 

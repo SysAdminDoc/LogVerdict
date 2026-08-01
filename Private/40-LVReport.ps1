@@ -95,8 +95,29 @@ function Write-LVConsoleReport {
     }
     Write-Host ''
 
+    # Filtered, not merely wrapped. A result object from an older build - or one that
+    # has been through JSON and back - has no Correlations property at all, and @() on a
+    # missing property yields a one-element array holding null, which would crash the
+    # renderer on the first property access.
+    $correlated = @($Result.Correlations | Where-Object { $_ })
+
+    # Correlations first, deliberately. Printed after the flat list they are a footnote
+    # to conclusions the reader has already drawn from the individual parts, which is
+    # the exact mistake this feature exists to prevent.
+    foreach ($c in $correlated) {
+        Write-Host ''
+        Write-Host ('  [TOGETHER: {0}] {1}' -f $c.Verdict.ToUpper(), $c.Title) -ForegroundColor $script:LVVerdictColor[$c.Verdict]
+        Write-Host ('    {0} occurred within {1} of each other, {2} time(s)' -f (@($c.RuleIds) -join ' + '), $c.Timespan, @($c.Windows).Count) -ForegroundColor DarkGray
+        foreach ($w in @($c.Windows | Select-Object -First 3)) {
+            Write-Host ('    when          : {0:yyyy-MM-dd HH:mm:ss} to {1:HH:mm:ss}' -f $w.Start, $w.End) -ForegroundColor DarkGray
+        }
+        Write-Host ('    What it means : {0}' -f $c.Plain)
+        Write-Host ('    Why it matters: {0}' -f $c.Why)
+        Write-Host ('    Do this       : {0}' -f $c.Action) -ForegroundColor White
+    }
+
     $notable = @($Result.Findings | Where-Object { (Get-LVVerdictRank -Verdict $_.Verdict) -ge (Get-LVVerdictRank -Verdict 'unknown') })
-    if ($notable.Count -eq 0) {
+    if ($notable.Count -eq 0 -and $correlated.Count -eq 0) {
         Write-LVLog -Level ok -Message 'Nothing above the informational line in this window.'
     }
 
@@ -159,6 +180,35 @@ function ConvertTo-LVTextReport {
     Add-LVLine $sb
     Add-LVLine $sb ('-' * 78)
     Add-LVLine $sb
+
+    $correlated = @($Result.Correlations | Where-Object { $_ })
+    if ($correlated.Count -gt 0) {
+        Add-LVLine $sb 'THINGS THAT HAPPENED TOGETHER'
+        Add-LVLine $sb 'These signatures also appear individually below. Read them here first: apart'
+        Add-LVLine $sb 'they describe symptoms, together they name a cause.'
+        Add-LVLine $sb
+        foreach ($c in $correlated) {
+            Add-LVLine $sb ('[TOGETHER: {0}] {1}' -f $c.Verdict.ToUpper(), $c.Title)
+            Add-LVLine $sb ('  Correlation : {0} ({1}, within {2})' -f $c.Id, $c.Type, $c.Timespan)
+            Add-LVLine $sb ('  Signatures  : {0}' -f (@($c.InvolvedKeys) -join ', '))
+            Add-LVLine $sb ('  Occurred    : {0} time(s)' -f @($c.Windows).Count)
+            foreach ($w in @($c.Windows | Select-Object -First 10)) {
+                Add-LVLine $sb ('    {0:yyyy-MM-dd HH:mm:ss} to {1:HH:mm:ss} ({2} record(s))' -f $w.Start, $w.End, @($w.Occurrences).Count)
+            }
+            if (@($c.Windows).Count -gt 10) {
+                Add-LVLine $sb ('    ... and {0} more' -f (@($c.Windows).Count - 10))
+            }
+            Add-LVLine $sb ('  What it means: {0}' -f $c.Plain)
+            Add-LVLine $sb ('  Why it matters: {0}' -f $c.Why)
+            Add-LVLine $sb ('  Do this      : {0}' -f $c.Action)
+            foreach ($fp in @($c.FalsePositives | Where-Object { $_ })) {
+                Add-LVLine $sb ('  Could be innocent when: {0}' -f $fp)
+            }
+            Add-LVLine $sb
+        }
+        Add-LVLine $sb ('-' * 78)
+        Add-LVLine $sb
+    }
 
     foreach ($f in $Result.Findings) {
         Add-LVLine $sb ('[{0}] {1}' -f $f.Verdict.ToUpper(), $f.Title)
@@ -283,6 +333,34 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             Add-LVLine $sb ('<li>{0}</li>' -f (ConvertTo-LVHtmlEncoded $note))
         }
         Add-LVLine $sb '</ul></div>'
+    }
+
+    $correlated = @($Result.Correlations | Where-Object { $_ })
+    if ($correlated.Count -gt 0) {
+        Add-LVLine $sb '<h2>Things that happened together</h2>'
+        Add-LVLine $sb '<div class="sub">These signatures also appear individually below. Apart they describe symptoms; together they name a cause.</div>'
+        foreach ($c in $correlated) {
+            $chex = $script:LVVerdictHex[$c.Verdict]
+            if (-not $chex) { $chex = '#6c7086' }
+
+            Add-LVLine $sb ('<div class="f" style="border-left-color:{0}">' -f $chex)
+            Add-LVLine $sb ('<div class="h"><span class="v" style="background:{0}">{1}</span> {2}</div>' -f `
+                $chex, (ConvertTo-LVHtmlEncoded $c.Verdict.ToUpper()), (ConvertTo-LVHtmlEncoded $c.Title))
+            Add-LVLine $sb ('<div class="meta">{0} &middot; {1} within {2} &middot; {3} occurrence(s)</div>' -f `
+                (ConvertTo-LVHtmlEncoded ((@($c.RuleIds) -join ' + '))), (ConvertTo-LVHtmlEncoded $c.Type),
+                (ConvertTo-LVHtmlEncoded $c.Timespan), @($c.Windows).Count)
+            $when = (@($c.Windows | Select-Object -First 10 | ForEach-Object { '{0:yyyy-MM-dd HH:mm:ss} to {1:HH:mm:ss}' -f $_.Start, $_.End }) -join '; ')
+            Add-LVLine $sb ('<div class="row"><div class="lbl">When</div><div class="val">{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $when))
+            Add-LVLine $sb ('<div class="row"><div class="lbl">Signatures</div><div class="val">{0}</div></div>' -f (ConvertTo-LVHtmlEncoded ((@($c.InvolvedKeys) -join ', '))))
+            Add-LVLine $sb ('<div class="row"><div class="lbl">What it means</div><div class="val">{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $c.Plain))
+            Add-LVLine $sb ('<div class="row"><div class="lbl">Why it matters</div><div class="val">{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $c.Why))
+            Add-LVLine $sb ('<div class="row"><div class="lbl">Do this</div><div class="val">{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $c.Action))
+            foreach ($fp in @($c.FalsePositives | Where-Object { $_ })) {
+                Add-LVLine $sb ('<div class="row"><div class="lbl">Could be innocent when</div><div class="val">{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $fp))
+            }
+            Add-LVLine $sb '</div>'
+        }
+        Add-LVLine $sb '<h2>Every signature</h2>'
     }
 
     foreach ($f in $Result.Findings) {

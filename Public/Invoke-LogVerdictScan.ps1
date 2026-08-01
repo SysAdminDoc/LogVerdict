@@ -111,6 +111,15 @@ function Invoke-LogVerdictScan {
     Write-LVLog -Level info -Message ('Applying {0} rule(s) from the verdict database...' -f @($db.rules).Count)
     $findings = Resolve-LVVerdict -Signature $signatures -Database $db
 
+    # Correlate BEFORE benign suppression. A benign signature is still perfectly good
+    # evidence of when something happened, and dropping it here would silently break any
+    # pairing that involves one - the correlation would stop firing for a reason nothing
+    # in the output could explain.
+    $correlations = @(Resolve-LVCorrelation -Finding @($findings) -Database $db)
+    if ($correlations.Count -gt 0) {
+        Write-LVLog -Level warn -Message ('{0} correlated finding(s): signatures that occurred together and mean more than they do apart' -f $correlations.Count)
+    }
+
     if (-not $IncludeBenign) {
         $before = @($findings).Count
         $findings = @($findings | Where-Object { $_.Verdict -ne 'benign' })
@@ -170,8 +179,11 @@ function Invoke-LogVerdictScan {
     }
 
     # Precomputed here so callers (including the entry script) never need a private helper.
+    # Correlations count toward the worst verdict: a pairing that is graver than either
+    # of its parts is the whole reason it exists, and an exit code that ignored it would
+    # under-report the machine.
     $worst = 'benign'
-    foreach ($f in $findings) {
+    foreach ($f in @($findings) + @($correlations)) {
         if ((Get-LVVerdictRank -Verdict $f.Verdict) -gt (Get-LVVerdictRank -Verdict $worst)) { $worst = $f.Verdict }
     }
     $exitCode = 0
@@ -198,6 +210,7 @@ function Invoke-LogVerdictScan {
         CoverageNotes  = @($coverageNotes)
         Reduction      = $stat
         Findings       = @($findings)
+        Correlations   = @($correlations)
         CrashArtifacts = @($crash)
         Horizon        = $horizon
         HorizonWarning = $horizonWarning

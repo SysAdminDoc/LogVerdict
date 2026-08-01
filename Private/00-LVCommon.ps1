@@ -16,7 +16,17 @@ $script:LVVerdictRank = @{
 # than the code knows about is a hard failure, not a best effort: silently mis-reading
 # rules would produce confident rulings from fields the code never looked at.
 $script:LVSchemaVersionMin = 1
-$script:LVSchemaVersionMax = 4
+$script:LVSchemaVersionMax = 5
+
+# How many occurrence timestamps a single signature retains for correlation. Past
+# this the signature is a continuous stream rather than a set of incidents, and
+# "did it coincide with something" is no longer a meaningful question about it.
+$script:LVMaxSignatureTimes = 2000
+
+# Correlation types, from the Sigma Correlation Rules Specification v2.1.0. Named
+# after Sigma's vocabulary on purpose: anyone who can read a Sigma correlation can
+# read one of these. The window is NOT Sigma's, though - see 25-LVCorrelate.ps1.
+$script:LVCorrelationType = @('temporal', 'temporal_ordered', 'event_count')
 
 # Whether Reliability Monitor answered on this scan. Declared here so the variable
 # always exists: a scan that skipped the source and a scan whose provider is missing
