@@ -343,8 +343,27 @@ function ConvertTo-LVRedactedResult {
         foreach ($prop in $f.PSObject.Properties) {
             $c | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
         }
-        $c.SampleMessage = ConvertTo-LVRedactedText -Text $c.SampleMessage -MachineName $machine
-        $c.Samples = @(@($f.Samples) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
+        if ($c.PSObject.Properties['SampleMessage']) {
+            $c.SampleMessage = ConvertTo-LVRedactedText -Text $c.SampleMessage -MachineName $machine
+        }
+        if ($c.PSObject.Properties['Samples']) {
+            $c.Samples = @(@($f.Samples) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
+        }
+        if ($f.PSObject.Properties['ModelExplanation'] -and $f.ModelExplanation) {
+            $draft = [pscustomobject]@{}
+            foreach ($prop in $f.ModelExplanation.PSObject.Properties) {
+                $draft | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+            }
+            foreach ($name in @('Summary', 'Uncertainty')) {
+                if ($draft.PSObject.Properties[$name]) {
+                    $draft.$name = ConvertTo-LVRedactedText -Text ([string]$draft.$name) -MachineName $machine
+                }
+            }
+            if ($draft.PSObject.Properties['Evidence']) {
+                $draft.Evidence = @(@($draft.Evidence) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
+            }
+            $c.ModelExplanation = $draft
+        }
         $c
     }
 
@@ -366,7 +385,9 @@ function ConvertTo-LVRedactedResult {
 
     $copy.Findings = @($findings)
     $copy.CrashArtifacts = @($crash)
-    $copy.CoverageNotes = @(@($Result.CoverageNotes) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
+    if ($copy.PSObject.Properties['CoverageNotes']) {
+        $copy.CoverageNotes = @(@($Result.CoverageNotes) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
+    }
     $copy.MachineName = '<MACHINE>'
     $copy | Add-Member -NotePropertyName 'Redacted' -NotePropertyValue $true -Force
 

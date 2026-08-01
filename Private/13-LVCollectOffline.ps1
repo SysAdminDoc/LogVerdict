@@ -260,7 +260,10 @@ function Invoke-LVOfflineScan {
         [switch]$SkipReliability,
         [switch]$IncludeBenign,
         [string]$DatabasePath,
-        [int]$MaxPerChannel = 20000
+        [int]$MaxPerChannel = 20000,
+        [switch]$ExplainUnknown,
+        [string]$OllamaModel = 'llama3.2',
+        [string]$OllamaEndpoint = 'http://127.0.0.1:11434'
     )
 
     $started = Get-Date
@@ -367,6 +370,10 @@ function Invoke-LVOfflineScan {
         $findings = @(Resolve-LVVerdict -Signature $signatures -Database $db)
         $correlations = @(Resolve-LVCorrelation -Finding $findings -Database $db)
         if (-not $IncludeBenign) { $findings = @($findings | Where-Object { $_.Verdict -ne 'benign' }) }
+        if ($ExplainUnknown) {
+            Write-LVLog -Level info -Message ('Requesting non-remedial draft explanations for unknown signatures from local Ollama model {0}...' -f $OllamaModel)
+            $findings = @(Add-LVModelExplanation -Finding @($findings) -Model $OllamaModel -Endpoint $OllamaEndpoint)
+        }
 
         $coverageNotes = New-Object System.Collections.Generic.List[string]
         $coverageNotes.Add('This is offline analysis. No event channel, text log, Reliability Monitor provider, or crash directory on the reviewing PC was queried.') | Out-Null
@@ -454,6 +461,8 @@ function Invoke-LVOfflineScan {
             DatabaseName   = $db.name
             DatabaseDate   = $db.updated
             RuleCount      = @($db.rules).Count
+            ModelExplanationsEnabled = [bool]$ExplainUnknown
+            ModelExplanationCount = @($findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation }).Count
             WorstVerdict   = $worst
             ExitCode       = $exitCode
             Offline        = $true

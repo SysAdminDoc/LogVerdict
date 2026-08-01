@@ -34,6 +34,11 @@ function Invoke-LogVerdictScan {
         without reading any source on the reviewing PC. Exported .evtx files are read
         when present; captured report signatures preserve non-event evidence.
 
+        .PARAMETER ExplainUnknown
+        Opt in to asking a local Ollama model for a separately labelled, non-remedial
+        draft explanation of signatures that have no curated rule. Known verdicts are
+        never sent and never changed.
+
         .EXAMPLE
         Invoke-LogVerdictScan -DaysBack 7
 
@@ -49,7 +54,10 @@ function Invoke-LogVerdictScan {
         [switch]$SkipReliability,
         [switch]$IncludeBenign,
         [string]$DatabasePath,
-        [string]$EvidencePath
+        [string]$EvidencePath,
+        [switch]$ExplainUnknown,
+        [string]$OllamaModel = 'llama3.2',
+        [string]$OllamaEndpoint = 'http://127.0.0.1:11434'
     )
 
     if ($EvidencePath) {
@@ -60,6 +68,9 @@ function Invoke-LogVerdictScan {
             SkipReliability = $SkipReliability
             IncludeBenign  = $IncludeBenign
             DatabasePath   = $DatabasePath
+            ExplainUnknown = $ExplainUnknown
+            OllamaModel    = $OllamaModel
+            OllamaEndpoint = $OllamaEndpoint
         }
         if ($PSBoundParameters.ContainsKey('DaysBack')) { $offlineArgs['DaysBack'] = $DaysBack }
         return Invoke-LVOfflineScan @offlineArgs
@@ -164,6 +175,11 @@ function Invoke-LogVerdictScan {
         }
     }
 
+    if ($ExplainUnknown) {
+        Write-LVLog -Level info -Message ('Requesting non-remedial draft explanations for unknown signatures from local Ollama model {0}...' -f $OllamaModel)
+        $findings = @(Add-LVModelExplanation -Finding @($findings) -Model $OllamaModel -Endpoint $OllamaEndpoint)
+    }
+
     # Coverage honesty: an in-place upgrade or a cleared log resets a channel, which
     # makes a scan look clean for the wrong reason. Say so rather than imply health.
     $horizon = @{}
@@ -255,6 +271,8 @@ function Invoke-LogVerdictScan {
         DatabaseName   = $db.name
         DatabaseDate   = $db.updated
         RuleCount      = @($db.rules).Count
+        ModelExplanationsEnabled = [bool]$ExplainUnknown
+        ModelExplanationCount = @($findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation }).Count
         WorstVerdict   = $worst
         ExitCode       = $exitCode
     }

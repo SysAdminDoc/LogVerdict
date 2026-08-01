@@ -113,6 +113,13 @@ Describe 'Entry script launch behaviour' {
         $text | Should -Match '\[switch\]\$Pause'
         $text | Should -Match '\[switch\]\$NoPause'
     }
+
+    It 'exposes the explicit local-model opt-in on the entry script' {
+        $entry = Join-Path (Split-Path $PSScriptRoot -Parent) 'Invoke-LogVerdict.ps1'
+        $text = Get-Content -LiteralPath $entry -Raw
+        $text | Should -Match '\[switch\]\$ExplainUnknown'
+        $text | Should -Match 'ExplainUnknown\s*=\s*\$ExplainUnknown'
+    }
 }
 
 Describe 'Verdict database' {
@@ -1105,6 +1112,73 @@ Describe 'Verdict resolution' {
     }
 }
 
+Describe 'Local model explanations' {
+    It 'requests structured output from loopback and keeps the candidate separate' {
+        InModuleScope LogVerdict {
+            $script:LVModelRequestBody = $null
+            Mock Invoke-RestMethod {
+                $script:LVModelRequestBody = $Body
+                [pscustomobject]@{
+                    response = '{"summary":"This may describe an Acme service failure.","evidence":["Provider Acme emitted event 99."],"uncertainty":"The message does not identify the underlying cause."}'
+                }
+            }
+            $finding = [pscustomobject]@{
+                Key='Acme/99'; Source='event'; Channel='System'; Provider='Acme'; Id=99
+                Count=2; PerDay=0.2; SampleMessage='Acme stopped'; Verdict='unknown'; RuleId=$null
+                Plain='deterministic fallback'; Why='deterministic reason'; Action='deterministic action'
+            }
+
+            $out = @(Add-LVModelExplanation -Finding @($finding) -Model 'test-model')
+            Assert-MockCalled Invoke-RestMethod -Times 1 -Exactly -ParameterFilter {
+                $Method -eq 'Post' -and $Uri -eq 'http://127.0.0.1:11434/api/generate'
+            }
+            $body = $script:LVModelRequestBody | ConvertFrom-Json
+            $body.model | Should -BeExactly 'test-model'
+            $body.stream | Should -BeFalse
+            $body.format.additionalProperties | Should -BeFalse
+            $out[0].ModelExplanation.Label | Should -BeExactly 'MODEL-GENERATED CANDIDATE - NOT A CURATED RULING'
+            $out[0].ModelExplanation.PSObject.Properties.Name | Should -Not -Contain 'Action'
+            $out[0].Plain | Should -BeExactly 'deterministic fallback'
+            $out[0].Action | Should -BeExactly 'deterministic action'
+        }
+    }
+
+    It 'never calls a model for a known finding' {
+        InModuleScope LogVerdict {
+            Mock Invoke-RestMethod { throw 'should not be called' }
+            $known = [pscustomobject]@{ Key='Acme/1'; Verdict='actionable'; RuleId='LV-0001' }
+            $out = @(Add-LVModelExplanation -Finding @($known))
+            Assert-MockCalled Invoke-RestMethod -Times 0 -Exactly
+            $out[0].PSObject.Properties.Name | Should -Not -Contain 'ModelExplanation'
+        }
+    }
+
+    It 'refuses a non-loopback model endpoint' {
+        InModuleScope LogVerdict {
+            $unknown = [pscustomobject]@{ Key='Acme/2'; Verdict='unknown'; RuleId=$null }
+            { Add-LVModelExplanation -Finding @($unknown) -Endpoint 'http://example.com:11434' } |
+                Should -Throw '*must be HTTP on localhost*'
+        }
+    }
+
+    It 'discards a response that contains remediation language' {
+        InModuleScope LogVerdict {
+            Mock Invoke-RestMethod {
+                [pscustomobject]@{
+                    response = '{"summary":"Run chkdsk to repair the volume.","evidence":["The message mentions a disk."],"uncertainty":"The disk state is unknown."}'
+                }
+            }
+            $unknown = [pscustomobject]@{
+                Key='Acme/3'; Source='event'; Channel='System'; Provider='Acme'; Id=3
+                Count=1; PerDay=0.1; SampleMessage='disk message'; Verdict='unknown'; RuleId=$null
+            }
+            $out = @(Add-LVModelExplanation -Finding @($unknown))
+            $out[0].PSObject.Properties.Name | Should -Not -Contain 'ModelExplanation'
+            $out[0].ModelExplanationError | Should -Match 'remediation or instructional language'
+        }
+    }
+}
+
 Describe 'Report rendering' {
     BeforeAll {
         $script:FakeResult = [pscustomobject]@{
@@ -1147,6 +1221,29 @@ Describe 'Report rendering' {
             $html = ConvertTo-LVHtmlReport -Result $r
             $html | Should -Match '&lt;script&gt;'
             $html | Should -Not -Match '<script>alert'
+        }
+    }
+
+    It 'renders model text only in a clearly labelled candidate block' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $finding = $r.Findings[0] | Select-Object *
+            $finding | Add-Member -NotePropertyName ModelExplanation -NotePropertyValue ([pscustomobject]@{
+                Label='MODEL-GENERATED CANDIDATE - NOT A CURATED RULING'; Model='test-model'
+                Summary='Possible <cause>'; Evidence=@('Evidence from TESTPC'); Uncertainty='Still uncertain'
+            })
+            $result.Findings = @($finding)
+
+            $text = ConvertTo-LVTextReport -Result $result
+            $html = ConvertTo-LVHtmlReport -Result $result
+            $text | Should -Match 'MODEL-GENERATED CANDIDATE - NOT A CURATED RULING'
+            $html | Should -Match 'MODEL-GENERATED CANDIDATE - NOT A CURATED RULING'
+            $html | Should -Match 'Possible &lt;cause&gt;'
+            $html | Should -Match 'Verdicts, actions and unlabelled explanations come only from the curated rule database'
+
+            $redacted = ConvertTo-LVRedactedResult -Result $result
+            $redacted.Findings[0].ModelExplanation.Evidence[0] | Should -BeExactly 'Evidence from <MACHINE>'
         }
     }
 

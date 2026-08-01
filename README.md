@@ -46,7 +46,7 @@ Collect  ->  Reduce  ->  Resolve  ->  Correlate  ->  Report
 4. **Correlate** - signatures that occurred within minutes of each other are reported together, above the flat list, with the window of time to look at. Corrected hardware errors and an unexpected restart are each easy to dismiss alone; together they name a cause. Correlations are curated, never inferred - on one machine the loudest signature co-occurs with everything, so a discovered correlation is mostly an artefact of volume.
 5. **Report** - console, plain text, JSON, and a self-contained dark HTML page that opens anywhere with no network access.
 
-**No language model is involved.** Every explanation is a curated rule written by a human. A signature with no matching rule is reported as `unknown` with its raw evidence and **no guess at a cause** - because a confidently wrong fix is worse than no fix.
+**No language model is involved by default.** Every ruling and remediation is a curated rule written by a human. A signature with no matching rule is reported as `unknown` with its raw evidence and no guess at a cause. An explicit `-ExplainUnknown` opt-in can ask a local Ollama model for a separately labelled candidate explanation; it never changes the verdict and output containing remediation language is discarded.
 
 ## Usage
 
@@ -83,6 +83,7 @@ LogVerdict.exe -OutputDir C:\Temp\lv             choose where reports land
 LogVerdict.exe -Redact                          mask identifiers before writing
 LogVerdict.exe -SkipReliability                 skip Reliability Monitor
 LogVerdict.exe -IncludeEvidence                 also zip the evidence for a ticket
+LogVerdict.exe -ExplainUnknown                  draft explanations for unknowns with local Ollama
 ```
 
 `-IncludeEvidence` writes a zip beside the report holding the reports, the matching text-log lines and the scanned event channels as `.evtx`. The report says what LogVerdict concluded; the bundle carries what it concluded it *from*. Combined with `-Redact` the channel exports are deliberately left out - `.evtx` is binary and carries the identifiers redaction removes from the text, and the manifest says so, so a withheld channel is never mistaken for a clean one.
@@ -124,17 +125,23 @@ powershell -ExecutionPolicy Bypass -File .\Invoke-LogVerdict.ps1
 
 # Re-evaluate a bundle collected on another PC with the current rule database
 .\Invoke-LogVerdict.ps1 -EvidencePath .\LogVerdict-Evidence_HOST_20260801-120000.zip
+
+# Opt in to non-remedial draft explanations for unknown signatures from local Ollama
+.\Invoke-LogVerdict.ps1 -ExplainUnknown -OllamaModel llama3.2
 ```
 
 Reports land in a timestamped folder on the Desktop by default (safe even for right-click-elevated runs that start in System32). Override with `-OutputDir`.
 
 Offline analysis never reads the reviewing PC. It inherits the source report's look-back window unless `-DaysBack` is supplied, reopens exported `.evtx` members when present, and uses the captured report summaries for text logs and Reliability Monitor, whose full stores are deliberately not copied into a small evidence bundle. Redacted bundles contain no raw `.evtx`, so they are re-evaluated from report summaries and carry a coverage note saying so.
 
+`-ExplainUnknown` is the only switch that contacts a model endpoint. LogVerdict accepts only plain HTTP on `localhost`, `127.0.0.1`, or `::1`, sends one reduced unknown signature at a time to Ollama's `/api/generate`, and requests structured output with no actions or fixes. Known signatures are never sent. The candidate appears in its own **MODEL-GENERATED CANDIDATE - NOT A CURATED RULING** block; a connection failure, malformed response, unexpected field, or remediation language leaves the deterministic scan intact and produces no candidate.
+
 As a module:
 
 ```powershell
 Import-Module .\LogVerdict.psd1
 $r = Invoke-LogVerdictScan -DaysBack 30
+$drafted = Invoke-LogVerdictScan -DaysBack 30 -ExplainUnknown -OllamaModel llama3.2
 $r.Findings | Where-Object Verdict -eq 'actionable'
 $r | Export-LogVerdictReport -OutputDir C:\Temp\lv
 

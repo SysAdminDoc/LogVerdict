@@ -23,6 +23,10 @@
     .PARAMETER EvidencePath
     Analyze a LogVerdict evidence bundle or JSON report without reading this PC.
 
+    .PARAMETER ExplainUnknown
+    Ask a local Ollama model for separately labelled, non-remedial draft explanations
+    of unknown signatures only. Off by default.
+
     .PARAMETER NoReport
     Console only; write nothing to disk.
 
@@ -52,6 +56,9 @@ param(
     [switch]$Redact,
     [switch]$IncludeEvidence,
     [string]$EvidencePath,
+    [switch]$ExplainUnknown,
+    [string]$OllamaModel = 'llama3.2',
+    [string]$OllamaEndpoint = 'http://127.0.0.1:11434',
     [switch]$Pause,
     [switch]$NoPause
 )
@@ -99,6 +106,9 @@ try {
         SkipTextLogs    = $SkipTextLogs
         SkipReliability = $SkipReliability
         AllChannels     = $AllChannels
+        ExplainUnknown  = $ExplainUnknown
+        OllamaModel     = $OllamaModel
+        OllamaEndpoint  = $OllamaEndpoint
     }
     if (-not $EvidencePath -or $PSBoundParameters.ContainsKey('DaysBack')) { $scanArgs['DaysBack'] = $DaysBack }
     if ($EvidencePath) { $scanArgs['EvidencePath'] = $EvidencePath }
