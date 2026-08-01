@@ -1277,18 +1277,23 @@ Describe 'GUI accessibility' {
 }
 
 Describe 'Rule provenance' {
-    It 'accepts a schema v3 database and still accepts v2' {
+    It 'ships at the newest schema this build understands, and still accepts the older ones' {
+        # Bound to the constant, not to a literal. Pinning the number here meant that
+        # every schema bump broke this test for a reason unrelated to what it checks.
         InModuleScope LogVerdict {
             $script:LVSchemaVersionMax | Should -BeGreaterOrEqual 3
+            (Get-LogVerdictDatabase).schemaVersion | Should -Be $script:LVSchemaVersionMax
         }
-        (Get-LogVerdictDatabase).schemaVersion | Should -Be 3
     }
 
     It 'still refuses a schema newer than this build understands' {
-        $future = Join-Path $TestDrive 'v4.json'
-        '{ "schemaVersion": 4, "name": "future", "updated": "2026-07-31", "rules": [] }' |
-            Set-Content -LiteralPath $future -Encoding UTF8
-        { Get-LogVerdictDatabase -Path $future } | Should -Throw -ExpectedMessage '*schemaVersion 4*'
+        InModuleScope LogVerdict {
+            $next = $script:LVSchemaVersionMax + 1
+            $future = Join-Path $TestDrive 'future.json'
+            ('{{ "schemaVersion": {0}, "name": "future", "updated": "2026-07-31", "rules": [] }}' -f $next) |
+                Set-Content -LiteralPath $future -Encoding UTF8
+            { Get-LogVerdictDatabase -Path $future } | Should -Throw -ExpectedMessage ('*schemaVersion {0}*' -f $next)
+        }
     }
 
     It 'reports an unsourced rule as a warning, not as invalid' {
@@ -1433,6 +1438,110 @@ Describe 'GUI coverage surfacing' {
     It 'ignores an unparseable verified date rather than counting it as stale' {
         InModuleScope LogVerdict {
             Get-LVStaleRuleCount -Finding @([pscustomobject]@{ Verified = 'last tuesday' }) | Should -Be 0
+        }
+    }
+}
+
+Describe 'Reliability Monitor collection' {
+    It 'drops a record already collected from an event channel' {
+        # Reliability Monitor overlaps the channels heavily. Counting both views of one
+        # incident would inflate the count and the rate that rate escalation reads, so a
+        # signature could cross its threshold purely because it was collected twice.
+        InModuleScope LogVerdict {
+            Mock Get-CimInstance {
+                @(
+                    [pscustomobject]@{ SourceName = 'Application Error'; EventIdentifier = 1000; TimeGenerated = (Get-Date); Message = 'dup'; RecordNumber = 1 }
+                    [pscustomobject]@{ SourceName = 'MsiInstaller';      EventIdentifier = 1033; TimeGenerated = (Get-Date); Message = 'new'; RecordNumber = 2 }
+                ) } -ParameterFilter { $ClassName -eq 'Win32_ReliabilityRecords' }
+
+            $existing = @([pscustomobject]@{ Source = 'event'; Provider = 'Application Error'; Id = 1000 })
+            $got = @(Get-LVReliabilityRecord -DaysBack 30 -ExistingRecord $existing)
+
+            $got.Count | Should -Be 1
+            $got[0].Provider | Should -Be 'MsiInstaller'
+        }
+    }
+
+    It 'reports an unavailable provider as a skipped source rather than as health' {
+        # The provider is Group Policy gated and off by default on Server. Silence from
+        # a source that was never read must never be reported as a clean result.
+        InModuleScope LogVerdict {
+            Mock Get-CimInstance { throw 'Invalid class' } -ParameterFilter { $ClassName -eq 'Win32_ReliabilityRecords' }
+
+            $script:LVReliabilityAvailable = $true
+            @(Get-LVReliabilityRecord -DaysBack 30).Count | Should -Be 0
+            $script:LVReliabilityAvailable | Should -BeFalse
+            $script:LVReliabilitySkipReason | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'keeps a reliability signature separate from the channel signature of the same id' {
+        InModuleScope LogVerdict {
+            $now = Get-Date
+            $records = @(
+                [pscustomobject]@{ Source = 'event';       Channel = 'Application'; Provider = 'Application Error'; Id = 1000; Level = 2; LevelName = 'Error'; TimeCreated = $now; Message = 'from the channel' }
+                [pscustomobject]@{ Source = 'reliability'; Channel = 'Reliability'; Provider = 'Application Error'; Id = 1000; Level = 4; LevelName = 'Information'; TimeCreated = $now; Message = 'from reliability' }
+            )
+            $sigs = @(Group-LVSignature -Record $records -WindowDays 30)
+            $sigs.Count | Should -Be 2
+            ($sigs.Key | Sort-Object) | Should -Be @('Application Error/1000', 'Reliability/Application Error/1000')
+        }
+    }
+
+    It 'reads the stability index and says which way it is moving' {
+        InModuleScope LogVerdict {
+            Mock Get-CimInstance {
+                @(
+                    [pscustomobject]@{ SystemStabilityIndex = 9.5; TimeGenerated = (Get-Date).AddDays(-20) }
+                    [pscustomobject]@{ SystemStabilityIndex = 2.1; TimeGenerated = (Get-Date).AddDays(-10) }
+                    [pscustomobject]@{ SystemStabilityIndex = 4.0; TimeGenerated = (Get-Date).AddDays(-1) }
+                ) } -ParameterFilter { $ClassName -eq 'Win32_ReliabilityStabilityMetrics' }
+
+            $t = Get-LVStabilityTrend -DaysBack 30
+            $t.Current   | Should -Be 4.0
+            $t.Starting  | Should -Be 9.5
+            $t.Lowest    | Should -Be 2.1
+            $t.Direction | Should -Be 'worsening'
+        }
+    }
+
+    It 'returns null rather than a flat trend when the provider is missing' {
+        # "No data" and "no change" are different answers and the report renders them
+        # differently, so they must not collapse into one value here.
+        InModuleScope LogVerdict {
+            Mock Get-CimInstance { throw 'Invalid class' } -ParameterFilter { $ClassName -eq 'Win32_ReliabilityStabilityMetrics' }
+            Get-LVStabilityTrend -DaysBack 30 | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'treats a tenth of a point as noise rather than as a trend' {
+        InModuleScope LogVerdict {
+            Mock Get-CimInstance {
+                @(
+                    [pscustomobject]@{ SystemStabilityIndex = 5.00; TimeGenerated = (Get-Date).AddDays(-5) }
+                    [pscustomobject]@{ SystemStabilityIndex = 5.05; TimeGenerated = (Get-Date).AddDays(-1) }
+                ) } -ParameterFilter { $ClassName -eq 'Win32_ReliabilityStabilityMetrics' }
+            (Get-LVStabilityTrend -DaysBack 30).Direction | Should -Be 'steady'
+        }
+    }
+
+    It 'rules every reliability source it collects so the new source does not just raise the unknown count' {
+        # Adding a collector that produces nothing but unrecognized signatures would make
+        # every scan noisier and every exit code worse, for no diagnostic gain.
+        InModuleScope LogVerdict {
+            $db = Get-LogVerdictDatabase
+            $sigs = @('MsiInstaller/1033', 'MsiInstaller/1034', 'MsiInstaller/1035', 'MsiInstaller/1036', 'Anything/9999') |
+                ForEach-Object {
+                    $parts = $_ -split '/'
+                    [pscustomobject]@{
+                        Key = ('Reliability/{0}' -f $_); Source = 'reliability'; Channel = 'Reliability'
+                        Provider = $parts[0]; Id = [int]$parts[1]; SampleMessage = 'sample'
+                        Count = 1; PerDay = 0; SpanDays = 0
+                    }
+                }
+            foreach ($f in (Resolve-LVVerdict -Signature @($sigs) -Database $db)) {
+                $f.Verdict | Should -Not -Be 'unknown' -Because "$($f.Key) must be ruled, even if only by the catch-all"
+            }
         }
     }
 }

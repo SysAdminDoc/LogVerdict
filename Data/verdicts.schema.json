@@ -15,8 +15,8 @@
     "schemaVersion": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 3,
-      "description": "Loading a version this build does not understand is a hard failure, not a best effort. v3 adds per-rule sources[] so attribution obligations travel with the rule."
+      "maximum": 4,
+      "description": "Loading a version this build does not understand is a hard failure, not a best effort. v3 adds per-rule sources[] so attribution obligations travel with the rule. v4 adds the 'reliability' match source, which an earlier build cannot collect at all."
     },
     "name": {
       "type": "string",
@@ -206,12 +206,14 @@
         "source": {
           "enum": [
             "event",
-            "textlog"
-          ]
+            "textlog",
+            "reliability"
+          ],
+          "description": "Which collector produced the signature. 'reliability' is Reliability Monitor, whose records are structured like events and match on provider and event id."
         },
         "channel": {
           "type": "string",
-          "description": "Event channel name, or the text-log target name such as CBS or SetupAPI."
+          "description": "Event channel name, the text-log target name such as CBS or SetupAPI, or 'Reliability'."
         },
         "provider": {
           "type": "string",

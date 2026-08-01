@@ -27,6 +27,14 @@ function Group-LVSignature {
         if ($r.Source -eq 'event') {
             $key = '{0}/{1}' -f $r.Provider, $r.Id
             $template = $null
+        } elseif ($r.Source -eq 'reliability') {
+            # Reliability records are structured like events and carry the same identity,
+            # so they key the same way - but under their own prefix. Without it a
+            # reliability record and a channel record for the same provider and id would
+            # land in one bucket, and the count that rate escalation reads would be the
+            # sum of two views of a single incident rather than the incident itself.
+            $key = 'Reliability/{0}/{1}' -f $r.Provider, $r.Id
+            $template = $null
         } else {
             $template = ConvertTo-LVTemplate -Text $r.Message
             $key = '{0}/{1}' -f $r.Channel, (Get-LVShortHash -Text $template)

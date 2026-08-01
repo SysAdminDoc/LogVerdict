@@ -74,6 +74,10 @@ function Write-LVConsoleReport {
         Write-Host ('  Loudest         : {0} at {1}% of all records' -f $stat.LoudestKey, $stat.LoudestShare)
     }
     Write-Host ('  Elevated        : {0}' -f $Result.Elevated)
+    if ($Result.Stability) {
+        $s = $Result.Stability
+        Write-Host ('  Stability       : {0}/10, {1} over the window (low {2})' -f $s.Current, $s.Direction, $s.Lowest)
+    }
     Write-Host ''
 
     foreach ($note in @($Result.CoverageNotes)) {
@@ -123,6 +127,13 @@ function ConvertTo-LVTextReport {
     Add-LVLine $sb ('Channels      : {0}' -f ($Result.Channels -join ', '))
     Add-LVLine $sb ('Records read  : {0}' -f $Result.Reduction.RecordCount)
     Add-LVLine $sb ('Signatures    : {0} (reduction {1}:1)' -f $Result.Reduction.SignatureCount, $Result.Reduction.Ratio)
+    if ($Result.Stability) {
+        # Windows' own 1-10 stability score. Rate escalation answers "is this signature
+        # frequent"; this answers "is the machine getting worse", which a single scan
+        # otherwise has no way to see.
+        Add-LVLine $sb ('Stability     : {0}/10, {1} over the window (started {2}, low {3}, {4} sample(s))' -f `
+            $Result.Stability.Current, $Result.Stability.Direction, $Result.Stability.Starting, $Result.Stability.Lowest, $Result.Stability.SampleCount)
+    }
     Add-LVLine $sb ('Verdict DB    : {0}, {1} rule(s), updated {2}' -f $Result.DatabaseName, $Result.RuleCount, $Result.DatabaseDate)
     Add-LVLine $sb ('Worst verdict : {0}' -f $Result.WorstVerdict)
     Add-LVLine $sb
@@ -250,6 +261,9 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
     Add-LVLine $sb ('<div class="stat"><div class="k">Signatures</div><div class="v">{0}</div></div>' -f $Result.Reduction.SignatureCount)
     Add-LVLine $sb ('<div class="stat"><div class="k">Noise removed</div><div class="v">{0}:1</div></div>' -f $Result.Reduction.Ratio)
     Add-LVLine $sb ('<div class="stat"><div class="k">Needs attention</div><div class="v">{0}</div></div>' -f $needsAttention)
+    if ($Result.Stability) {
+        Add-LVLine $sb ('<div class="stat"><div class="k">Stability ({0})</div><div class="v">{1}/10</div></div>' -f (ConvertTo-LVHtmlEncoded $Result.Stability.Direction), $Result.Stability.Current)
+    }
     Add-LVLine $sb '</div>'
 
     if ($Result.HorizonWarning) {

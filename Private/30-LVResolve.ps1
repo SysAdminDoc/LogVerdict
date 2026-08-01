@@ -108,9 +108,10 @@ function Test-LVLocaleSensitiveMatch {
     param([Parameter(Mandatory)]$Rule)
 
     if (-not $Rule.match.messagePattern) { return $false }
-    # Absent source means events, which is the localized case.
+    # Absent source means events, which is the localized case. Reliability Monitor
+    # renders its Message from the same provider resources, so it is localized too.
     $source = $Rule.match.source
-    return (-not $source -or $source -eq 'event')
+    return (-not $source -or $source -eq 'event' -or $source -eq 'reliability')
 }
 
 function Test-LVLocaleMatch {

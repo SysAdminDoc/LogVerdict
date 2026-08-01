@@ -16,7 +16,14 @@ $script:LVVerdictRank = @{
 # than the code knows about is a hard failure, not a best effort: silently mis-reading
 # rules would produce confident rulings from fields the code never looked at.
 $script:LVSchemaVersionMin = 1
-$script:LVSchemaVersionMax = 3
+$script:LVSchemaVersionMax = 4
+
+# Whether Reliability Monitor answered on this scan. Declared here so the variable
+# always exists: a scan that skipped the source and a scan whose provider is missing
+# have to be distinguishable from one that read it, and "absent" must never be
+# reported as "clean".
+$script:LVReliabilityAvailable = $true
+$script:LVReliabilitySkipReason = $null
 
 # Rule lifecycle, aligned with the Sigma specification's 'status' vocabulary.
 # Only these statuses are ever applied to a signature; deprecated and unsupported

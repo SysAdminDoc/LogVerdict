@@ -32,6 +32,7 @@ LogVerdict is the missing middle: local, whole-machine, multi-source, deduplicat
 | `NetSetup.LOG` | Domain join and rename - survives in-place upgrades that wipe the event channels |
 | `Panther\setupact.log`, `MoSetup\BlueBox.log` | Setup, upgrade and compatibility blocks |
 | `Minidump\`, WER `ReportArchive` | Crash evidence, inventoried (not decoded) |
+| Reliability Monitor (`Win32_ReliabilityRecords`) | Microsoft's own curated view of what failed, plus the software install/removal history an error-only sweep never sees |
 
 ## How it works
 
@@ -188,7 +189,7 @@ Invoke-Pester -Path .\Tests
 
 ## Honest limitations
 
-- **Coverage is the roadmap.** 70 rules ship. A first scan will report plenty of `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
+- **Coverage is the roadmap.** 76 rules ship. A first scan will report plenty of `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
 - **Crash dumps are inventoried, not decoded.** Reading a minidump needs a debugger and symbols.
 - **A clean result is not proof of health.** An in-place upgrade or a cleared log resets the event channels, so the report states each channel's oldest surviving record and warns when that horizon falls inside the requested window.
 - Only the live machine is supported today. Offline analysis of a collected evidence bundle is planned.

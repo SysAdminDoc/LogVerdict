@@ -871,6 +871,78 @@
         "Id": 5861,
         "SampleMessage": "Namespace = root\\CIMV2, Provider = WmiPerfClass, operation failed."
       }
+    },
+    {
+      "ruleId": "LV-0140",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "reliability",
+        "Channel": "Reliability",
+        "Provider": "MsiInstaller",
+        "Id": 1033,
+        "SampleMessage": "Windows Installer installed the product. Product Name: Example Suite. Product Version: 3.3.221.0. Product Language: 1033. Manufacturer: Example Corporation. Installation success or error status: 0."
+      }
+    },
+    {
+      "ruleId": "LV-0141",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "reliability",
+        "Channel": "Reliability",
+        "Provider": "MsiInstaller",
+        "Id": 1034,
+        "SampleMessage": "Windows Installer removed the product. Product Name: Example Suite. Product Version: 1.14.151.0. Product Language: 1033. Manufacturer: Example Corporation. Removal success or error status: 0."
+      }
+    },
+    {
+      "ruleId": "LV-0142",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "reliability",
+        "Channel": "Reliability",
+        "Provider": "MsiInstaller",
+        "Id": 1035,
+        "SampleMessage": "Windows Installer reconfigured the product. Product Name: Example Suite. Product Version: 024.000.0496. Product Language: 1033. Manufacturer: Example Corporation. Reconfiguration success or error status: 0."
+      }
+    },
+    {
+      "ruleId": "LV-0143",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "reliability",
+        "Channel": "Reliability",
+        "Provider": "MsiInstaller",
+        "Id": 1036,
+        "SampleMessage": "Windows Installer installed an update. Product Name: Example Suite. Product Version: 024.000.0496. Product Language: 1033. Manufacturer: Example Corporation. Update Name: Program Updates. Installation success or error status: 0."
+      }
+    },
+    {
+      "ruleId": "LV-0144",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "reliability",
+        "Channel": "Reliability",
+        "Provider": "Microsoft-Windows-WindowsUpdateClient",
+        "Id": 19,
+        "SampleMessage": "Installation Successful: Windows successfully installed the following update: 2026-07 Cumulative Update for Windows 11 (KB5062660)"
+      }
+    },
+    {
+      "ruleId": "LV-0149",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "reliability",
+        "Channel": "Reliability",
+        "Provider": "Example-Updater",
+        "Id": 4242,
+        "SampleMessage": "The Example updater reported a problem that no more specific rule covers."
+      }
     }
   ]
 }

@@ -21,6 +21,10 @@ function Invoke-LogVerdictScan {
         .PARAMETER SkipTextLogs
         Skip CBS, DISM, SetupAPI and the other plain-text logs.
 
+        .PARAMETER SkipReliability
+        Skip Reliability Monitor. That source supplies the software install and removal
+        history, which no error-level channel sweep can see.
+
         .PARAMETER IncludeBenign
         Keep signatures ruled benign in the result. Off by default - the entire point
         is to remove them.
@@ -37,12 +41,15 @@ function Invoke-LogVerdictScan {
         [string[]]$Channel,
         [switch]$AllChannels,
         [switch]$SkipTextLogs,
+        [switch]$SkipReliability,
         [switch]$IncludeBenign,
         [string]$DatabasePath
     )
 
     $started = Get-Date
     $elevated = Test-LVElevated
+    $script:LVReliabilityAvailable = $true
+    $script:LVReliabilitySkipReason = $null
 
     Write-LVLog -Level step -Message ('LogVerdict {0} starting - window {1} day(s)' -f $script:LVVersion, $DaysBack)
     if (-not $elevated) {
@@ -78,6 +85,20 @@ function Invoke-LogVerdictScan {
     if (-not $SkipTextLogs) {
         Write-LVLog -Level info -Message 'Reading plain-text logs...'
         foreach ($r in (Get-LVTextLogRecord -DaysBack $DaysBack)) { $records.Add($r) | Out-Null }
+    }
+
+    $stability = $null
+    if (-not $SkipReliability) {
+        Write-LVLog -Level info -Message 'Reading Reliability Monitor...'
+        # Handed the records collected so far so it can drop anything already seen in a
+        # channel. Order matters: this has to run after the channel and text-log reads.
+        foreach ($r in (Get-LVReliabilityRecord -DaysBack $DaysBack -ExistingRecord @($records.ToArray()))) {
+            $records.Add($r) | Out-Null
+        }
+        $stability = Get-LVStabilityTrend -DaysBack $DaysBack
+        if ($stability) {
+            Write-LVLog -Level info -Message ('System stability index {0}/10, {1} over the window (low {2})' -f $stability.Current, $stability.Direction, $stability.Lowest)
+        }
     }
 
     $all = @($records.ToArray())
@@ -142,6 +163,11 @@ function Invoke-LogVerdictScan {
     if (-not $elevated) {
         $coverageNotes.Add('Scan ran without elevation. The Security channel and some text logs require administrator rights.') | Out-Null
     }
+    if ($SkipReliability) {
+        $coverageNotes.Add('Reliability Monitor was skipped by request, so the software install and removal history was not read.') | Out-Null
+    } elseif (-not $script:LVReliabilityAvailable) {
+        $coverageNotes.Add(('Reliability Monitor could not be read, so the software install and removal history is missing from this scan. It is Group Policy gated and disabled by default on Windows Server. Reason: {0}' -f $script:LVReliabilitySkipReason)) | Out-Null
+    }
 
     # Precomputed here so callers (including the entry script) never need a private helper.
     $worst = 'benign'
@@ -175,6 +201,8 @@ function Invoke-LogVerdictScan {
         CrashArtifacts = @($crash)
         Horizon        = $horizon
         HorizonWarning = $horizonWarning
+        Stability      = $stability
+        ReliabilityAvailable = [bool]$script:LVReliabilityAvailable
         DatabaseName   = $db.name
         DatabaseDate   = $db.updated
         RuleCount      = @($db.rules).Count

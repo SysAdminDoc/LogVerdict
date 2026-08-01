@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "name": "LogVerdict core verdict database",
   "updated": "2026-07-31",
   "notes": "Rules are evaluated most-specific first. A signature matching no rule is reported as 'unknown' with its raw evidence - never with a guessed cause. Each rule carries a 'verified' date because guidance ages, and a 'status' controlling whether it is used: stable and test rules match, experimental rules match, deprecated and unsupported rules are retained for traceability but never applied.",
@@ -1455,6 +1455,148 @@
       "references": [],
       "falsepositives": [
         "Inventory and monitoring agents generate these continuously while healthy."
+      ]
+    },
+    {
+      "id": "LV-0140",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "reliability",
+        "provider": "MsiInstaller",
+        "eventId": 1033
+      },
+      "verdict": "informational",
+      "title": "Software was installed",
+      "plain": "Windows Installer recorded a successful product installation. The message names the product, its version and its publisher.",
+      "why": "Not a fault - this is the timeline of what changed. It is here because 'what was installed just before this started' is the first question in most triage, and an error-only sweep of the event channels never sees it: these are logged at Information level.",
+      "action": "Read the list when something began failing on a known date. Otherwise ignore.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Every healthy machine installs software. A high count here means an active machine, not a sick one."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/win32/wmisdk/win32-reliabilityrecords",
+          "retrieved": "2026-07-31"
+        }
+      ]
+    },
+    {
+      "id": "LV-0141",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "reliability",
+        "provider": "MsiInstaller",
+        "eventId": 1034
+      },
+      "verdict": "informational",
+      "title": "Software was removed",
+      "plain": "Windows Installer recorded a product being uninstalled. The message names the product and version.",
+      "why": "The other half of the change timeline. An uninstall immediately before a failure is a far stronger lead than any single error record, and nothing in the event channels surfaces it during an error sweep.",
+      "action": "Read the list when something began failing on a known date. Otherwise ignore.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Installers routinely remove and reinstall their own older version during an upgrade, which produces a removal that broke nothing."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/win32/wmisdk/win32-reliabilityrecords",
+          "retrieved": "2026-07-31"
+        }
+      ]
+    },
+    {
+      "id": "LV-0142",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "reliability",
+        "provider": "MsiInstaller",
+        "eventId": 1035
+      },
+      "verdict": "informational",
+      "title": "Software was reconfigured",
+      "plain": "Windows Installer reconfigured an already-installed product - a repair, a feature added or removed, or a change made by the product's own maintenance mode.",
+      "why": "Part of the change timeline. A reconfigure is also what a self-repairing installer does when something it owns went missing, so a product reconfiguring itself repeatedly is a lead rather than noise.",
+      "action": "Ignore a one-off. If the same product reconfigures itself over and over, something keeps removing files it owns.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Normal during a product upgrade or when a user adds a feature deliberately."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/win32/wmisdk/win32-reliabilityrecords",
+          "retrieved": "2026-07-31"
+        }
+      ]
+    },
+    {
+      "id": "LV-0143",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "reliability",
+        "provider": "MsiInstaller",
+        "eventId": 1036
+      },
+      "verdict": "informational",
+      "title": "A software update was installed",
+      "plain": "Windows Installer applied a patch to an already-installed product. The message names both the product and the update.",
+      "why": "Part of the change timeline, and the entry that most often explains an application that worked yesterday and does not today.",
+      "action": "Read the list when an application started misbehaving on a known date. Otherwise ignore.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Routine on any machine whose software updates itself."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/win32/wmisdk/win32-reliabilityrecords",
+          "retrieved": "2026-07-31"
+        }
+      ]
+    },
+    {
+      "id": "LV-0144",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "reliability",
+        "provider": "Microsoft-Windows-WindowsUpdateClient",
+        "eventId": 19
+      },
+      "verdict": "informational",
+      "title": "A Windows update installed successfully",
+      "plain": "Windows Update installed an update and it succeeded. The message names the update.",
+      "why": "The successful half of the update history, and it reaches the report only through Reliability Monitor - the event channel sweep looks for errors and warnings, so a successful install is invisible to it. It matters because 'it broke after the last update' is a claim you can now check against a date instead of a memory.",
+      "action": "Ignore unless something started failing recently, in which case compare the dates here against when the problem began.",
+      "confidence": "high",
+      "references": [],
+      "falsepositives": [
+        "Present on every patched machine. Volume here is a sign of a maintained machine, not a broken one."
+      ]
+    },
+    {
+      "id": "LV-0149",
+      "status": "stable",
+      "verified": "2026-07-31",
+      "match": {
+        "source": "reliability"
+      },
+      "verdict": "informational",
+      "title": "Reliability Monitor recorded an event with no more specific rule",
+      "plain": "Windows' own Reliability Monitor logged this, and no rule covers it specifically. The raw message below is the evidence.",
+      "why": "Reliability Monitor is a curated view rather than a raw channel, so anything in it was considered worth recording by whoever wrote the event. A catch-all here keeps that visible instead of letting it fall through to 'unknown', while still being honest that no specific ruling exists.",
+      "action": "Read the message. Anything already collected from an event channel was dropped before this point, so what reaches here is genuinely additional.",
+      "confidence": "low",
+      "references": [],
+      "falsepositives": [
+        "Third-party installers and updaters write to Reliability Monitor routinely while working correctly."
       ]
     }
   ]

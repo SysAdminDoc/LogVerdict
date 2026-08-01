@@ -139,7 +139,7 @@ function Test-LogVerdictDatabase {
 
         if ($rule.match -and $rule.match.messagePattern) {
             $src = $rule.match.source
-            if ((-not $src -or $src -eq 'event') -and -not $rule.locale) {
+            if ((-not $src -or $src -eq 'event' -or $src -eq 'reliability') -and -not $rule.locale) {
                 # Event message text is localized, so a pattern written against English
                 # will silently stop matching on a non-English Windows. Declaring the
                 # locale makes the rule skip instead of quietly failing.
