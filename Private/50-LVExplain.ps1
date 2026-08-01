@@ -194,3 +194,178 @@ function Add-LVModelExplanation {
 
     return ConvertTo-LVArrayOutput -Value @($Finding)
 }
+
+function Get-LVModelDraftRulePath {
+    [CmdletBinding()]
+    param([string]$Path)
+
+    if ($Path) { return [IO.Path]::GetFullPath($Path) }
+    if ($script:LVModuleRoot) { return (Join-Path $script:LVDataDir 'verdicts.local.json') }
+    return (Join-Path (Get-LVHostDirectory) 'verdicts.local.json')
+}
+
+function ConvertTo-LVModelDraftRule {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Finding,
+        [string]$MachineName = $env:COMPUTERNAME
+    )
+
+    if ($Finding.Verdict -ne 'unknown' -or $Finding.RuleId -or
+        -not $Finding.PSObject.Properties['ModelExplanation'] -or -not $Finding.ModelExplanation) {
+        throw 'Only an unknown finding with an accepted model explanation can become a draft rule.'
+    }
+
+    $draft = $Finding.ModelExplanation
+    if (-not $draft.ModelGenerated -or
+        $draft.Label -ne 'MODEL-GENERATED CANDIDATE - NOT A CURATED RULING') {
+        throw 'The explanation is not a validated LogVerdict model candidate.'
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string]$draft.Summary) -or
+        [string]::IsNullOrWhiteSpace([string]$draft.Uncertainty) -or
+        @($draft.Evidence | Where-Object { $_ }).Count -eq 0) {
+        throw 'The model candidate is incomplete and cannot be promoted.'
+    }
+
+    $draftText = @([string]$draft.Summary, [string]$draft.Uncertainty) + @($draft.Evidence)
+    if (Test-LVModelRemediationText -Text ($draftText -join [Environment]::NewLine)) {
+        throw 'The model candidate contains remediation or instructional language and cannot be promoted.'
+    }
+
+    $match = [ordered]@{}
+    if ($Finding.Source) { $match['source'] = [string]$Finding.Source }
+    if ($Finding.Channel) { $match['channel'] = [string]$Finding.Channel }
+    if ($Finding.Provider) { $match['provider'] = [string]$Finding.Provider }
+    if ($Finding.PSObject.Properties['Id'] -and $null -ne $Finding.Id) { $match['eventId'] = [int]$Finding.Id }
+    if ($match.Count -eq 0) { throw 'The finding has no stable fields from which to draft a rule match.' }
+
+    # A review draft is durable and may later be shared or committed. Do not bake the
+    # current machine's identity, account names, SIDs, profile paths, or mail addresses
+    # into reusable rule prose even though the source scan itself was not redacted.
+    $summary = ConvertTo-LVRedactedText -Text ([string]$draft.Summary).Trim() -MachineName $MachineName
+    $uncertainty = ConvertTo-LVRedactedText -Text ([string]$draft.Uncertainty).Trim() -MachineName $MachineName
+    $evidenceText = (@($draft.Evidence | Where-Object { $_ } | ForEach-Object {
+        ConvertTo-LVRedactedText -Text ([string]$_) -MachineName $MachineName
+    }) -join ' ')
+    return [ordered]@{
+        id             = ('LOCAL-DRAFT-{0}' -f (Get-LVShortHash -Text ([string]$Finding.Key))).ToUpperInvariant()
+        status         = 'unsupported'
+        verified       = (Get-Date).ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        match          = $match
+        verdict        = 'unknown'
+        title          = ('[DRAFT] {0}' -f $Finding.Key)
+        plain          = ('[MODEL-GENERATED - NOT CURATED] {0}' -f $summary)
+        why            = ('Model uncertainty: {0} Evidence cited: {1}' -f $uncertainty, $evidenceText)
+        action         = 'This draft is inactive. A human reviewer must replace this placeholder with a verified remediation and change both status and confidence before the rule can match.'
+        confidence     = 'draft'
+        references     = @()
+        falsepositives = @()
+        sources        = @()
+    }
+}
+
+function Write-LVModelDraftRule {
+    <#
+        .SYNOPSIS
+        Atomically add validated model candidates to the local rule database.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Finding,
+        [string]$Path,
+        [string]$MachineName = $env:COMPUTERNAME
+    )
+
+    $target = Get-LVModelDraftRulePath -Path $Path
+    $parent = Split-Path -Parent $target
+    if (-not (Test-Path -LiteralPath $parent)) {
+        $null = New-Item -ItemType Directory -Path $parent -Force
+    }
+
+    if (Test-Path -LiteralPath $target) {
+        try {
+            $database = [IO.File]::ReadAllText($target) | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            throw ('The local verdict database is not valid JSON and was left unchanged: {0}' -f $_.Exception.Message)
+        }
+        Assert-LVSchemaVersion -Database $database -Path $target
+    } else {
+        $database = [pscustomobject]@{
+            schemaVersion = $script:LVSchemaVersionMax
+            name = 'LogVerdict local rules and review drafts'
+            updated = (Get-Date).ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+            notes = 'MODEL-GENERATED drafts are inactive. Human review must replace status unsupported and confidence draft before a rule can match.'
+            rules = @()
+            correlations = @()
+        }
+    }
+
+    $candidateById = @{}
+    foreach ($item in @($Finding)) {
+        $candidate = ConvertTo-LVModelDraftRule -Finding $item -MachineName $MachineName
+        $candidateById[$candidate.id] = $candidate
+    }
+    if ($candidateById.Count -eq 0) { return @() }
+
+    $replaced = @{}
+    $outputRules = New-Object System.Collections.Generic.List[object]
+    foreach ($existing in @($database.rules)) {
+        if (-not $candidateById.ContainsKey([string]$existing.id)) {
+            $outputRules.Add($existing) | Out-Null
+            continue
+        }
+
+        $candidate = $candidateById[[string]$existing.id]
+        if ($existing.confidence -ne 'draft' -or $existing.status -ne 'unsupported') {
+            throw ("Refusing to overwrite reviewed local rule '{0}'." -f $existing.id)
+        }
+        $existingMatch = $existing.match | ConvertTo-Json -Depth 6 -Compress
+        $candidateMatch = $candidate.match | ConvertTo-Json -Depth 6 -Compress
+        if ($existingMatch -ne $candidateMatch) {
+            throw ("Draft rule id collision for '{0}'; the existing match was left unchanged." -f $existing.id)
+        }
+
+        $outputRules.Add([pscustomobject]$candidate) | Out-Null
+        $replaced[[string]$existing.id] = $true
+        $candidateById.Remove([string]$existing.id)
+    }
+    foreach ($candidate in @($candidateById.Values | Sort-Object id)) {
+        $outputRules.Add([pscustomobject]$candidate) | Out-Null
+    }
+
+    $out = [ordered]@{
+        schemaVersion = [int]$database.schemaVersion
+        name = $(if ($database.name) { [string]$database.name } else { 'LogVerdict local rules and review drafts' })
+        updated = (Get-Date).ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        notes = $(if ($database.notes) { [string]$database.notes } else { 'MODEL-GENERATED drafts are inactive. Human review must replace status unsupported and confidence draft before a rule can match.' })
+        rules = @($outputRules.ToArray())
+    }
+    if ($database.PSObject.Properties['correlations']) { $out['correlations'] = @($database.correlations) }
+
+    $temp = '{0}.{1}.tmp' -f $target, ([guid]::NewGuid().ToString('N'))
+    $backup = '{0}.{1}.bak' -f $target, ([guid]::NewGuid().ToString('N'))
+    try {
+        Write-LVTextFile -Path $temp -Content (($out | ConvertTo-Json -Depth 20) + [Environment]::NewLine)
+        if (-not (Test-LogVerdictDatabase -Path $temp -SkipFixture -Quiet)) {
+            throw 'The generated local verdict database did not pass validation.'
+        }
+        if (Test-Path -LiteralPath $target) {
+            [IO.File]::Replace($temp, $target, $backup)
+        } else {
+            [IO.File]::Move($temp, $target)
+        }
+    } finally {
+        if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force }
+        if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force }
+    }
+
+    $written = New-Object System.Collections.Generic.List[object]
+    foreach ($rule in @($outputRules | Where-Object { $_.confidence -eq 'draft' -and $_.id -like 'LOCAL-DRAFT-*' })) {
+        if ($replaced.ContainsKey([string]$rule.id) -or $candidateById.ContainsKey([string]$rule.id)) {
+            $written.Add([pscustomobject]@{ Id=[string]$rule.id; Path=$target; Replaced=$replaced.ContainsKey([string]$rule.id) }) | Out-Null
+        }
+    }
+    Write-LVLog -Level ok -Message ('Wrote {0} inactive draft rule(s) to {1}' -f $written.Count, $target)
+    return ConvertTo-LVArrayOutput -Value @($written.ToArray())
+}

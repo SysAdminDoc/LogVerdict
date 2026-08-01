@@ -148,6 +148,18 @@
         "confidence"
       ],
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": { "confidence": { "const": "draft" } },
+            "required": ["confidence"]
+          },
+          "then": {
+            "properties": { "status": { "const": "unsupported" } },
+            "required": ["status"]
+          }
+        }
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -215,9 +227,10 @@
           "enum": [
             "high",
             "medium",
-            "low"
+            "low",
+            "draft"
           ],
-          "description": "How certain the ruling is. Restating a self-describing message is high; adding interpretation is medium."
+          "description": "How certain the ruling is. Restating a self-describing message is high; adding interpretation is medium. draft is reserved for an inactive, model-generated local candidate with status unsupported; a reviewer must replace both fields before it can match."
         },
         "references": {
           "type": "array",

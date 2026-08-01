@@ -84,6 +84,7 @@ LogVerdict.exe -Redact                          mask identifiers before writing
 LogVerdict.exe -SkipReliability                 skip Reliability Monitor
 LogVerdict.exe -IncludeEvidence                 also zip the evidence for a ticket
 LogVerdict.exe -ExplainUnknown                  draft explanations for unknowns with local Ollama
+LogVerdict.exe -PromoteToRule                   save safe candidates as inactive local rule drafts
 ```
 
 `-IncludeEvidence` writes a zip beside the report holding the reports, the matching text-log lines and the scanned event channels as `.evtx`. The report says what LogVerdict concluded; the bundle carries what it concluded it *from*. Combined with `-Redact` the channel exports are deliberately left out - `.evtx` is binary and carries the identifiers redaction removes from the text, and the manifest says so, so a withheld channel is never mistaken for a clean one.
@@ -128,13 +129,18 @@ powershell -ExecutionPolicy Bypass -File .\Invoke-LogVerdict.ps1
 
 # Opt in to non-remedial draft explanations for unknown signatures from local Ollama
 .\Invoke-LogVerdict.ps1 -ExplainUnknown -OllamaModel llama3.2
+
+# Accept safe candidates into verdicts.local.json for human review; implies ExplainUnknown
+.\Invoke-LogVerdict.ps1 -PromoteToRule -OllamaModel llama3.2
 ```
 
 Reports land in a timestamped folder on the Desktop by default (safe even for right-click-elevated runs that start in System32). Override with `-OutputDir`.
 
 Offline analysis never reads the reviewing PC. It inherits the source report's look-back window unless `-DaysBack` is supplied, reopens exported `.evtx` members when present, and uses the captured report summaries for text logs and Reliability Monitor, whose full stores are deliberately not copied into a small evidence bundle. Redacted bundles contain no raw `.evtx`, so they are re-evaluated from report summaries and carry a coverage note saying so.
 
-`-ExplainUnknown` is the only switch that contacts a model endpoint. LogVerdict accepts only plain HTTP on `localhost`, `127.0.0.1`, or `::1`, sends one reduced unknown signature at a time to Ollama's `/api/generate`, and requests structured output with no actions or fixes. Known signatures are never sent. The candidate appears in its own **MODEL-GENERATED CANDIDATE - NOT A CURATED RULING** block; a connection failure, malformed response, unexpected field, or remediation language leaves the deterministic scan intact and produces no candidate.
+`-ExplainUnknown`, or the stronger `-PromoteToRule` switch that implies it, is the only path that contacts a model endpoint. LogVerdict accepts only plain HTTP on `localhost`, `127.0.0.1`, or `::1`, sends one reduced unknown signature at a time to Ollama's `/api/generate`, and requests structured output with no actions or fixes. Known signatures are never sent. The candidate appears in its own **MODEL-GENERATED CANDIDATE - NOT A CURATED RULING** block; a connection failure, malformed response, unexpected field, or remediation language leaves the deterministic scan intact and produces no candidate.
+
+`-PromoteToRule` is a stronger opt-in and therefore implies `-ExplainUnknown`. Each safe candidate is written atomically to `Data\verdicts.local.json` from source, or `verdicts.local.json` beside the compiled executable. Generated rules are visibly marked, use `confidence: draft` and `status: unsupported`, and remain ineligible to match even if either gate is edited alone. Human review must supply a real verdict and remediation, check the evidence, then replace both fields. Re-running promotion updates the same hashed draft id instead of creating duplicates; a reviewed rule is never overwritten. `-LocalRulePath` selects a different local file when needed.
 
 As a module:
 
@@ -193,7 +199,7 @@ The rules are the product. Adding one is a JSON edit, no code:
 
 `Data/verdicts.schema.json` describes the full rule format - point your editor at it for completion and inline validation. [CONTRIBUTING.md](CONTRIBUTING.md) walks through adding a rule end to end.
 
-Put site-specific rules in `Data/verdicts.local.json` - it is merged automatically, wins ties against the shipped rules, and survives updates. Validate with:
+Put site-specific rules in `Data/verdicts.local.json` - it is merged automatically, wins ties against the shipped rules, and survives updates. Model-promoted entries in that file are review drafts, not site rules yet: `confidence: draft` is accepted only with `status: unsupported`, and the resolver independently excludes both. Change both fields only after replacing the placeholder action with reviewed guidance. Validate with:
 
 ```powershell
 Test-LogVerdictDatabase

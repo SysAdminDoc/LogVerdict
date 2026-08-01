@@ -35,13 +35,14 @@ function Test-LVRuleActive {
         Whether a rule is eligible to produce a verdict.
 
         .DESCRIPTION
-        Deprecated and unsupported rules stay in the database so their ids remain
-        resolvable and their history is not lost, but they must never rule on a
-        signature. A rule with no status predates the status field and is treated as
-        active, which keeps schema v1 databases working.
+        Deprecated, unsupported, and model-generated draft rules stay in the database
+        so their ids remain resolvable and their history is not lost, but they must
+        never rule on a signature. A rule with no status predates the status field and
+        is treated as active, which keeps schema v1 databases working.
     #>
     param([Parameter(Mandatory)]$Rule)
 
+    if ($Rule.confidence -eq 'draft') { return $false }
     if (-not $Rule.status) { return $true }
     return ($script:LVActiveRuleStatus -contains $Rule.status)
 }
@@ -176,7 +177,7 @@ function Resolve-LVVerdict {
             $sig | Add-Member -NotePropertyName 'Title'      -NotePropertyValue ('Unrecognized: {0}' -f $sig.Key) -Force
             $sig | Add-Member -NotePropertyName 'Plain'      -NotePropertyValue 'No rule in the verdict database covers this signature, so LogVerdict will not guess at what it means. The raw message below is the evidence, unedited.' -Force
             $sig | Add-Member -NotePropertyName 'Why'        -NotePropertyValue 'Reported so that an unknown problem is visible rather than silently dropped.' -Force
-            $sig | Add-Member -NotePropertyName 'Action'     -NotePropertyValue 'Read the sample message. If you identify it, add a rule to Data/verdicts.json so the next scan explains it.' -Force
+            $sig | Add-Member -NotePropertyName 'Action'     -NotePropertyValue 'Read the sample message. If you identify it, add a reviewed rule to Data/verdicts.local.json so the next scan explains it.' -Force
             $sig | Add-Member -NotePropertyName 'Confidence' -NotePropertyValue 'none' -Force
             $sig | Add-Member -NotePropertyName 'Reference'  -NotePropertyValue $null -Force
             $sig | Add-Member -NotePropertyName 'References' -NotePropertyValue @() -Force

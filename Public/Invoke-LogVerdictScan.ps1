@@ -39,6 +39,15 @@ function Invoke-LogVerdictScan {
         draft explanation of signatures that have no curated rule. Known verdicts are
         never sent and never changed.
 
+        .PARAMETER PromoteToRule
+        Accept each safe model candidate into the local verdict file as an inactive
+        review draft. Implies ExplainUnknown. Drafts cannot match until a human replaces
+        both status unsupported and confidence draft.
+
+        .PARAMETER LocalRulePath
+        Override the local draft-rule destination. The default is Data\verdicts.local.json
+        from source and verdicts.local.json beside a compiled executable.
+
         .EXAMPLE
         Invoke-LogVerdictScan -DaysBack 7
 
@@ -57,7 +66,9 @@ function Invoke-LogVerdictScan {
         [string]$EvidencePath,
         [switch]$ExplainUnknown,
         [string]$OllamaModel = 'llama3.2',
-        [string]$OllamaEndpoint = 'http://127.0.0.1:11434'
+        [string]$OllamaEndpoint = 'http://127.0.0.1:11434',
+        [switch]$PromoteToRule,
+        [string]$LocalRulePath
     )
 
     if ($EvidencePath) {
@@ -71,6 +82,8 @@ function Invoke-LogVerdictScan {
             ExplainUnknown = $ExplainUnknown
             OllamaModel    = $OllamaModel
             OllamaEndpoint = $OllamaEndpoint
+            PromoteToRule  = $PromoteToRule
+            LocalRulePath  = $LocalRulePath
         }
         if ($PSBoundParameters.ContainsKey('DaysBack')) { $offlineArgs['DaysBack'] = $DaysBack }
         return Invoke-LVOfflineScan @offlineArgs
@@ -175,9 +188,19 @@ function Invoke-LogVerdictScan {
         }
     }
 
-    if ($ExplainUnknown) {
+    $modelRequested = [bool]($ExplainUnknown -or $PromoteToRule)
+    $promotedDrafts = @()
+    if ($modelRequested) {
         Write-LVLog -Level info -Message ('Requesting non-remedial draft explanations for unknown signatures from local Ollama model {0}...' -f $OllamaModel)
         $findings = @(Add-LVModelExplanation -Finding @($findings) -Model $OllamaModel -Endpoint $OllamaEndpoint)
+    }
+    if ($PromoteToRule) {
+        $accepted = @($findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation })
+        if ($accepted.Count -eq 0) {
+            Write-LVLog -Level warn -Message 'No safe model candidates were available to promote; the local rule file was not changed.'
+        } else {
+            $promotedDrafts = @(Write-LVModelDraftRule -Finding $accepted -Path $LocalRulePath -MachineName $env:COMPUTERNAME)
+        }
     }
 
     # Coverage honesty: an in-place upgrade or a cleared log resets a channel, which
@@ -271,8 +294,9 @@ function Invoke-LogVerdictScan {
         DatabaseName   = $db.name
         DatabaseDate   = $db.updated
         RuleCount      = @($db.rules).Count
-        ModelExplanationsEnabled = [bool]$ExplainUnknown
+        ModelExplanationsEnabled = $modelRequested
         ModelExplanationCount = @($findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation }).Count
+        PromotedDraftRules = @($promotedDrafts)
         WorstVerdict   = $worst
         ExitCode       = $exitCode
     }

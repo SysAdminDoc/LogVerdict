@@ -27,6 +27,13 @@
     Ask a local Ollama model for separately labelled, non-remedial draft explanations
     of unknown signatures only. Off by default.
 
+    .PARAMETER PromoteToRule
+    Write safe model candidates to the local verdict database as inactive review
+    drafts. Implies ExplainUnknown; a human must enable each rule deliberately.
+
+    .PARAMETER LocalRulePath
+    Override the local draft-rule destination.
+
     .PARAMETER NoReport
     Console only; write nothing to disk.
 
@@ -59,6 +66,8 @@ param(
     [switch]$ExplainUnknown,
     [string]$OllamaModel = 'llama3.2',
     [string]$OllamaEndpoint = 'http://127.0.0.1:11434',
+    [switch]$PromoteToRule,
+    [string]$LocalRulePath,
     [switch]$Pause,
     [switch]$NoPause
 )
@@ -109,6 +118,8 @@ try {
         ExplainUnknown  = $ExplainUnknown
         OllamaModel     = $OllamaModel
         OllamaEndpoint  = $OllamaEndpoint
+        PromoteToRule   = $PromoteToRule
+        LocalRulePath   = $LocalRulePath
     }
     if (-not $EvidencePath -or $PSBoundParameters.ContainsKey('DaysBack')) { $scanArgs['DaysBack'] = $DaysBack }
     if ($EvidencePath) { $scanArgs['EvidencePath'] = $EvidencePath }

@@ -40,6 +40,7 @@ $script:LVReliabilitySkipReason = $null
 # rules stay in the database for traceability but never produce a verdict.
 $script:LVRuleStatus = @('stable', 'test', 'experimental', 'deprecated', 'unsupported')
 $script:LVActiveRuleStatus = @('stable', 'test', 'experimental')
+$script:LVRuleConfidence = @('high', 'medium', 'low', 'draft')
 
 # A ruling that asserts "Microsoft says ignore this" is only as good as the day it was
 # checked. Rules older than this without re-verification are reported as stale.

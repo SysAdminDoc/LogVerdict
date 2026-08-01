@@ -119,6 +119,10 @@ Describe 'Entry script launch behaviour' {
         $text = Get-Content -LiteralPath $entry -Raw
         $text | Should -Match '\[switch\]\$ExplainUnknown'
         $text | Should -Match 'ExplainUnknown\s*=\s*\$ExplainUnknown'
+        $text | Should -Match '\[switch\]\$PromoteToRule'
+        $text | Should -Match 'PromoteToRule\s*=\s*\$PromoteToRule'
+        $scan = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $scan | Should -Match '\$modelRequested\s*=\s*\[bool\]\(\$ExplainUnknown\s+-or\s+\$PromoteToRule\)'
     }
 }
 
@@ -210,11 +214,13 @@ Describe 'Verdict database' {
 
         $schemaVerdicts = @($schema.definitions.rule.properties.verdict.enum) | Sort-Object
         $schemaStatuses = @($schema.definitions.rule.properties.status.enum) | Sort-Object
+        $schemaConfidence = @($schema.definitions.rule.properties.confidence.enum) | Sort-Object
 
-        InModuleScope LogVerdict -Parameters @{ sv = $schemaVerdicts; ss = $schemaStatuses } {
-            param($sv, $ss)
+        InModuleScope LogVerdict -Parameters @{ sv = $schemaVerdicts; ss = $schemaStatuses; sc = $schemaConfidence } {
+            param($sv, $ss, $sc)
             ($sv -join ',') | Should -Be ((@($script:LVVerdictRank.Keys) | Sort-Object) -join ',')
             ($ss -join ',') | Should -Be ((@($script:LVRuleStatus) | Sort-Object) -join ',')
+            ($sc -join ',') | Should -Be ((@($script:LVRuleConfidence) | Sort-Object) -join ',')
         }
 
         # Bound to the module's own ceiling rather than a literal, so the two cannot
@@ -1176,6 +1182,67 @@ Describe 'Local model explanations' {
             $out[0].PSObject.Properties.Name | Should -Not -Contain 'ModelExplanation'
             $out[0].ModelExplanationError | Should -Match 'remediation or instructional language'
         }
+    }
+
+    It 'writes a model candidate as an inactive, repeatable local rule draft' {
+        InModuleScope LogVerdict {
+            $path = Join-Path $TestDrive 'verdicts.local.json'
+            $unknown = [pscustomobject]@{
+                Key='Acme/4242'; Source='event'; Channel='System'; Provider='Acme'; Id=4242
+                Count=3; PerDay=0.3; SampleMessage='Acme fault'; Verdict='unknown'; RuleId=$null
+                ModelExplanation=[pscustomobject]@{
+                    Label='MODEL-GENERATED CANDIDATE - NOT A CURATED RULING'
+                    ModelGenerated=$true; Model='test-model'
+                    Summary='This may describe an Acme component fault on TESTPC.'
+                    Evidence=@('TESTPC emitted Acme event 4242 three times.')
+                    Uncertainty='The component and cause are not identified.'
+                }
+            }
+
+            $first = @(Write-LVModelDraftRule -Finding @($unknown) -Path $path -MachineName 'TESTPC')
+            $first.Count | Should -Be 1
+            $first[0].Replaced | Should -BeFalse
+            $local = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+            @($local.rules).Count | Should -Be 1
+            $local.rules[0].confidence | Should -BeExactly 'draft'
+            $local.rules[0].status | Should -BeExactly 'unsupported'
+            $local.rules[0].plain | Should -Match '^\[MODEL-GENERATED - NOT CURATED\]'
+            $local.rules[0].plain | Should -Not -Match 'TESTPC'
+            $local.rules[0].why | Should -Match '<MACHINE>'
+            $local.rules[0].action | Should -Match 'human reviewer'
+            Test-LogVerdictDatabase -Path $path -SkipFixture -Quiet | Should -BeTrue
+
+            $signature = [pscustomobject]@{
+                Key='Acme/4242'; Source='event'; Channel='System'; Provider='Acme'; Id=4242
+                Count=3; PerDay=0.3; SampleMessage='Acme fault'; FirstSeen=(Get-Date); LastSeen=(Get-Date)
+            }
+            $resolved = @(Resolve-LVVerdict -Signature @($signature) -Database (Get-LogVerdictDatabase -Path $path))
+            $resolved[0].Verdict | Should -BeExactly 'unknown'
+            $resolved[0].RuleId | Should -BeNullOrEmpty
+
+            $second = @(Write-LVModelDraftRule -Finding @($unknown) -Path $path -MachineName 'TESTPC')
+            $second[0].Replaced | Should -BeTrue
+            @(((Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).rules)).Count | Should -Be 1
+
+            $reviewed = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+            $reviewed.rules[0].status = 'stable'
+            $reviewed.rules[0].confidence = 'medium'
+            $reviewed | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
+            { Write-LVModelDraftRule -Finding @($unknown) -Path $path -MachineName 'TESTPC' } |
+                Should -Throw '*Refusing to overwrite reviewed local rule*'
+            (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).rules[0].confidence | Should -BeExactly 'medium'
+        }
+    }
+
+    It 'requires both inactive gates on a draft-confidence rule' {
+        $bad = Join-Path $TestDrive 'active-draft.json'
+        @'
+{ "schemaVersion": 5, "name": "bad draft", "updated": "2026-08-01", "rules": [
+  { "id": "LOCAL-DRAFT-BAD", "status": "experimental", "verified": "2026-08-01",
+    "match": { "source": "event", "provider": "Acme", "eventId": 1 }, "verdict": "unknown",
+    "title": "draft", "plain": "draft", "why": "draft", "action": "review", "confidence": "draft" } ] }
+'@ | Set-Content -LiteralPath $bad -Encoding UTF8
+        Test-LogVerdictDatabase -Path $bad -SkipFixture -Quiet | Should -BeFalse
     }
 }
 

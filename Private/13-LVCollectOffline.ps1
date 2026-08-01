@@ -263,7 +263,9 @@ function Invoke-LVOfflineScan {
         [int]$MaxPerChannel = 20000,
         [switch]$ExplainUnknown,
         [string]$OllamaModel = 'llama3.2',
-        [string]$OllamaEndpoint = 'http://127.0.0.1:11434'
+        [string]$OllamaEndpoint = 'http://127.0.0.1:11434',
+        [switch]$PromoteToRule,
+        [string]$LocalRulePath
     )
 
     $started = Get-Date
@@ -370,9 +372,22 @@ function Invoke-LVOfflineScan {
         $findings = @(Resolve-LVVerdict -Signature $signatures -Database $db)
         $correlations = @(Resolve-LVCorrelation -Finding $findings -Database $db)
         if (-not $IncludeBenign) { $findings = @($findings | Where-Object { $_.Verdict -ne 'benign' }) }
-        if ($ExplainUnknown) {
+        $modelRequested = [bool]($ExplainUnknown -or $PromoteToRule)
+        $promotedDrafts = @()
+        if ($modelRequested) {
             Write-LVLog -Level info -Message ('Requesting non-remedial draft explanations for unknown signatures from local Ollama model {0}...' -f $OllamaModel)
             $findings = @(Add-LVModelExplanation -Finding @($findings) -Model $OllamaModel -Endpoint $OllamaEndpoint)
+        }
+        if ($PromoteToRule) {
+            $accepted = @($findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation })
+            if ($accepted.Count -eq 0) {
+                Write-LVLog -Level warn -Message 'No safe model candidates were available to promote; the local rule file was not changed.'
+            } else {
+                $evidenceMachine = $null
+                if ($sourceReport -and $sourceReport.MachineName) { $evidenceMachine = [string]$sourceReport.MachineName }
+                elseif ($records.Count -gt 0 -and $records[0].MachineName) { $evidenceMachine = [string]$records[0].MachineName }
+                $promotedDrafts = @(Write-LVModelDraftRule -Finding $accepted -Path $LocalRulePath -MachineName $evidenceMachine)
+            }
         }
 
         $coverageNotes = New-Object System.Collections.Generic.List[string]
@@ -461,8 +476,9 @@ function Invoke-LVOfflineScan {
             DatabaseName   = $db.name
             DatabaseDate   = $db.updated
             RuleCount      = @($db.rules).Count
-            ModelExplanationsEnabled = [bool]$ExplainUnknown
+            ModelExplanationsEnabled = $modelRequested
             ModelExplanationCount = @($findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation }).Count
+            PromotedDraftRules = @($promotedDrafts)
             WorstVerdict   = $worst
             ExitCode       = $exitCode
             Offline        = $true

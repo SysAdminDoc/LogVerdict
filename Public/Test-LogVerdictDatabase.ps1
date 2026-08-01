@@ -48,6 +48,7 @@ function Test-LogVerdictDatabase {
 
     $required = @('id', 'verdict', 'title', 'plain', 'why', 'action', 'confidence')
     $validVerdicts = @($script:LVVerdictRank.Keys)
+    $validConfidence = @($script:LVRuleConfidence)
     $schemaVersion = [int]$db.schemaVersion
 
     # Provenance is only required from the schema version that introduced it, so a
@@ -74,6 +75,13 @@ function Test-LogVerdictDatabase {
 
         if ($rule.verdict -and $validVerdicts -notcontains $rule.verdict) {
             $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("unknown verdict '{0}'; valid: {1}" -f $rule.verdict, ($validVerdicts -join ', ')) }) | Out-Null
+        }
+
+        if ($rule.confidence -and $validConfidence -notcontains $rule.confidence) {
+            $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("unknown confidence '{0}'; valid: {1}" -f $rule.confidence, ($validConfidence -join ', ')) }) | Out-Null
+        }
+        if ($rule.confidence -eq 'draft' -and $rule.status -ne 'unsupported') {
+            $problems.Add([pscustomobject]@{ RuleId = $id; Problem = "confidence 'draft' requires status 'unsupported' so it cannot produce a verdict before human review" }) | Out-Null
         }
 
         if ($null -eq $rule.match) {
