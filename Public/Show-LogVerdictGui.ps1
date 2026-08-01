@@ -395,6 +395,9 @@ function Show-LogVerdictGui {
                 $channelLines.Add(('{0,-36} {1,-11} {2}' -f $name, ([string]$entry.Access).ToUpperInvariant(), $availability)) | Out-Null
             }
         }
+        if ($Result.PSObject.Properties['SetupDiag'] -and $Result.SetupDiag) {
+            $channelLines.Add(('SetupDiag                            {0,-11} {1}' -f ([string]$Result.SetupDiag.Status).ToUpperInvariant(), $Result.SetupDiag.Message)) | Out-Null
+        }
         if ($channelLines.Count -eq 0) { $channelLines.Add('No event-channel status was returned.') | Out-Null }
         $ui.LstChannelCoverage.ItemsSource = [string[]]$channelLines.ToArray()
 

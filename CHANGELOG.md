@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **Existing SetupDiag installations now deepen Panther analysis.** LogVerdict discovers an already-present Microsoft SetupDiag, runs it offline with `/NoTel` against the newest Panther log set, and merges its structured profile, failure details, and remediation as an attributed finding. Execution is bounded and temporary; no tool is downloaded, `/AddReg` is never used, and absence, stale logs, success, required elevation, launch failure, timeout, or invalid output all fall back explicitly to the built-in Panther collector.
 - Reproducible Scoop and winget manifests for the immutable v0.7.0 release. `Tools\New-PackageManifests.ps1` downloads an existing release, hashes both unsigned executables, emits a Scoop package with the console shim and GUI shortcut, and emits an x64 winget portable package for the console tool. Offline asset mode keeps generation directly testable without network access.
 
 - **The window now reaches every deterministic live-scan and report option.** It can scan the focused tier or named event channels, skip Reliability Monitor, load an alternate complete rule database, choose a report folder, redact written output, and include an evidence zip. All-channels and focused-channel choices are mutually exclusive, while a non-empty named list deliberately overrides both. Offline evidence review, local-model rule drafting, and output-format selection remain console-only and are documented as such.

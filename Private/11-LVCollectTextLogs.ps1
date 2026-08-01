@@ -224,6 +224,357 @@ function Get-LVTextLogRecord {
     return ConvertTo-LVArrayOutput -Value @($records.ToArray())
 }
 
+function Get-LVSetupDiagExecutable {
+    <#
+        .SYNOPSIS
+        Find an already-present Microsoft SetupDiag executable without downloading it.
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyCollection()][string[]]$CandidatePath)
+
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if ($PSBoundParameters.ContainsKey('CandidatePath')) {
+        foreach ($path in @($CandidatePath)) { if ($path) { $candidates.Add($path) | Out-Null } }
+    } else {
+        $command = Get-Command 'SetupDiag.exe' -ErrorAction SilentlyContinue
+        if ($command -and $command.Source) { $candidates.Add([string]$command.Source) | Out-Null }
+
+        $systemDrive = $env:SystemDrive
+        if (-not $systemDrive) { $systemDrive = 'C:' }
+        $windows = $env:windir
+        if (-not $windows) { $windows = Join-Path $systemDrive 'Windows' }
+        foreach ($path in @(
+            (Join-Path $systemDrive '$Windows.~BT\Sources\SetupDiag.exe'),
+            (Join-Path $systemDrive 'Windows.old\$Windows.~BT\Sources\SetupDiag.exe'),
+            (Join-Path $windows 'System32\SetupDiag.exe'),
+            (Join-Path $windows 'SetupDiag.exe')
+        )) { $candidates.Add($path) | Out-Null }
+    }
+
+    foreach ($path in @($candidates.ToArray() | Select-Object -Unique)) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            return (Get-Item -LiteralPath $path -ErrorAction Stop).FullName
+        }
+    }
+    return $null
+}
+
+function Get-LVSetupDiagLogSet {
+    <#
+        .SYNOPSIS
+        Choose the most recent supported Windows Setup log tree in the scan window.
+    #>
+    [CmdletBinding()]
+    param(
+        [int]$DaysBack = 30,
+        [AllowEmptyCollection()][string[]]$CandidatePath
+    )
+
+    if (-not $PSBoundParameters.ContainsKey('CandidatePath')) {
+        $systemDrive = $env:SystemDrive
+        if (-not $systemDrive) { $systemDrive = 'C:' }
+        $windows = $env:windir
+        if (-not $windows) { $windows = Join-Path $systemDrive 'Windows' }
+        $CandidatePath = @(
+            (Join-Path $systemDrive '$Windows.~BT\Sources'),
+            (Join-Path $windows 'Panther'),
+            (Join-Path $systemDrive 'Windows.old\$Windows.~BT\Sources')
+        )
+    }
+
+    $cutoff = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
+    $sets = New-Object System.Collections.Generic.List[object]
+    foreach ($path in @($CandidatePath | Where-Object { $_ } | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Container)) { continue }
+        $latest = Get-ChildItem -LiteralPath $path -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '(?i)^(setupact|setuperr|bluebox).*\.log$' } |
+            Sort-Object -Property LastWriteTime -Descending |
+            Select-Object -First 1
+        if ($latest) {
+            $sets.Add([pscustomobject]@{ Path=(Get-Item -LiteralPath $path).FullName; Latest=$latest.LastWriteTime }) | Out-Null
+        }
+    }
+
+    return @($sets.ToArray() | Where-Object { $_.Latest -ge $cutoff } | Sort-Object -Property Latest -Descending | Select-Object -First 1)
+}
+
+function Invoke-LVSetupDiagProcess {
+    <#
+        .SYNOPSIS
+        Run SetupDiag without a window, telemetry, zip output, or registry changes.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ExecutablePath,
+        [Parameter(Mandatory)][string]$LogsPath,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [Parameter(Mandatory)][string]$WorkingDirectory,
+        [int]$TimeoutSeconds = 120
+    )
+
+    if ($LogsPath.Contains('"') -or $OutputPath.Contains('"')) {
+        throw 'SetupDiag paths cannot contain a double quote.'
+    }
+
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.FileName = $ExecutablePath
+    $start.Arguments = '/Output:"{0}" /LogsPath:"{1}" /Format:json /ZipLogs:False /NoTel' -f $OutputPath, $LogsPath
+    $start.WorkingDirectory = $WorkingDirectory
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+
+    $process = New-Object Diagnostics.Process
+    $process.StartInfo = $start
+    try {
+        if (-not $process.Start()) { throw 'SetupDiag did not start.' }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $completed = $process.WaitForExit([Math]::Max(1, $TimeoutSeconds) * 1000)
+        if (-not $completed) {
+            try { $process.Kill() } catch { Write-Verbose ('SetupDiag timeout cleanup failed: {0}' -f $_.Exception.Message) }
+            $process.WaitForExit()
+            return [pscustomobject]@{ ExitCode=$null; TimedOut=$true; StandardOutput=$stdoutTask.Result; StandardError=$stderrTask.Result }
+        }
+        $process.WaitForExit()
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            TimedOut = $false
+            StandardOutput = $stdoutTask.Result
+            StandardError = $stderrTask.Result
+        }
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Get-LVSetupDiagValue {
+    param(
+        [Parameter(Mandatory)]$InputObject,
+        [Parameter(Mandatory)][string]$Name
+    )
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($property) { return $property.Value }
+    return $null
+}
+
+function ConvertTo-LVSetupDiagLine {
+    param([AllowNull()]$Value)
+    if ($null -eq $Value) { return $null }
+    $line = ([string]$Value -replace '\s+', ' ').Trim()
+    if ($line) { return $line }
+    return $null
+}
+
+function ConvertFrom-LVSetupDiagDate {
+    param(
+        [AllowNull()]$Value,
+        [Nullable[datetime]]$Fallback
+    )
+
+    if ($Value -is [datetime]) {
+        if ($Value.Year -gt 1900) { return [datetime]$Value }
+        return $Fallback
+    }
+
+    $text = [string]$Value
+    $serialized = [regex]::Match($text, '^/Date\((-?\d+)(?:[+-]\d{4})?\)/$')
+    if ($serialized.Success) {
+        try {
+            $epoch = [datetime]::SpecifyKind([datetime]'1970-01-01 00:00:00', [DateTimeKind]::Utc)
+            $date = $epoch.AddMilliseconds([double]$serialized.Groups[1].Value).ToLocalTime()
+            if ($date.Year -gt 1900) { return $date }
+        } catch { Write-Verbose ('SetupDiag serialized date could not be decoded: {0}' -f $_.Exception.Message) }
+    }
+
+    $parsed = [datetime]::MinValue
+    if ($text -and [datetime]::TryParse(
+        $text,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::AllowWhiteSpaces,
+        [ref]$parsed)) {
+        if ($parsed.Year -gt 1900) { return $parsed }
+    }
+    return $Fallback
+}
+
+function ConvertFrom-LVSetupDiagJson {
+    <#
+        .SYNOPSIS
+        Turn SetupDiag's documented JSON shape into one ordinary LogVerdict record.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Json,
+        [Nullable[datetime]]$FallbackWhen
+    )
+
+    try {
+        $parsed = $Json | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw ('SetupDiag returned invalid JSON: {0}' -f $_.Exception.Message)
+    }
+
+    $result = @($parsed | Where-Object { $_ -and (Get-LVSetupDiagValue -InputObject $_ -Name 'ProfileName') } | Select-Object -Last 1)
+    if ($result.Count -eq 0) { throw 'SetupDiag JSON contains no ProfileName.' }
+    $item = $result[0]
+    $profileName = ConvertTo-LVSetupDiagLine (Get-LVSetupDiagValue -InputObject $item -Name 'ProfileName')
+    $version = ConvertTo-LVSetupDiagLine (Get-LVSetupDiagValue -InputObject $item -Name 'Version')
+    $guid = ConvertTo-LVSetupDiagLine (Get-LVSetupDiagValue -InputObject $item -Name 'ProfileGuid')
+
+    $systemInfo = Get-LVSetupDiagValue -InputObject $item -Name 'SystemInfo'
+    $when = $null
+    if ($systemInfo) {
+        $when = ConvertFrom-LVSetupDiagDate -Value (Get-LVSetupDiagValue -InputObject $systemInfo -Name 'UpgradeEndTime') -Fallback $null
+        if ($null -eq $when) {
+            $when = ConvertFrom-LVSetupDiagDate -Value (Get-LVSetupDiagValue -InputObject $systemInfo -Name 'UpgradeStartTime') -Fallback $null
+        }
+    }
+    if ($null -eq $when) { $when = $FallbackWhen }
+
+    if ($profileName -eq 'FindSuccessfulUpgrade') {
+        return [pscustomobject]@{ Successful=$true; Profile=$profileName; Version=$version; Record=$null; When=$when }
+    }
+
+    $failure = New-Object System.Collections.Generic.List[string]
+    foreach ($value in @(
+        (Get-LVSetupDiagValue -InputObject $item -Name 'FailureDetails'),
+        (Get-LVSetupDiagValue -InputObject $item -Name 'LogErrorLine')
+    ) + @(Get-LVSetupDiagValue -InputObject $item -Name 'FailureData')) {
+        $line = ConvertTo-LVSetupDiagLine $value
+        if ($line -and -not $failure.Contains($line)) { $failure.Add($line) | Out-Null }
+    }
+
+    $remediation = New-Object System.Collections.Generic.List[string]
+    foreach ($value in @(Get-LVSetupDiagValue -InputObject $item -Name 'Remediation')) {
+        $line = ConvertTo-LVSetupDiagLine $value
+        if ($line -and -not $remediation.Contains($line)) { $remediation.Add($line) | Out-Null }
+    }
+
+    $message = New-Object System.Collections.Generic.List[string]
+    $identity = 'Microsoft SetupDiag'
+    if ($version) { $identity += ' ' + $version }
+    $identity += ' matched profile ' + $profileName
+    if ($guid) { $identity += ' (' + $guid + ')' }
+    $message.Add($identity + '.') | Out-Null
+    if ($failure.Count -gt 0) { $message.Add('Failure: ' + ($failure -join ' | ')) | Out-Null }
+    if ($remediation.Count -gt 0) { $message.Add('Remediation: ' + ($remediation -join ' | ')) | Out-Null }
+
+    $record = [pscustomobject]@{
+        Source = 'textlog'
+        Channel = 'SetupDiag'
+        Provider = 'Microsoft SetupDiag'
+        Id = 0
+        Level = 2
+        LevelName = 'Error'
+        TimeCreated = $when
+        Undated = ($null -eq $when)
+        MachineName = $env:COMPUTERNAME
+        RecordId = 1
+        Area = 'Setup and upgrade'
+        Hint = 'Microsoft SetupDiag matched its curated upgrade-failure rules against the Panther log set.'
+        SignatureKey = 'SetupDiag/' + $profileName.ToLowerInvariant()
+        Message = $message -join ' '
+    }
+
+    return [pscustomobject]@{
+        Successful = $false
+        Profile = $profileName
+        Version = $version
+        Remediation = @($remediation.ToArray())
+        Record = $record
+        When = $when
+    }
+}
+
+function Get-LVSetupDiagRecord {
+    <#
+        .SYNOPSIS
+        Use SetupDiag when present, otherwise explicitly retain the Panther fallback.
+    #>
+    [CmdletBinding()]
+    param(
+        [int]$DaysBack = 30,
+        [AllowEmptyCollection()][string[]]$ExecutableCandidate,
+        [AllowEmptyCollection()][string[]]$LogCandidate,
+        [int]$TimeoutSeconds = 120
+    )
+
+    $executableArgs = @{}
+    if ($PSBoundParameters.ContainsKey('ExecutableCandidate')) { $executableArgs['CandidatePath'] = $ExecutableCandidate }
+    $executable = Get-LVSetupDiagExecutable @executableArgs
+    if (-not $executable) {
+        $message = 'SetupDiag is not present; Panther failures will use LogVerdict built-in text rules.'
+        Write-LVLog -Level info -Message $message
+        return [pscustomobject]@{ Available=$false; Used=$false; Status='absent'; Message=$message; ExecutablePath=$null; LogsPath=$null; Profile=$null; Records=@() }
+    }
+
+    $logArgs = @{ DaysBack=$DaysBack }
+    if ($PSBoundParameters.ContainsKey('LogCandidate')) { $logArgs['CandidatePath'] = $LogCandidate }
+    $logSet = @(Get-LVSetupDiagLogSet @logArgs)
+    if ($logSet.Count -eq 0) {
+        $message = 'SetupDiag is present, but no supported Panther log set was updated inside the scan window; built-in text rules remain active.'
+        Write-LVLog -Level info -Message $message
+        return [pscustomobject]@{ Available=$true; Used=$false; Status='no-recent-logs'; Message=$message; ExecutablePath=$executable; LogsPath=$null; Profile=$null; Records=@() }
+    }
+
+    $temporary = Join-Path ([IO.Path]::GetTempPath()) ('LogVerdict-SetupDiag-' + [Guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Path $temporary
+    $output = Join-Path $temporary 'SetupDiagResults.json'
+    try {
+        Write-LVLog -Level info -Message ('SetupDiag found; analyzing the recent Panther log set at {0}.' -f $logSet[0].Path)
+        try {
+            $process = Invoke-LVSetupDiagProcess -ExecutablePath $executable -LogsPath $logSet[0].Path `
+                -OutputPath $output -WorkingDirectory $temporary -TimeoutSeconds $TimeoutSeconds
+        } catch {
+            $reason = $_.Exception.Message
+            $status = 'execution-failed'
+            if ($reason -match '(?i)elevat') { $status = 'requires-elevation' }
+            $message = ('SetupDiag could not start ({0}); built-in Panther rules remain active.' -f $reason)
+            Write-LVLog -Level warn -Message $message
+            return [pscustomobject]@{ Available=$true; Used=$false; Status=$status; Message=$message; ExecutablePath=$executable; LogsPath=$logSet[0].Path; Profile=$null; Records=@() }
+        }
+        if ($process.TimedOut) {
+            $message = ('SetupDiag exceeded the {0}-second limit; built-in Panther rules remain active.' -f $TimeoutSeconds)
+            Write-LVLog -Level warn -Message $message
+            return [pscustomobject]@{ Available=$true; Used=$true; Status='timeout'; Message=$message; ExecutablePath=$executable; LogsPath=$logSet[0].Path; Profile=$null; Records=@() }
+        }
+        if (-not (Test-Path -LiteralPath $output -PathType Leaf)) {
+            $message = ('SetupDiag exited {0} without a JSON result; built-in Panther rules remain active.' -f $process.ExitCode)
+            Write-LVLog -Level warn -Message $message
+            return [pscustomobject]@{ Available=$true; Used=$true; Status='no-output'; Message=$message; ExecutablePath=$executable; LogsPath=$logSet[0].Path; Profile=$null; Records=@() }
+        }
+
+        try {
+            $decoded = ConvertFrom-LVSetupDiagJson -Json (Get-Content -LiteralPath $output -Raw -ErrorAction Stop) -FallbackWhen $logSet[0].Latest
+        } catch {
+            $message = ('SetupDiag JSON could not be read ({0}); built-in Panther rules remain active.' -f $_.Exception.Message)
+            Write-LVLog -Level warn -Message $message
+            return [pscustomobject]@{ Available=$true; Used=$true; Status='invalid-output'; Message=$message; ExecutablePath=$executable; LogsPath=$logSet[0].Path; Profile=$null; Records=@() }
+        }
+
+        if ($decoded.Successful) {
+            $message = ('SetupDiag matched {0}; no failure record was added and built-in Panther lines remain available.' -f $decoded.Profile)
+            Write-LVLog -Level ok -Message $message
+            return [pscustomobject]@{ Available=$true; Used=$true; Status='successful-upgrade'; Message=$message; ExecutablePath=$executable; LogsPath=$logSet[0].Path; Profile=$decoded.Profile; Records=@() }
+        }
+
+        $cutoff = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
+        if ($decoded.When -and $decoded.When -lt $cutoff) {
+            $message = ('SetupDiag matched {0}, but the result predates the scan window; no failure record was added.' -f $decoded.Profile)
+            Write-LVLog -Level info -Message $message
+            return [pscustomobject]@{ Available=$true; Used=$true; Status='stale-result'; Message=$message; ExecutablePath=$executable; LogsPath=$logSet[0].Path; Profile=$decoded.Profile; Records=@() }
+        }
+
+        $message = ('SetupDiag matched {0}; its structured failure and remediation were merged into the scan.' -f $decoded.Profile)
+        Write-LVLog -Level ok -Message $message
+        return [pscustomobject]@{ Available=$true; Used=$true; Status='matched'; Message=$message; ExecutablePath=$executable; LogsPath=$logSet[0].Path; Profile=$decoded.Profile; Records=@($decoded.Record) }
+    } finally {
+        Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Select-LVWerValue {
     <#
         .SYNOPSIS

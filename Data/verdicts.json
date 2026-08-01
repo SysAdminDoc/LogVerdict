@@ -4460,6 +4460,34 @@
       "falsepositives": [
         "A later boot can apply the value successfully, leaving only this historical failure in the log."
       ]
+    },
+    {
+      "id": "LV-0327",
+      "status": "stable",
+      "verified": "2026-08-01",
+      "match": {
+        "source": "textlog",
+        "channel": "SetupDiag",
+        "provider": "Microsoft SetupDiag"
+      },
+      "verdict": "actionable",
+      "title": "SetupDiag identified the Windows upgrade failure",
+      "plain": "Microsoft SetupDiag matched the Panther logs against its curated upgrade-failure rules and returned a structured failure profile.",
+      "why": "SetupDiag is Microsoft's purpose-built analyzer for these logs. Its matched profile is stronger evidence than one isolated Panther error line because the rule evaluates the setup phase, operation and related log context together.",
+      "action": "Read the Failure and Remediation fields in the raw evidence below and follow the SetupDiag guidance for this profile before retrying the upgrade.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/deployment/upgrade/setupdiag"
+      ],
+      "falsepositives": [
+        "A failed attempt can remain in Panther after a later upgrade succeeds; confirm the result time and target build match the attempt being investigated."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/deployment/upgrade/setupdiag",
+          "retrieved": "2026-08-01"
+        }
+      ]
     }
   ],
   "correlations": [

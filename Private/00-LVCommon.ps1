@@ -452,6 +452,18 @@ function ConvertTo-LVRedactedResult {
 
     $copy.Findings = @($findings)
     $copy.CrashArtifacts = @($crash)
+    if ($Result.PSObject.Properties['SetupDiag'] -and $Result.SetupDiag) {
+        $setupDiag = [pscustomobject]@{}
+        foreach ($prop in $Result.SetupDiag.PSObject.Properties) {
+            $setupDiag | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+        }
+        foreach ($name in @('Message', 'ExecutablePath', 'LogsPath')) {
+            if ($setupDiag.PSObject.Properties[$name]) {
+                $setupDiag.$name = ConvertTo-LVRedactedText -Text ([string]$setupDiag.$name) -MachineName $machine
+            }
+        }
+        $copy.SetupDiag = $setupDiag
+    }
     if ($copy.PSObject.Properties['CoverageNotes']) {
         $copy.CoverageNotes = @(@($Result.CoverageNotes) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
     }

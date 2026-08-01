@@ -31,7 +31,7 @@ LogVerdict is the missing middle: local, whole-machine, multi-source, deduplicat
 | `dism.log` | Image servicing failures |
 | `setupapi.dev.log` | Every driver install and device enumeration |
 | `NetSetup.LOG` | Domain join and rename - survives in-place upgrades that wipe the event channels |
-| `Panther\setupact.log`, `MoSetup\BlueBox.log` | Setup, upgrade and compatibility blocks |
+| `Panther\setupact.log`, `MoSetup\BlueBox.log` | Setup, upgrade and compatibility blocks; when an existing `SetupDiag.exe` is available, its structured failure profile and remediation are merged too |
 | `Minidump\`, WER `ReportArchive` | `Report.wer` app/module/exception metadata and kernel dump stop-code headers; artifacts that cannot be read remain inventoried |
 | Reliability Monitor (`Win32_ReliabilityRecords`) | Microsoft's own curated view of what failed, plus the software install/removal history an error-only sweep never sees |
 

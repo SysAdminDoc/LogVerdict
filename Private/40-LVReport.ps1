@@ -82,6 +82,9 @@ function Write-LVConsoleReport {
         $s = $Result.Stability
         Write-Host ('  Stability       : {0}/10, {1} over the window (low {2})' -f $s.Current, $s.Direction, $s.Lowest)
     }
+    if ($Result.PSObject.Properties['SetupDiag'] -and $Result.SetupDiag) {
+        Write-Host ('  SetupDiag       : {0} - {1}' -f $Result.SetupDiag.Status, $Result.SetupDiag.Message)
+    }
     Write-Host ''
 
     foreach ($note in @($Result.CoverageNotes)) {
@@ -173,6 +176,9 @@ function ConvertTo-LVTextReport {
         # otherwise has no way to see.
         Add-LVLine $sb ('Stability     : {0}/10, {1} over the window (started {2}, low {3}, {4} sample(s))' -f `
             $Result.Stability.Current, $Result.Stability.Direction, $Result.Stability.Starting, $Result.Stability.Lowest, $Result.Stability.SampleCount)
+    }
+    if ($Result.PSObject.Properties['SetupDiag'] -and $Result.SetupDiag) {
+        Add-LVLine $sb ('SetupDiag     : {0} - {1}' -f $Result.SetupDiag.Status, $Result.SetupDiag.Message)
     }
     if ($Result.PSObject.Properties['Redacted'] -and $Result.Redacted) {
         Add-LVLine $sb 'Redacted      : yes - account, machine, profile paths, SIDs and mail addresses were masked in the evidence below. Identifiers Windows wrote in a form this tool does not recognize may remain, so read before sending.'
@@ -402,6 +408,10 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         Add-LVLine $sb ('<div class="sub">Template passes: {0} fully masked signatures ({1}:1 reduction) &rarr; {2} signatures after promoting {3} low-cardinality slot(s) ({4}:1 reduction).</div>' -f `
             $Result.Reduction.InitialSignatureCount, $Result.Reduction.InitialRatio, $Result.Reduction.SignatureCount,
             $Result.Reduction.PromotedSlotCount, $Result.Reduction.Ratio)
+    }
+
+    if ($Result.PSObject.Properties['SetupDiag'] -and $Result.SetupDiag) {
+        Add-LVLine $sb ('<div class="sub">SetupDiag: {0}</div>' -f (ConvertTo-LVHtmlEncoded $Result.SetupDiag.Message))
     }
 
     if ($Result.PSObject.Properties['Redacted'] -and $Result.Redacted) {

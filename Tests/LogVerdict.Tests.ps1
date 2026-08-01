@@ -784,6 +784,155 @@ Describe 'Text-log collection against fixtures' {
     }
 }
 
+Describe 'SetupDiag Panther integration' {
+    BeforeAll {
+        $script:SetupDiagFixtureRoot = Join-Path $TestDrive 'Panther'
+        $null = New-Item -ItemType Directory -Path $script:SetupDiagFixtureRoot -Force
+        $script:SetupDiagLog = Join-Path $script:SetupDiagFixtureRoot 'setupact.log'
+        '2026-08-01 10:00:00, Error SP setup failed' | Set-Content -LiteralPath $script:SetupDiagLog -Encoding UTF8
+        (Get-Item -LiteralPath $script:SetupDiagLog).LastWriteTime = Get-Date
+        $script:SetupDiagExe = Join-Path $TestDrive 'SetupDiag.exe'
+        [IO.File]::WriteAllBytes($script:SetupDiagExe, [byte[]](77, 90))
+        $script:SetupDiagJson = @{
+            Version = '1.7.0.0'
+            ProfileName = 'FindSPFatalError'
+            ProfileGuid = 'A4028172-1B09-48F8-AD3B-86CDD7D55852'
+            SystemInfo = @{ UpgradeEndTime = (Get-Date).AddHours(-2).ToString('o') }
+            LogErrorLine = 'SP failed with 0x80070057'
+            FailureData = @('Error: SetupDiag reports Fatal Error.', 'Last Setup Phase = Downlevel')
+            FailureDetails = 'Err = 0x80070057, LastOperation = Gather data, LastPhase = Downlevel'
+            Remediation = @('Remove the incompatible component, reboot, and retry the upgrade.')
+        } | ConvertTo-Json -Depth 5
+    }
+
+    It 'finds only existing executable candidates and the newest recent log set' {
+        InModuleScope LogVerdict -Parameters @{ exe=$script:SetupDiagExe; root=$script:SetupDiagFixtureRoot } {
+            param($exe, $root)
+            Get-LVSetupDiagExecutable -CandidatePath @((Join-Path $root 'missing.exe'), $exe) | Should -BeExactly $exe
+            $set = @(Get-LVSetupDiagLogSet -DaysBack 1 -CandidatePath @($root))
+            $set.Count | Should -Be 1
+            $set[0].Path | Should -BeExactly $root
+            $set[0].Latest | Should -BeGreaterThan (Get-Date).AddHours(-1)
+        }
+    }
+
+    It 'projects documented JSON fields into an attributed stable signature' {
+        InModuleScope LogVerdict -Parameters @{ json=$script:SetupDiagJson } {
+            param($json)
+            $decoded = ConvertFrom-LVSetupDiagJson -Json $json -FallbackWhen (Get-Date).AddDays(-1)
+            $decoded.Successful | Should -BeFalse
+            $decoded.Profile | Should -BeExactly 'FindSPFatalError'
+            $decoded.Remediation | Should -Be @('Remove the incompatible component, reboot, and retry the upgrade.')
+            $decoded.Record.Provider | Should -BeExactly 'Microsoft SetupDiag'
+            $decoded.Record.Channel | Should -BeExactly 'SetupDiag'
+            $decoded.Record.SignatureKey | Should -BeExactly 'SetupDiag/findspfatalerror'
+            $decoded.Record.Message | Should -Match 'Failure:.*LastPhase = Downlevel'
+            $decoded.Record.Message | Should -Match 'Remediation: Remove the incompatible component'
+
+            $signature = @(Group-LVSignature -Record @($decoded.Record) -WindowDays 1)[0]
+            $db = Get-LogVerdictDatabase
+            $finding = @(Resolve-LVVerdict -Signature @($signature) -Database $db)[0]
+            $finding.RuleId | Should -BeExactly 'LV-0327'
+            $finding.Verdict | Should -BeExactly 'actionable'
+            $finding.Sources[0].uri | Should -BeExactly 'https://learn.microsoft.com/en-us/windows/deployment/upgrade/setupdiag'
+        }
+    }
+
+    It 'runs the available tool and returns its structured record' {
+        InModuleScope LogVerdict -Parameters @{ exe=$script:SetupDiagExe; root=$script:SetupDiagFixtureRoot; json=$script:SetupDiagJson } {
+            param($exe, $root, $json)
+            Mock Invoke-LVSetupDiagProcess {
+                param($ExecutablePath, $LogsPath, $OutputPath, $WorkingDirectory, $TimeoutSeconds)
+                [IO.File]::WriteAllText($OutputPath, $json, (New-Object Text.UTF8Encoding($false)))
+                [pscustomobject]@{ ExitCode=0; TimedOut=$false; StandardOutput=''; StandardError='' }
+            }
+
+            $status = Get-LVSetupDiagRecord -DaysBack 1 -ExecutableCandidate @($exe) -LogCandidate @($root)
+            $status.Available | Should -BeTrue
+            $status.Used | Should -BeTrue
+            $status.Status | Should -BeExactly 'matched'
+            $status.Profile | Should -BeExactly 'FindSPFatalError'
+            @($status.Records).Count | Should -Be 1
+            Assert-MockCalled Invoke-LVSetupDiagProcess -Times 1 -Exactly -Scope It -ParameterFilter {
+                $ExecutablePath -eq $exe -and $LogsPath -eq $root -and $TimeoutSeconds -eq 120
+            }
+        }
+    }
+
+    It 'degrades explicitly when SetupDiag is absent' {
+        InModuleScope LogVerdict -Parameters @{ root=$script:SetupDiagFixtureRoot } {
+            param($root)
+            Mock Invoke-LVSetupDiagProcess { throw 'must not run' }
+            $status = Get-LVSetupDiagRecord -DaysBack 1 -ExecutableCandidate @((Join-Path $root 'missing.exe')) -LogCandidate @($root)
+            $status.Available | Should -BeFalse
+            $status.Used | Should -BeFalse
+            $status.Status | Should -BeExactly 'absent'
+            $status.Message | Should -Match 'built-in text rules'
+            @($status.Records).Count | Should -Be 0
+            Assert-MockCalled Invoke-LVSetupDiagProcess -Times 0 -Exactly -Scope It
+        }
+    }
+
+    It 'keeps built-in rules active on timeout and invalid output' {
+        InModuleScope LogVerdict -Parameters @{ exe=$script:SetupDiagExe; root=$script:SetupDiagFixtureRoot } {
+            param($exe, $root)
+            Mock Invoke-LVSetupDiagProcess {
+                [pscustomobject]@{ ExitCode=$null; TimedOut=$true; StandardOutput=''; StandardError='' }
+            }
+            $timeout = Get-LVSetupDiagRecord -DaysBack 1 -ExecutableCandidate @($exe) -LogCandidate @($root) -TimeoutSeconds 1
+            $timeout.Status | Should -BeExactly 'timeout'
+            $timeout.Message | Should -Match 'built-in Panther rules remain active'
+
+            Mock Invoke-LVSetupDiagProcess {
+                param($ExecutablePath, $LogsPath, $OutputPath)
+                [IO.File]::WriteAllText($OutputPath, '{not-json')
+                [pscustomobject]@{ ExitCode=0; TimedOut=$false; StandardOutput=''; StandardError='' }
+            }
+            $invalid = Get-LVSetupDiagRecord -DaysBack 1 -ExecutableCandidate @($exe) -LogCandidate @($root)
+            $invalid.Status | Should -BeExactly 'invalid-output'
+            $invalid.Message | Should -Match 'built-in Panther rules remain active'
+            @($invalid.Records).Count | Should -Be 0
+
+            Mock Invoke-LVSetupDiagProcess { throw 'The requested operation requires elevation.' }
+            $denied = Get-LVSetupDiagRecord -DaysBack 1 -ExecutableCandidate @($exe) -LogCandidate @($root)
+            $denied.Status | Should -BeExactly 'requires-elevation'
+            $denied.Used | Should -BeFalse
+            $denied.Message | Should -Match 'built-in Panther rules remain active'
+        }
+    }
+
+    It 'does not turn a successful upgrade profile into a failure' {
+        InModuleScope LogVerdict {
+            $json = @{
+                Version='1.7.0.0'; ProfileName='FindSuccessfulUpgrade'
+                SystemInfo=@{ UpgradeEndTime='2026-08-01T10:00:00' }
+                FailureData=@(); Remediation=@()
+            } | ConvertTo-Json -Depth 4
+            $decoded = ConvertFrom-LVSetupDiagJson -Json $json -FallbackWhen (Get-Date)
+            $decoded.Successful | Should -BeTrue
+            $decoded.Record | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'invokes offline JSON mode with telemetry, zip, and registry writes disabled' {
+        InModuleScope LogVerdict {
+            $text = (Get-Command Invoke-LVSetupDiagProcess).ScriptBlock.ToString()
+            $text | Should -Match '/LogsPath:'
+            $text | Should -Match '/Format:json'
+            $text | Should -Match '/ZipLogs:False'
+            $text | Should -Match '/NoTel'
+            $text | Should -Not -Match '/AddReg'
+        }
+    }
+
+    It 'publishes status without duplicating raw SetupDiag records' {
+        $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Invoke-LogVerdictScan.ps1'
+        $text = Get-Content -LiteralPath $path -Raw
+        $text | Should -Match 'if \(\$property\.Name -ne ''Records''\)'
+        $text | Should -Match 'SetupDiag\s+= \$setupDiagStatus'
+    }
+}
+
 Describe 'Crash artifact header decoding' {
     BeforeAll {
         $script:CrashFixtureDir = Join-Path $TestDrive 'crash-artifacts'
@@ -2844,6 +2993,24 @@ Describe 'Report redaction' {
         }
     }
 
+    It 'redacts SetupDiag status paths and messages without duplicating its raw records' {
+        InModuleScope LogVerdict {
+            $result = [pscustomobject]@{
+                MachineName = 'HOST-9'; Findings = @(); CrashArtifacts = @(); CoverageNotes = @()
+                SetupDiag = [pscustomobject]@{
+                    Status='execution-failed'; Message='HOST-9 failed under C:\Users\bob\Panther'
+                    ExecutablePath='C:\Users\bob\SetupDiag.exe'; LogsPath='C:\Users\bob\Panther'
+                }
+            }
+            $redacted = ConvertTo-LVRedactedResult -Result $result
+            foreach ($name in @('Message', 'ExecutablePath', 'LogsPath')) {
+                $redacted.SetupDiag.$name | Should -Not -Match 'bob|HOST-9'
+            }
+            $redacted.SetupDiag.PSObject.Properties.Name | Should -Not -Contain 'Records'
+            $result.SetupDiag.Message | Should -Match 'HOST-9.*bob'
+        }
+    }
+
     It 'writes reports that state redaction was applied' {
         # A masked report that does not say it is masked reads as a complete one, and
         # the reader draws conclusions from evidence that was removed.
@@ -3212,6 +3379,11 @@ Describe 'Rule regression fixtures' {
                 }
                 if ($f.signature.Channel -eq 'Minidump') {
                     $f.signature.SampleMessage | Should -Match '^Kernel minidump bug check 0x[0-9A-Fa-f]{8}; parameters ' -Because "$($f.ruleId)'s sample must be a line the crash collector produces"
+                    continue
+                }
+                if ($f.signature.Channel -eq 'SetupDiag') {
+                    $f.signature.Provider | Should -BeExactly 'Microsoft SetupDiag' -Because "$($f.ruleId)'s sample must retain SetupDiag attribution"
+                    $f.signature.SampleMessage | Should -Match '^Microsoft SetupDiag .* matched profile ' -Because "$($f.ruleId)'s sample must be a record the SetupDiag projection produces"
                     continue
                 }
                 $target = $script:LVTextLogTarget | Where-Object { $_.Name -eq $f.signature.Channel }

@@ -137,10 +137,24 @@ function Invoke-LogVerdictScan {
     Write-LVLog -Level ok -Message ('{0} event record(s)' -f $records.Count)
 
     $crash = @()
+    $setupDiag = $null
+    $setupDiagStatus = $null
     $decodedCrashCount = 0
     if (-not $SkipTextLogs) {
         Write-LVLog -Level info -Message 'Reading plain-text logs...'
         foreach ($r in (Get-LVTextLogRecord -DaysBack $DaysBack)) { $records.Add($r) | Out-Null }
+
+        $setupDiag = Get-LVSetupDiagRecord -DaysBack $DaysBack
+        foreach ($r in @($setupDiag.Records | Where-Object { $_ })) { $records.Add($r) | Out-Null }
+        # Records are merged into the ordinary pipeline above. Keep only execution
+        # status in the public result so raw SetupDiag evidence is not duplicated in
+        # JSON (and cannot bypass the finding redaction path on export).
+        $setupDiagStatus = [pscustomobject]@{}
+        foreach ($property in $setupDiag.PSObject.Properties) {
+            if ($property.Name -ne 'Records') {
+                $setupDiagStatus | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force
+            }
+        }
 
         $crash = @(Get-LVCrashArtifact -DaysBack ([Math]::Max($DaysBack, 90)))
         $decodedCrashCount = @($crash | Where-Object { $_.Decoded }).Count
@@ -301,6 +315,7 @@ function Invoke-LogVerdictScan {
         Findings       = @($findings)
         Correlations   = @($correlations)
         CrashArtifacts = @($crash)
+        SetupDiag      = $setupDiagStatus
         Horizon        = $horizon
         HorizonWarning = $horizonWarning
         Stability      = $stability
