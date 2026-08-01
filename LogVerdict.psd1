@@ -9,6 +9,7 @@
     PowerShellVersion = '5.1'
 
     FunctionsToExport = @(
+        'Compare-LogVerdictScan',
         'Invoke-LogVerdictScan',
         'Get-LogVerdictDatabase',
         'Test-LogVerdictDatabase',

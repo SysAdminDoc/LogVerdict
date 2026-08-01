@@ -9,6 +9,7 @@ Describe 'Module surface' {
     It 'exports exactly the documented public functions' {
         $exported = (Get-Module LogVerdict).ExportedFunctions.Keys | Sort-Object
         $exported | Should -Be @(
+            'Compare-LogVerdictScan',
             'Export-LogVerdictReport',
             'Get-LogVerdictDatabase',
             'Invoke-LogVerdictScan',
@@ -27,6 +28,60 @@ Describe 'Module surface' {
         $manifest = Import-PowerShellDataFile -Path (Join-Path $root 'LogVerdict.psd1')
         $exported = (Get-Module LogVerdict).ExportedFunctions.Keys | Sort-Object
         ($manifest.FunctionsToExport | Sort-Object) | Should -Be $exported
+    }
+}
+
+Describe 'Scan comparison' {
+    BeforeAll {
+        $script:BeforeComparison = [pscustomobject]@{
+            ScanTime = [datetime]'2026-07-31 10:00'
+            Findings = @(
+                [pscustomobject]@{ Key='Disk/7'; Title='Disk error'; Verdict='actionable'; Count=2; PerDay=0.5 }
+                [pscustomobject]@{ Key='Old/1'; Title='Old failure'; Verdict='investigate'; Count=4; PerDay=1.0 }
+                [pscustomobject]@{ Key='Rate/2'; Title='Rate climb'; Verdict='investigate'; Count=4; PerDay=1.0 }
+                [pscustomobject]@{ Key='Severity/3'; Title='Severity climb'; Verdict='investigate'; Count=1; PerDay=0.1 }
+                [pscustomobject]@{ Key='Noise/4'; Title='Rounding noise'; Verdict='informational'; Count=1; PerDay=0.03 }
+            )
+        }
+        $script:AfterComparison = [pscustomobject]@{
+            ScanTime = [datetime]'2026-08-01 10:00'
+            Findings = @(
+                [pscustomobject]@{ Key='Disk/7'; Title='Disk error'; Verdict='actionable'; Count=2; PerDay=0.5 }
+                [pscustomobject]@{ Key='New/9'; Title='New failure'; Verdict='unknown'; Count=1; PerDay=0.1 }
+                [pscustomobject]@{ Key='Rate/2'; Title='Rate climb'; Verdict='investigate'; Count=8; PerDay=1.5 }
+                [pscustomobject]@{ Key='Severity/3'; Title='Severity climb'; Verdict='actionable'; Count=1; PerDay=0.1 }
+                [pscustomobject]@{ Key='Noise/4'; Title='Rounding noise'; Verdict='informational'; Count=2; PerDay=0.05 }
+            )
+        }
+    }
+
+    It 'emits only new, resolved, and worsening signatures' {
+        $changes = @(Compare-LogVerdictScan -Before $script:BeforeComparison -After $script:AfterComparison)
+        $changes.Count | Should -Be 4
+        @($changes.Change | Sort-Object) | Should -Be @('new', 'resolved', 'worsening', 'worsening')
+        @($changes.Key) | Should -Not -Contain 'Disk/7'
+        @($changes.Key) | Should -Not -Contain 'Noise/4'
+    }
+
+    It 'distinguishes a rate regression from a verdict regression' {
+        $changes = @(Compare-LogVerdictScan $script:BeforeComparison $script:AfterComparison)
+        ($changes | Where-Object Key -eq 'Rate/2').Reason | Should -Match 'Rate rose from 1\.00/day to 1\.50/day'
+        ($changes | Where-Object Key -eq 'Severity/3').Reason | Should -Match 'investigate to actionable'
+    }
+
+    It 'accepts two JSON reports from disk' {
+        $beforePath = Join-Path $TestDrive 'before.json'
+        $afterPath = Join-Path $TestDrive 'after.json'
+        $script:BeforeComparison | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $beforePath -Encoding UTF8
+        $script:AfterComparison | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $afterPath -Encoding UTF8
+        $changes = @(Compare-LogVerdictScan -Before $beforePath -After $afterPath)
+        ($changes | Where-Object Change -eq 'resolved').Key | Should -BeExactly 'Old/1'
+        ($changes | Where-Object Change -eq 'new').Key | Should -BeExactly 'New/9'
+    }
+
+    It 'refuses an object that is not a scan result' {
+        { Compare-LogVerdictScan -Before ([pscustomobject]@{ Name='not a report' }) -After $script:AfterComparison } |
+            Should -Throw '*no Findings collection*'
     }
 }
 

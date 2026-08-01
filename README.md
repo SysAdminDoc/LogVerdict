@@ -142,6 +142,14 @@ $r | Export-LogVerdictReport -OutputDir C:\Temp\lv
 Show-LogVerdictGui -DaysBack 7 -AutoScan
 ```
 
+To check whether a fix worked, save a JSON report before the change, scan again afterwards, and compare them. The output contains only signatures that are new, resolved, or worsening, as flat PowerShell objects that can be filtered or exported directly:
+
+```powershell
+Compare-LogVerdictScan `
+  -Before .\before\LogVerdict-Report.json `
+  -After  .\after\LogVerdict-Report.json
+```
+
 WPF needs a single-threaded apartment. Windows PowerShell is STA by default; `pwsh` is not, so `LogVerdict-GUI.ps1` relaunches itself under `powershell.exe -STA`. Calling `Show-LogVerdictGui` directly from `pwsh` throws and tells you why.
 
 ### Exit codes
@@ -206,7 +214,7 @@ Invoke-Pester -Path .\Tests
 
 ## Honest limitations
 
-- **Coverage is the roadmap.** 171 rules ship. A first scan will still report `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
+- **Coverage is the roadmap.** 173 rules ship. A first scan will still report `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
 - **Crash-stack analysis is bounded.** LogVerdict reads the bug-check code and four parameters from supported kernel dump headers, but naming the responsible driver still needs a debugger and symbols. Unsupported, truncated or access-controlled dumps remain inventoried with the reason they were not decoded.
 - **A clean result is not proof of health.** An in-place upgrade or a cleared log resets the event channels, so the report states each channel's oldest surviving record and warns when that horizon falls inside the requested window.
 - Offline review is bounded by what the bundle captured. Exported event channels are re-read in full, while text logs and Reliability Monitor are re-evaluated from the signature summaries in the source report rather than copied wholesale.

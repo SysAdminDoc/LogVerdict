@@ -20,6 +20,7 @@ foreach ($scope in @('Private', 'Public')) {
 }
 
 Export-ModuleMember -Function @(
+    'Compare-LogVerdictScan',
     'Invoke-LogVerdictScan',
     'Get-LogVerdictDatabase',
     'Test-LogVerdictDatabase',
