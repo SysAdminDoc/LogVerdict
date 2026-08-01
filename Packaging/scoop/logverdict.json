@@ -1,0 +1,39 @@
+{
+    "$schema":  "https://raw.githubusercontent.com/ScoopInstaller/Scoop/master/schema.json",
+    "version":  "0.7.0",
+    "description":  "Local Windows log triage with curated plain-English verdicts",
+    "homepage":  "https://github.com/SysAdminDoc/LogVerdict",
+    "license":  "MIT, MS-LPL",
+    "architecture":  {
+                         "64bit":  {
+                                       "url":  [
+                                                   "https://github.com/SysAdminDoc/LogVerdict/releases/download/v0.7.0/LogVerdict.exe",
+                                                   "https://github.com/SysAdminDoc/LogVerdict/releases/download/v0.7.0/LogVerdict-GUI.exe"
+                                               ],
+                                       "hash":  [
+                                                    "0147867798173a17eb83e7cde6208aab90198a9cd9521af387964372c6a62508",
+                                                    "3770702debb88e174f762ee7c5389f003c0c94db9a5c6709da84d01192869078"
+                                                ]
+                                   }
+                     },
+    "bin":  "LogVerdict.exe",
+    "shortcuts":  [
+                      [
+                          "LogVerdict-GUI.exe",
+                          "LogVerdict"
+                      ]
+                  ],
+    "checkver":  {
+                     "github":  "https://github.com/SysAdminDoc/LogVerdict"
+                 },
+    "autoupdate":  {
+                       "architecture":  {
+                                            "64bit":  {
+                                                          "url":  [
+                                                                      "https://github.com/SysAdminDoc/LogVerdict/releases/download/v$version/LogVerdict.exe",
+                                                                      "https://github.com/SysAdminDoc/LogVerdict/releases/download/v$version/LogVerdict-GUI.exe"
+                                                                  ]
+                                                      }
+                                        }
+                   }
+}

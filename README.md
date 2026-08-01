@@ -123,6 +123,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Build-LogVerdictExe.
 # -Target Console or -Target Gui builds just one
 ```
 
+Release maintainers generate Scoop and winget manifests only after the matching GitHub release exists:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\New-PackageManifests.ps1 -Version 0.7.0
+```
+
+The generator downloads the existing release assets, pins their SHA-256 hashes, and writes both manifests under `Packaging\`. It never creates or changes a release. Published assets must not be replaced in place: Scoop, winget, and SmartScreen all attach trust to the exact file hash.
+
 ### From source
 
 ```powershell

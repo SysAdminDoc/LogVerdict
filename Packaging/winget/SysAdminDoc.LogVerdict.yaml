@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.singleton.1.12.0.schema.json
+PackageIdentifier: SysAdminDoc.LogVerdict
+PackageVersion: 0.7.0
+PackageLocale: en-US
+Publisher: SysAdminDoc
+PublisherUrl: https://github.com/SysAdminDoc
+PublisherSupportUrl: https://github.com/SysAdminDoc/LogVerdict/issues
+PackageName: LogVerdict
+PackageUrl: https://github.com/SysAdminDoc/LogVerdict
+License: MIT, MS-LPL
+LicenseUrl: https://github.com/SysAdminDoc/LogVerdict/blob/main/LICENSE
+ShortDescription: Local Windows log triage with curated plain-English verdicts
+Description: Scans Windows diagnostic logs, reduces repeated records into signatures, and explains each finding with a curated verdict and remediation.
+Moniker: logverdict
+Tags:
+  - diagnostics
+  - event-log
+  - powershell
+  - sysadmin
+  - troubleshooting
+InstallerType: portable
+Scope: user
+UpgradeBehavior: install
+Commands:
+  - LogVerdict
+ReleaseDate: 2026-08-01
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/SysAdminDoc/LogVerdict/releases/download/v0.7.0/LogVerdict.exe
+    InstallerSha256: 0147867798173A17EB83E7CDE6208AAB90198A9CD9521AF387964372C6A62508
+ManifestType: singleton
+ManifestVersion: 1.12.0

@@ -1745,6 +1745,87 @@ Describe 'GUI pure presentation logic' {
     }
 }
 
+Describe 'Package-manager manifest generation' {
+    BeforeAll {
+        $script:PackageManifestTool = Join-Path (Split-Path $PSScriptRoot -Parent) 'Tools/New-PackageManifests.ps1'
+    }
+
+    It 'generates deterministic Scoop and winget manifests from local release assets' {
+        $assetDirectory = Join-Path $TestDrive 'assets'
+        $outputDirectory = Join-Path $TestDrive 'packaging'
+        $null = New-Item -ItemType Directory -Path $assetDirectory
+        [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'LogVerdict.exe'), [byte[]](1, 2, 3, 4))
+        [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'LogVerdict-GUI.exe'), [byte[]](5, 6, 7))
+
+        $result = & $script:PackageManifestTool -Version '9.8.7' -Repository 'Example/LogVerdict' `
+            -AssetDirectory $assetDirectory -ReleaseDate '2026-08-01' -OutputDirectory $outputDirectory
+
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            $consoleHash = ([BitConverter]::ToString($sha256.ComputeHash([IO.File]::ReadAllBytes((Join-Path $assetDirectory 'LogVerdict.exe'))))).Replace('-', '')
+            $sha256.Initialize()
+            $guiHash = ([BitConverter]::ToString($sha256.ComputeHash([IO.File]::ReadAllBytes((Join-Path $assetDirectory 'LogVerdict-GUI.exe'))))).Replace('-', '')
+        } finally {
+            $sha256.Dispose()
+        }
+        $scoop = Get-Content -LiteralPath $result.ScoopManifest -Raw | ConvertFrom-Json
+        $winget = Get-Content -LiteralPath $result.WingetManifest -Raw
+
+        $result.Version | Should -BeExactly '9.8.7'
+        $result.ReleaseDate | Should -BeExactly '2026-08-01'
+        $result.ConsoleSha256 | Should -BeExactly $consoleHash
+        $result.GuiSha256 | Should -BeExactly $guiHash
+        $scoop.version | Should -BeExactly '9.8.7'
+        $scoop.license | Should -BeExactly 'MIT, MS-LPL'
+        @($scoop.architecture.'64bit'.url) | Should -Be @(
+            'https://github.com/Example/LogVerdict/releases/download/v9.8.7/LogVerdict.exe',
+            'https://github.com/Example/LogVerdict/releases/download/v9.8.7/LogVerdict-GUI.exe'
+        )
+        @($scoop.architecture.'64bit'.hash) | Should -Be @($consoleHash.ToLowerInvariant(), $guiHash.ToLowerInvariant())
+        $scoop.bin | Should -BeExactly 'LogVerdict.exe'
+        @($scoop.shortcuts[0]) | Should -Be @('LogVerdict-GUI.exe', 'LogVerdict')
+        @($scoop.autoupdate.architecture.'64bit'.url)[0] | Should -Match '/v\$version/LogVerdict\.exe$'
+        $winget | Should -Match '(?m)^PackageIdentifier: SysAdminDoc\.LogVerdict\r?$'
+        $winget | Should -Match '(?m)^PackageVersion: 9\.8\.7\r?$'
+        $winget | Should -Match '(?m)^InstallerType: portable\r?$'
+        $winget | Should -Match '(?m)^  - Architecture: x64\r?$'
+        $winget | Should -Match ('(?m)^    InstallerSha256: {0}\r?$' -f [regex]::Escape($consoleHash))
+        $winget | Should -Match '(?m)^ManifestVersion: 1\.12\.0\r?$'
+        $winget | Should -Not -Match [regex]::Escape($guiHash)
+    }
+
+    It 'requires a release date with offline assets and writes nothing on failure' {
+        $assetDirectory = Join-Path $TestDrive 'offline-assets'
+        $outputDirectory = Join-Path $TestDrive 'failed-output'
+        $null = New-Item -ItemType Directory -Path $assetDirectory
+        [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'LogVerdict.exe'), [byte[]](1))
+        [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'LogVerdict-GUI.exe'), [byte[]](2))
+
+        { & $script:PackageManifestTool -Version '1.2.3' -AssetDirectory $assetDirectory `
+                -OutputDirectory $outputDirectory } | Should -Throw '*ReleaseDate is required*'
+        Test-Path -LiteralPath $outputDirectory | Should -BeFalse
+    }
+
+    It 'tracks immutable v0.7.0 release hashes in the checked-in manifests' {
+        $repo = Split-Path $PSScriptRoot -Parent
+        $scoopPath = Join-Path $repo 'Packaging/scoop/logverdict.json'
+        $wingetPath = Join-Path $repo 'Packaging/winget/SysAdminDoc.LogVerdict.yaml'
+        Test-Path -LiteralPath $scoopPath | Should -BeTrue
+        Test-Path -LiteralPath $wingetPath | Should -BeTrue
+
+        $scoop = Get-Content -LiteralPath $scoopPath -Raw | ConvertFrom-Json
+        $winget = Get-Content -LiteralPath $wingetPath -Raw
+        $scoop.version | Should -BeExactly '0.7.0'
+        @($scoop.architecture.'64bit'.hash) | Should -Be @(
+            '0147867798173a17eb83e7cde6208aab90198a9cd9521af387964372c6a62508',
+            '3770702debb88e174f762ee7c5389f003c0c94db9a5c6709da84d01192869078'
+        )
+        $winget | Should -Match '(?m)^PackageVersion: 0\.7\.0\r?$'
+        $winget | Should -Match '(?m)^    InstallerSha256: 0147867798173A17EB83E7CDE6208AAB90198A9CD9521AF387964372C6A62508\r?$'
+        $winget | Should -Not -Match '/releases/latest/'
+    }
+}
+
 Describe 'GUI row projection' {
     It 'dates an undated signature to DateTime.MinValue rather than to now' {
         # Undated text-log lines must sort to the bottom of a last-seen sort, not to
