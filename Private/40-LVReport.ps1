@@ -335,12 +335,52 @@ padding:10px 12px;margin:12px 0;color:var(--sub)}
 .model ul{margin:5px 0;padding-left:20px}
 ul.fp{margin:0;padding-left:18px}
 ul.fp li{margin:2px 0}
+.filterbar{display:none;background:var(--mantle);border:1px solid var(--s0);border-radius:10px;
+padding:14px 16px;margin:0 0 18px}
+.filters-ready .filterbar{display:block}
+.filter-title{font-size:13px;font-weight:700;margin-bottom:9px}
+.filter-controls{display:flex;flex-wrap:wrap;align-items:end;gap:8px}
+.toggle{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--s1);
+border-radius:999px;padding:5px 10px;color:var(--sub);font-size:12px;cursor:pointer}
+.toggle:focus-within{outline:2px solid var(--blue);outline-offset:2px}
+.toggle input{margin:0;accent-color:var(--blue)}
+.toggle b{color:var(--over);font-weight:500}
+.search{display:flex;flex:1 1 260px;flex-direction:column;gap:3px;color:var(--over);
+font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+.search input{width:100%;min-height:34px;border:1px solid var(--s1);border-radius:7px;
+background:var(--crust);color:var(--text);padding:6px 10px;font:14px "Segoe UI",sans-serif}
+.search input:focus{outline:2px solid var(--blue);outline-offset:1px}
+.reset{min-height:34px;border:1px solid var(--s1);border-radius:7px;background:var(--s0);
+color:var(--text);padding:6px 12px;cursor:pointer}
+.reset:hover{border-color:var(--blue)}
+.filter-status{color:var(--over);font-size:12px;margin-top:9px}
+.finding[hidden],.empty[hidden]{display:none}
+.empty{border:1px dashed var(--s1);border-radius:8px;color:var(--sub);padding:20px;
+text-align:center;margin-bottom:14px}
 pre.ev{background:var(--crust);border:1px solid var(--s0);border-radius:6px;padding:10px 12px;
 margin:12px 0 0;font:12px/1.5 Consolas,monospace;color:var(--sub);
 white-space:pre-wrap;word-break:break-word;max-height:180px;overflow:auto}
 a{color:var(--blue)}
 footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var(--s0);padding-top:16px}
 @media(max-width:560px){.row{flex-direction:column;gap:2px}.row .lbl{padding-top:0}}
+@media print{
+  @page{margin:16mm}
+  :root{--base:#fff;--mantle:#fff;--crust:#fff;--s0:#b8b8b8;--s1:#777;
+  --text:#111;--sub:#222;--over:#444;--blue:#000;--mauve:#000}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body{background:#fff;color:#111;font-size:10.5pt}
+  .wrap{max-width:none;margin:0;padding:0}
+  .filterbar,.no-script{display:none!important}
+  .grid{grid-template-columns:repeat(4,1fr);gap:6mm;margin-bottom:8mm}
+  .stat,.f,.warn,.model,pre.ev{background:#fff!important;color:#111!important;
+  box-shadow:none}
+  .stat,.f,.warn,.model{border-color:#777}
+  .f,.stat,.warn,.model{break-inside:avoid-page;page-break-inside:avoid}
+  pre.ev{max-height:none;overflow:visible;white-space:pre-wrap;border-color:#aaa}
+  .sub,.meta,.row .lbl,footer{color:#333}
+  .act,a{color:#000;text-decoration:none}
+  footer{border-top-color:#777}
+}
 '@
     Add-LVLine $sb '</style></head><body><div class="wrap">'
 
@@ -405,14 +445,30 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             }
             Add-LVLine $sb '</div>'
         }
-        Add-LVLine $sb '<h2>Every signature</h2>'
+        Add-LVLine $sb '<h2 id="findings-heading">Every signature</h2>'
+    } else {
+        Add-LVLine $sb '<h2 id="findings-heading">Findings</h2>'
     }
 
+    Add-LVLine $sb '<div class="filterbar" id="finding-filters" aria-labelledby="filter-title">'
+    Add-LVLine $sb '<div class="filter-title" id="filter-title">Filter findings</div><div class="filter-controls">'
+    foreach ($verdict in @('critical', 'actionable', 'investigate', 'unknown', 'informational', 'benign')) {
+        $count = @($Result.Findings | Where-Object { $_.Verdict -eq $verdict }).Count
+        if ($count -eq 0) { continue }
+        Add-LVLine $sb ('<label class="toggle"><input type="checkbox" data-filter-verdict="{0}" checked><span>{1}</span><b>{2}</b></label>' -f `
+            (ConvertTo-LVHtmlEncoded $verdict), (ConvertTo-LVHtmlEncoded $verdict), $count)
+    }
+    Add-LVLine $sb '<label class="search" for="finding-search"><span>Search findings</span><input id="finding-search" type="search" autocomplete="off" placeholder="Title, provider, event ID, evidence..."></label>'
+    Add-LVLine $sb '<button class="reset" id="reset-filters" type="button">Reset</button></div>'
+    Add-LVLine $sb '<div class="filter-status" id="filter-status" aria-live="polite"></div></div>'
+    Add-LVLine $sb '<noscript><div class="sub no-script">Filtering is unavailable because scripting is disabled; all findings are shown.</div></noscript>'
+    Add-LVLine $sb '<div id="finding-list" aria-labelledby="findings-heading">'
     foreach ($f in $Result.Findings) {
         $hex = $script:LVVerdictHex[$f.Verdict]
         if (-not $hex) { $hex = '#6c7086' }
 
-        Add-LVLine $sb ('<div class="f" style="border-left-color:{0}">' -f $hex)
+        Add-LVLine $sb ('<article class="f finding" data-verdict="{0}" style="border-left-color:{1}">' -f `
+            (ConvertTo-LVHtmlEncoded $f.Verdict), $hex)
         Add-LVLine $sb ('<h2><span class="badge" style="color:{0}">{1}</span>{2}</h2>' -f $hex, $f.Verdict, (ConvertTo-LVHtmlEncoded $f.Title))
         Add-LVLine $sb ('<div class="meta">{0} &middot; {1} occurrence(s) &middot; {2}/day &middot; {3} to {4} &middot; rule {5} ({6}{7})</div>' -f (ConvertTo-LVHtmlEncoded $f.Key), $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen), $f.RuleId, $f.Confidence, $(if ($f.Verified) { ', verified ' + $f.Verified } else { '' }))
         Add-LVLine $sb ('<div class="row"><div class="lbl">Means</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.Plain))
@@ -442,8 +498,9 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             Add-LVLine $sb ('<div class="row"><div class="lbl">Reference</div><div><a href="{0}">{1}</a></div></div>' -f $ref, $ref)
         }
         Add-LVLine $sb ('<pre class="ev">{0}</pre>' -f (ConvertTo-LVHtmlEncoded $f.SampleMessage))
-        Add-LVLine $sb '</div>'
+        Add-LVLine $sb '</article>'
     }
+    Add-LVLine $sb '<div class="empty" id="filter-empty" hidden>No findings match the selected filters.</div></div>'
 
     if (@($Result.CrashArtifacts).Count -gt 0) {
         Add-LVLine $sb '<div class="f" style="border-left-color:#cba6f7"><h2>Crash evidence on disk</h2>'
@@ -466,6 +523,44 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
     } else {
         Add-LVLine $sb '<footer>Generated by LogVerdict. Every explanation above comes from a curated rule in the verdict database, not from a language model. Signatures with no matching rule are reported as unknown, with their raw evidence and no guess at a cause.</footer>'
     }
+    Add-LVLine $sb @'
+<script>
+(function(){
+  var panel=document.getElementById('finding-filters');
+  var list=document.getElementById('finding-list');
+  if(!panel||!list){return;}
+  document.documentElement.classList.add('filters-ready');
+  var cards=Array.prototype.slice.call(list.querySelectorAll('.finding'));
+  var checks=Array.prototype.slice.call(panel.querySelectorAll('[data-filter-verdict]'));
+  var search=document.getElementById('finding-search');
+  var status=document.getElementById('filter-status');
+  var empty=document.getElementById('filter-empty');
+  function apply(){
+    var enabled={};
+    checks.forEach(function(box){enabled[box.getAttribute('data-filter-verdict')]=box.checked;});
+    var query=search.value.trim().toLowerCase();
+    var shown=0;
+    cards.forEach(function(card){
+      var visible=enabled[card.getAttribute('data-verdict')]!==false&&
+        (!query||card.textContent.toLowerCase().indexOf(query)!==-1);
+      card.hidden=!visible;
+      if(visible){shown++;}
+    });
+    empty.hidden=shown!==0;
+    status.textContent='Showing '+shown+' of '+cards.length+' findings';
+  }
+  checks.forEach(function(box){box.addEventListener('change',apply);});
+  search.addEventListener('input',apply);
+  document.getElementById('reset-filters').addEventListener('click',function(){
+    checks.forEach(function(box){box.checked=true;});
+    search.value='';
+    apply();
+    search.focus();
+  });
+  apply();
+})();
+</script>
+'@
     Add-LVLine $sb '</div></body></html>'
 
     return $sb.ToString()

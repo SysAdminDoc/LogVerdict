@@ -1445,6 +1445,32 @@ Describe 'Report rendering' {
             $html | Should -Not -Match '<script[^>]+src='
         }
     }
+
+    It 'renders offline verdict toggles and text search without hiding findings when scripting is disabled' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $html = ConvertTo-LVHtmlReport -Result $r
+            $html | Should -Match 'id="finding-filters"'
+            $html | Should -Match 'data-filter-verdict="actionable"'
+            $html | Should -Match 'id="finding-search"'
+            $html | Should -Match '<article class="f finding" data-verdict="actionable"'
+            $html | Should -Not -Match '<article class="f finding"[^>]+hidden'
+            $html | Should -Match '<noscript>.*all findings are shown.*</noscript>'
+            $html | Should -Match "card\.textContent\.toLowerCase\(\)"
+        }
+    }
+
+    It 'prints as a light document and keeps finding cards together' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $html = ConvertTo-LVHtmlReport -Result $r
+            $html | Should -Match '@media print'
+            $html | Should -Match 'body\{background:#fff;color:#111'
+            $html | Should -Match 'break-inside:avoid-page;page-break-inside:avoid'
+            $html | Should -Match '\.filterbar,\.no-script\{display:none!important\}'
+            $html | Should -Match 'pre\.ev\{max-height:none;overflow:visible'
+        }
+    }
 }
 
 Describe 'GUI markup' {
