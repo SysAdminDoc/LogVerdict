@@ -237,6 +237,123 @@ function ConvertTo-LVTemplate {
     return $t.Trim()
 }
 
+function ConvertTo-LVRedactedText {
+    <#
+        .SYNOPSIS
+        Mask the identifiers a log message carries about the machine it came from.
+
+        .DESCRIPTION
+        Windows log messages routinely name the account, the machine, the profile path
+        and the account SID. That is exactly what makes them useful evidence locally and
+        exactly what makes them a liability the moment a report is attached to a ticket
+        or sent to a vendor.
+
+        Order matters, and two orderings here are load bearing.
+
+        Mail addresses and UPNs are masked BEFORE the account name, because a UPN
+        contains the account name: masking the name first turns jsmith@contoso.com into
+        <USER>@contoso.com, which no longer looks like an address to the address pattern
+        and so keeps the domain in the report.
+
+        The account and machine names are matched with non-word lookarounds rather than
+        as bare substrings. A short account name is otherwise catastrophic - an account
+        called "u" would rewrite C:\Users\Public into C:\<USER>sers\P<USER>blic and
+        corrupt every path in the report. Lookarounds rather than \b because the name
+        itself may begin or end with a non-word character, which would make \b fail to
+        match at exactly the boundary it was added to protect.
+
+        This is deliberately not a promise of anonymity. It removes the identifiers this
+        tool knows Windows puts in these messages; a log line can always carry a name in
+        a form nothing can recognize as one, and the report says so rather than implying
+        the output is safe to publish unread.
+    #>
+    param(
+        [AllowEmptyString()][AllowNull()][string]$Text,
+        [string]$UserName = $env:USERNAME,
+        [string]$MachineName = $env:COMPUTERNAME
+    )
+
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+    $t = $Text
+
+    $t = $t -replace 'S-1-5-21-[\d-]+', 'S-1-5-21-<SID>'
+    $t = $t -replace 'S-1-15-[\d-]+', 'S-1-15-<SID>'
+
+    # UPNs and mail addresses, which appear in identity, Kerberos and Entra events.
+    # Ahead of the account name on purpose - see the ordering note above.
+    $t = $t -replace '[\w.+-]+@[\w-]+\.[\w.-]+', '<UPN>'
+
+    if ($MachineName) { $t = $t -replace ('(?i)(?<!\w)' + [regex]::Escape($MachineName) + '(?!\w)'), '<MACHINE>' }
+    if ($UserName)    { $t = $t -replace ('(?i)(?<!\w)' + [regex]::Escape($UserName) + '(?!\w)'), '<USER>' }
+
+    # Any other account's profile directory, whoever it belongs to. Only the account
+    # segment is replaced, so the rest of the path survives and stays diagnostic.
+    $t = [regex]::Replace($t, '(?i)([A-Z]:\\Users\\)([^\\/:*?"<>|\r\n]+)', {
+        param($Match)
+        $account = $Match.Groups[2].Value
+        # These are Windows' own fixed profile names, not anybody's identity.
+        if ($account -in @('Default', 'Default User', 'Public', 'All Users', '<USER>')) {
+            return $Match.Value
+        }
+        return $Match.Groups[1].Value + '<USER>'
+    })
+
+    return $t
+}
+
+function ConvertTo-LVRedactedResult {
+    <#
+        .SYNOPSIS
+        A copy of a scan result with the machine's identifiers masked out of everything
+        that gets written to disk.
+
+        .DESCRIPTION
+        Copies before editing. Redacting in place would mean a caller who exports a
+        redacted report and then reads $result.Findings gets the masked text back, which
+        silently destroys the evidence they still needed for the machine in front of them.
+
+        The rule prose is left alone: it is written by us, ships in the database, and
+        contains nothing about the machine. Only the captured evidence is masked.
+    #>
+    param([Parameter(Mandatory)]$Result)
+
+    $machine = $Result.MachineName
+    $copy = [pscustomobject]@{}
+    foreach ($prop in $Result.PSObject.Properties) {
+        $copy | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+    }
+
+    $findings = foreach ($f in @($Result.Findings)) {
+        $c = [pscustomobject]@{}
+        foreach ($prop in $f.PSObject.Properties) {
+            $c | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+        }
+        $c.SampleMessage = ConvertTo-LVRedactedText -Text $c.SampleMessage -MachineName $machine
+        $c.Samples = @(@($f.Samples) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
+        $c
+    }
+
+    $crash = foreach ($a in @($Result.CrashArtifacts)) {
+        $c = [pscustomobject]@{}
+        foreach ($prop in $a.PSObject.Properties) {
+            $c | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+        }
+        # A WER report directory is named after the crashing app and sits under a
+        # profile path, so both fields here name the machine and its user.
+        if ($c.PSObject.Properties['Path']) { $c.Path = ConvertTo-LVRedactedText -Text ([string]$c.Path) -MachineName $machine }
+        if ($c.PSObject.Properties['App'])  { $c.App  = ConvertTo-LVRedactedText -Text ([string]$c.App)  -MachineName $machine }
+        $c
+    }
+
+    $copy.Findings = @($findings)
+    $copy.CrashArtifacts = @($crash)
+    $copy.CoverageNotes = @(@($Result.CoverageNotes) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
+    $copy.MachineName = '<MACHINE>'
+    $copy | Add-Member -NotePropertyName 'Redacted' -NotePropertyValue $true -Force
+
+    return $copy
+}
+
 function Get-LVShortHash {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
     $sha = [System.Security.Cryptography.SHA256]::Create()

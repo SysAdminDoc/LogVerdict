@@ -1442,6 +1442,120 @@ Describe 'GUI coverage surfacing' {
     }
 }
 
+Describe 'Report redaction' {
+    BeforeAll {
+        $script:Dirty = 'User MACHINE-01\jsmith SID S-1-5-21-1691094572-189533642-593899815-1000 opened C:\Users\jsmith\AppData\Local\app.log as jsmith@contoso.com'
+    }
+
+    It 'masks account, machine, SID, profile path and mail address' {
+        InModuleScope LogVerdict -Parameters @{ Dirty = $script:Dirty } {
+            param($Dirty)
+            $clean = ConvertTo-LVRedactedText -Text $Dirty -UserName 'jsmith' -MachineName 'MACHINE-01'
+            $clean | Should -Not -Match 'jsmith'
+            $clean | Should -Not -Match 'MACHINE-01'
+            $clean | Should -Not -Match 'S-1-5-21-\d'
+            $clean | Should -Match '<USER>'
+            $clean | Should -Match '<MACHINE>'
+            $clean | Should -Match '<UPN>'
+        }
+    }
+
+    It 'masks another account name in a profile path it was never told about' {
+        # The account running the scan is not the only account on the machine, and a
+        # report that masks only the current user leaks every other one.
+        InModuleScope LogVerdict {
+            $clean = ConvertTo-LVRedactedText -Text 'Failed to read C:\Users\adiaz\ntuser.dat' -UserName 'someone-else' -MachineName 'HOST'
+            $clean | Should -Be 'Failed to read C:\Users\<USER>\ntuser.dat'
+        }
+    }
+
+    It 'leaves Windows own profile names alone, since they identify nobody' {
+        InModuleScope LogVerdict {
+            $clean = ConvertTo-LVRedactedText -Text 'copy to C:\Users\Default\AppData and C:\Users\Public\Desktop' -UserName 'u' -MachineName 'm'
+            $clean | Should -Match 'C:\\Users\\Default\\AppData'
+            $clean | Should -Match 'C:\\Users\\Public\\Desktop'
+        }
+    }
+
+    It 'keeps the diagnostic remainder of a path' {
+        InModuleScope LogVerdict {
+            $clean = ConvertTo-LVRedactedText -Text 'C:\Users\bob\AppData\Local\Programs\Python\Python312\python.exe crashed' -UserName 'bob' -MachineName 'm'
+            $clean | Should -Match 'Python312\\python\.exe'
+        }
+    }
+
+    It 'does not mutate the result the caller still holds' {
+        # An operator who exports a redacted copy for a ticket is still troubleshooting
+        # the machine in front of them and needs the unmasked evidence afterwards.
+        InModuleScope LogVerdict {
+            $result = [pscustomobject]@{
+                MachineName = 'HOST-9'
+                Findings = @([pscustomobject]@{ SampleMessage = 'HOST-9 failed'; Samples = @('HOST-9 failed') })
+                CrashArtifacts = @()
+                CoverageNotes = @()
+            }
+            $redacted = ConvertTo-LVRedactedResult -Result $result
+
+            $redacted.Findings[0].SampleMessage | Should -Be '<MACHINE> failed'
+            $redacted.MachineName | Should -Be '<MACHINE>'
+            $result.Findings[0].SampleMessage   | Should -Be 'HOST-9 failed'
+            $result.MachineName | Should -Be 'HOST-9'
+        }
+    }
+
+    It 'redacts the sample list, not only the single sample message' {
+        InModuleScope LogVerdict {
+            $result = [pscustomobject]@{
+                MachineName = 'HOST-9'
+                Findings = @([pscustomobject]@{ SampleMessage = 'a'; Samples = @('HOST-9 one', 'HOST-9 two') })
+                CrashArtifacts = @(); CoverageNotes = @()
+            }
+            $redacted = ConvertTo-LVRedactedResult -Result $result
+            foreach ($s in $redacted.Findings[0].Samples) { $s | Should -Not -Match 'HOST-9' }
+        }
+    }
+
+    It 'redacts the crash artifact paths, which sit under a profile directory' {
+        InModuleScope LogVerdict {
+            $result = [pscustomobject]@{
+                MachineName = 'HOST-9'; Findings = @(); CoverageNotes = @()
+                CrashArtifacts = @([pscustomobject]@{ Kind = 'wer'; Path = 'C:\Users\bob\AppData\Local\CrashDumps'; App = 'bob-tool.exe' })
+            }
+            $redacted = ConvertTo-LVRedactedResult -Result $result
+            $redacted.CrashArtifacts[0].Path | Should -Not -Match '\\bob\\'
+        }
+    }
+
+    It 'writes reports that state redaction was applied' {
+        # A masked report that does not say it is masked reads as a complete one, and
+        # the reader draws conclusions from evidence that was removed.
+        $result = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
+        $dir = Join-Path $TestDrive 'redacted'
+        Export-LogVerdictReport -Result $result -OutputDir $dir -Redact 6>$null | Out-Null
+
+        (Get-Content (Join-Path $dir 'LogVerdict-Report.txt') -Raw)  | Should -Match 'Redacted\s+: yes'
+        (Get-Content (Join-Path $dir 'LogVerdict-Report.html') -Raw) | Should -Match '<strong>Redacted\.</strong>'
+    }
+
+    It 'keeps the machine name out of the written reports but not out of the folder name' {
+        $result = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
+        $dir = Join-Path $TestDrive 'redacted2'
+        Export-LogVerdictReport -Result $result -OutputDir $dir -Redact 6>$null | Out-Null
+
+        foreach ($file in @('LogVerdict-Report.txt', 'LogVerdict-Report.json', 'LogVerdict-Report.html')) {
+            (Get-Content (Join-Path $dir $file) -Raw) | Should -Not -Match ([regex]::Escape($env:COMPUTERNAME)) -Because "$file must not name the machine"
+        }
+    }
+
+    It 'writes the machine name normally when redaction is not asked for' {
+        # Redaction must be opt-in. The default report is evidence for the operator.
+        $result = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
+        $dir = Join-Path $TestDrive 'plain'
+        Export-LogVerdictReport -Result $result -OutputDir $dir 6>$null | Out-Null
+        (Get-Content (Join-Path $dir 'LogVerdict-Report.txt') -Raw) | Should -Match ([regex]::Escape($env:COMPUTERNAME))
+    }
+}
+
 Describe 'Reliability Monitor collection' {
     It 'drops a record already collected from an event channel' {
         # Reliability Monitor overlaps the channels heavily. Counting both views of one

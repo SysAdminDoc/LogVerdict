@@ -42,9 +42,11 @@ param(
     [string[]]$Channel,
     [switch]$AllChannels,
     [switch]$SkipTextLogs,
+    [switch]$SkipReliability,
     [switch]$IncludeBenign,
     [string]$OutputDir,
     [switch]$NoReport,
+    [switch]$Redact,
     [switch]$Pause,
     [switch]$NoPause
 )
@@ -88,10 +90,11 @@ function Test-LVLaunchedInteractively {
 
 try {
     $scanArgs = @{
-        DaysBack      = $DaysBack
-        IncludeBenign = $IncludeBenign
-        SkipTextLogs  = $SkipTextLogs
-        AllChannels   = $AllChannels
+        DaysBack        = $DaysBack
+        IncludeBenign   = $IncludeBenign
+        SkipTextLogs    = $SkipTextLogs
+        SkipReliability = $SkipReliability
+        AllChannels     = $AllChannels
     }
     if ($Channel) {
         # powershell.exe -File hands "-Channel System,Application" over as ONE string
@@ -103,7 +106,7 @@ try {
     Show-LogVerdictReport -Result $result
 
     if (-not $NoReport) {
-        $exportArgs = @{ Result = $result }
+        $exportArgs = @{ Result = $result; Redact = $Redact }
         if ($OutputDir) { $exportArgs['OutputDir'] = $OutputDir }
         $out = Export-LogVerdictReport @exportArgs
         Write-Host ''

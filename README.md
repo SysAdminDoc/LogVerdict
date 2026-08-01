@@ -77,7 +77,11 @@ LogVerdict.exe -DaysBack 7 -AllChannels         narrower window, every populated
 LogVerdict.exe -IncludeBenign                   show the signatures ruled harmless too
 LogVerdict.exe -NoReport                        console only, write nothing
 LogVerdict.exe -OutputDir C:\Temp\lv             choose where reports land
+LogVerdict.exe -Redact                          mask identifiers before writing
+LogVerdict.exe -SkipReliability                 skip Reliability Monitor
 ```
+
+`-Redact` masks the account name, machine name, profile paths, SIDs and mail addresses out of the captured log messages before they are written. Use it when the report is going to a ticket or a vendor - the default report keeps everything, because locally that is the evidence. The reports say when they were redacted, and say that an identifier Windows wrote in a form this tool does not recognize may still be in there: read before sending.
 
 Double-clicked, it holds the console window open until you press Enter. Run from a script or a scheduled task and it never pauses, so automation cannot hang; `-Pause` and `-NoPause` force the behaviour either way.
 

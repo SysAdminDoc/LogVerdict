@@ -134,6 +134,9 @@ function ConvertTo-LVTextReport {
         Add-LVLine $sb ('Stability     : {0}/10, {1} over the window (started {2}, low {3}, {4} sample(s))' -f `
             $Result.Stability.Current, $Result.Stability.Direction, $Result.Stability.Starting, $Result.Stability.Lowest, $Result.Stability.SampleCount)
     }
+    if ($Result.PSObject.Properties['Redacted'] -and $Result.Redacted) {
+        Add-LVLine $sb 'Redacted      : yes - account, machine, profile paths, SIDs and mail addresses were masked in the evidence below. Identifiers Windows wrote in a form this tool does not recognize may remain, so read before sending.'
+    }
     Add-LVLine $sb ('Verdict DB    : {0}, {1} rule(s), updated {2}' -f $Result.DatabaseName, $Result.RuleCount, $Result.DatabaseDate)
     Add-LVLine $sb ('Worst verdict : {0}' -f $Result.WorstVerdict)
     Add-LVLine $sb
@@ -265,6 +268,10 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         Add-LVLine $sb ('<div class="stat"><div class="k">Stability ({0})</div><div class="v">{1}/10</div></div>' -f (ConvertTo-LVHtmlEncoded $Result.Stability.Direction), $Result.Stability.Current)
     }
     Add-LVLine $sb '</div>'
+
+    if ($Result.PSObject.Properties['Redacted'] -and $Result.Redacted) {
+        Add-LVLine $sb '<div class="warn"><strong>Redacted.</strong> Account name, machine name, profile paths, SIDs and mail addresses were masked in the evidence below. Identifiers Windows wrote in a form this tool does not recognize may remain, so read this before sending it on.</div>'
+    }
 
     if ($Result.HorizonWarning) {
         Add-LVLine $sb ('<div class="warn"><strong>Coverage warning.</strong> {0}</div>' -f (ConvertTo-LVHtmlEncoded $Result.HorizonWarning))

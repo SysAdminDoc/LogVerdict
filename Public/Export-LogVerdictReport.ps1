@@ -13,21 +13,41 @@ function Export-LogVerdictReport {
         .PARAMETER Format
         Any of Text, Json, Html, or All. Default All.
 
+        .PARAMETER Redact
+        Mask the account name, machine name, profile paths, SIDs and mail addresses out
+        of the captured log messages before writing them. Use when the report is going
+        to a ticket or a vendor. The reports state that redaction was applied, so a
+        reader never mistakes a masked report for a complete one.
+
         .EXAMPLE
         Invoke-LogVerdictScan | Export-LogVerdictReport
+
+        .EXAMPLE
+        Invoke-LogVerdictScan | Export-LogVerdictReport -Redact
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, ValueFromPipeline)]$Result,
         [string]$OutputDir,
-        [ValidateSet('Text', 'Json', 'Html', 'All')][string[]]$Format = @('All')
+        [ValidateSet('Text', 'Json', 'Html', 'All')][string[]]$Format = @('All'),
+        [switch]$Redact
     )
 
     process {
+        # Captured before redacting. The folder name keeps the real machine name because
+        # the person running the scan has to find it on their own desktop - redaction is
+        # about what leaves the machine, not about hiding the output from its author.
+        $folderMachine = $Result.MachineName
+
+        if ($Redact) {
+            $Result = ConvertTo-LVRedactedResult -Result $Result
+            Write-LVLog -Level info -Message 'Redacting account, machine and path identifiers from the written reports.'
+        }
+
         if (-not $OutputDir) {
             $desktop = [Environment]::GetFolderPath('Desktop')
             $stamp = '{0:yyyyMMdd-HHmmss}' -f $Result.ScanTime
-            $name = 'LogVerdict_{0}_{1}' -f (ConvertTo-LVSafeName -Text $Result.MachineName), $stamp
+            $name = 'LogVerdict_{0}_{1}' -f (ConvertTo-LVSafeName -Text $folderMachine), $stamp
             $OutputDir = Join-Path $desktop $name
         }
 
