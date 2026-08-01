@@ -317,17 +317,14 @@ Describe 'Template masking' {
         }
     }
 
-    It 'never merges two different error codes' {
-        # This test previously asserted the opposite. On CBS and DISM the HRESULT is
-        # the diagnosis, so collapsing 0x800f081f (no source) with 0x80073712 (store
-        # corrupt) reported two unrelated problems, with two unrelated fixes, as one
-        # finding.
+    It 'fully masks error codes before the corpus-wide slot pass' {
         InModuleScope LogVerdict {
             $codes = @('0x800f081f', '0x80073712', '0x800f0922')
             $templates = $codes | ForEach-Object {
                 ConvertTo-LVTemplate -Text ('2026-07-31 10:00:00, Error CSI 00000123 Failed to stage package. Status = {0}' -f $_)
             }
-            (@($templates | Sort-Object -Unique)).Count | Should -Be 3
+            (@($templates | Sort-Object -Unique)).Count | Should -Be 1
+            $templates[0] | Should -Match '<HEX>'
         }
     }
 
@@ -336,7 +333,7 @@ Describe 'Template masking' {
             $upper = ConvertTo-LVTemplate -Text 'Operation failed 0x800F081F'
             $lower = ConvertTo-LVTemplate -Text 'Operation failed 0x800f081f'
             $upper | Should -Be $lower
-            $upper | Should -Match '<HEX:800f081f>'
+            $upper | Should -Match '<HEX>'
         }
     }
 
@@ -344,7 +341,7 @@ Describe 'Template masking' {
         # The preserved value sits between non-word characters, so a code with no
         # letters is exposed to the number mask unless the order is right.
         InModuleScope LogVerdict {
-            ConvertTo-LVTemplate -Text 'Failed 0x12345678' | Should -BeExactly 'Failed <HEX:12345678>'
+            ConvertTo-LVTemplate -Text 'Failed 0x12345678' | Should -BeExactly 'Failed <HEX>'
         }
     }
 
@@ -383,6 +380,17 @@ Describe 'Template masking' {
         InModuleScope LogVerdict {
             $t = ConvertTo-LVTemplate -Text 'CLSID {D63B10C5-BB46-4990-A94F-E40B9D520160} denied'
             $t | Should -Be 'CLSID <GUID> denied'
+        }
+    }
+
+    It 'masks the structured identities that generic number replacement misses' {
+        InModuleScope LogVerdict {
+            $text = 'User alice@example.com SID S-1-5-21-123-456-789-1001 reached host.example.com at https://host.example.com/a from fe80::1 using AA-BB-CC-DD-EE-FF version 1.2.3'
+            $template = ConvertTo-LVTemplate -Text $text
+            foreach ($placeholder in @('<UPN>', '<SID>', '<FQDN>', '<URL>', '<IPV6>', '<MAC>', '<VER>')) {
+                $template | Should -Match ([regex]::Escape($placeholder))
+            }
+            $template | Should -Not -Match 'alice|123-456|host\.example|fe80|AA-BB|1\.2\.3'
         }
     }
 
@@ -454,6 +462,57 @@ Describe 'Signature reduction' {
                 }
             }
             @(Group-LVSignature -Record $records -WindowDays 30).Count | Should -Be 2
+        }
+    }
+
+    It 'reports the masked pass and the low-cardinality promotion pass separately' {
+        InModuleScope LogVerdict {
+            $now = Get-Date
+            $records = @('0x800f081f', '0x80073712') | ForEach-Object {
+                [pscustomobject]@{
+                    Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0; Level=2; LevelName='Error'
+                    TimeCreated=$now; MachineName='TESTPC'; RecordId=1; Message="Failed to stage package with error $_"
+                }
+            }
+            $grouped = Get-LVSignatureReduction -Record $records -WindowDays 30
+            $stat = Get-LVReductionStat -Record $records -Signature @($grouped.Signatures) `
+                -InitialSignatureCount $grouped.InitialSignatureCount -PromotedSlotCount $grouped.PromotedSlotCount
+            $stat.InitialSignatureCount | Should -Be 1
+            $stat.InitialRatio | Should -Be 2
+            $stat.SignatureCount | Should -Be 2
+            $stat.Ratio | Should -Be 1
+            $stat.PromotedSlotCount | Should -Be 1
+            @($grouped.Signatures.Template | Where-Object { $_ -match '<HEX:[0-9a-f]+>' }).Count | Should -Be 2
+        }
+    }
+
+    It 'keeps a high-cardinality numeric slot masked' {
+        InModuleScope LogVerdict {
+            $now = Get-Date
+            $records = 1..4 | ForEach-Object {
+                [pscustomobject]@{
+                    Source='textlog'; Channel='Setup'; Provider='Setup'; Id=0; Level=2; LevelName='Error'
+                    TimeCreated=$now; MachineName='TESTPC'; RecordId=$_; Message="Transient operation $_ failed"
+                }
+            }
+            $grouped = Get-LVSignatureReduction -Record $records -WindowDays 30
+            @($grouped.Signatures).Count | Should -Be 1
+            $grouped.Signatures[0].Template | Should -BeExactly 'Transient operation <NUM> failed'
+            @($grouped.Signatures[0].PromotedSlots).Count | Should -Be 0
+        }
+    }
+
+    It 'includes original token count in a text signature identity' {
+        InModuleScope LogVerdict {
+            $now = Get-Date
+            $records = @(
+                [pscustomobject]@{ Source='textlog'; Channel='Setup'; Provider='Setup'; Id=0; Level=2; LevelName='Error'; TimeCreated=$now; Message='Failed 2026-07-31T10:00:00Z' },
+                [pscustomobject]@{ Source='textlog'; Channel='Setup'; Provider='Setup'; Id=0; Level=2; LevelName='Error'; TimeCreated=$now; Message='Failed 2026-07-31 10:00:00' }
+            )
+            $grouped = Get-LVSignatureReduction -Record $records -WindowDays 30
+            @($grouped.Signatures).Count | Should -Be 2
+            @($grouped.Signatures.Template | Sort-Object -Unique).Count | Should -Be 1
+            @($grouped.Signatures.TemplateTokenCount | Sort-Object -Unique) | Should -Be @(2, 3)
         }
     }
 
@@ -548,9 +607,9 @@ Describe 'Text-log timestamps' {
                 [pscustomobject]@{ Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0; Level=2
                     LevelName='Error'; TimeCreated=$base; MachineName='T'; RecordId=1; Message='Failed to stage package 1' }
                 [pscustomobject]@{ Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0; Level=2
-                    LevelName='Error'; TimeCreated=$base.AddDays(10); MachineName='T'; RecordId=2; Message='Failed to stage package 2' }
+                    LevelName='Error'; TimeCreated=$base.AddDays(10); MachineName='T'; RecordId=2; Message='Failed to stage package 1' }
                 [pscustomobject]@{ Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0; Level=2
-                    LevelName='Error'; TimeCreated=$null; MachineName='T'; RecordId=3; Message='Failed to stage package 3' }
+                    LevelName='Error'; TimeCreated=$null; MachineName='T'; RecordId=3; Message='Failed to stage package 1' }
             )
             $sigs = Group-LVSignature -Record $records -WindowDays 30
             @($sigs).Count | Should -Be 1
@@ -1254,6 +1313,7 @@ Describe 'Report rendering' {
             DaysBack = 30; Elevated = $false; Channels = @('System', 'Application')
             Reduction = [pscustomobject]@{
                 RecordCount = 1855; SignatureCount = 71; Ratio = 26.1
+                InitialSignatureCount = 68; InitialRatio = 27.3; PromotedSlotCount = 3
                 LoudestKey = 'A/1'; LoudestShare = 54.8
             }
             Findings = @([pscustomobject]@{
@@ -1277,6 +1337,7 @@ Describe 'Report rendering' {
             # format operator of its second argument and throws at render time.
             $text = ConvertTo-LVTextReport -Result $r
             $text | Should -Match 'Signatures    : 71 \(reduction 26\.1:1\)'
+            $text | Should -Match 'Template pass : 68 masked \(27\.3:1\) -> 71 after low-cardinality promotion'
             $text | Should -Match 'Occurrences : 12 \(0\.4/day\)'
             $text | Should -Match 'Rule        : T-1 \(confidence: high\)'
         }

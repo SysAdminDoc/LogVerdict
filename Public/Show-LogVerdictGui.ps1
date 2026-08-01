@@ -498,7 +498,12 @@ function Show-LogVerdictGui {
 
         $ui.TxtActivitySubtitle.Text = 'Latest scan - {0:yyyy-MM-dd HH:mm}' -f $Result.ScanTime
         $ui.TxtActivityState.Text = 'Completed in {0:N1}s' -f $Result.Duration.TotalSeconds
-        $ui.TxtActivityHeadline.Text = '{0:N0} records reduced to {1:N0} signatures' -f $Result.Reduction.RecordCount, $Result.Reduction.SignatureCount
+        if ($Result.Reduction.PSObject.Properties['InitialSignatureCount']) {
+            $ui.TxtActivityHeadline.Text = '{0:N0} records -> {1:N0} masked -> {2:N0} after slot pass' -f `
+                $Result.Reduction.RecordCount, $Result.Reduction.InitialSignatureCount, $Result.Reduction.SignatureCount
+        } else {
+            $ui.TxtActivityHeadline.Text = '{0:N0} records reduced to {1:N0} signatures' -f $Result.Reduction.RecordCount, $Result.Reduction.SignatureCount
+        }
         $ui.BtnActivityRunAgain.Content = 'Run again'
         $ui.TxtActivityDuration.Text = '{0:N1}s' -f $Result.Duration.TotalSeconds
         $ui.TxtActivityRecords.Text = '{0:N0}' -f $Result.Reduction.RecordCount

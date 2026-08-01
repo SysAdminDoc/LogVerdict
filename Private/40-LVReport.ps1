@@ -70,6 +70,10 @@ function Write-LVConsoleReport {
     Write-Host ('  Window          : last {0} day(s), through {1:yyyy-MM-dd HH:mm}' -f $Result.DaysBack, $Result.ScanTime)
     Write-Host ('  Records read    : {0}' -f $stat.RecordCount)
     Write-Host ('  Signatures      : {0}  (reduction {1}:1)' -f $stat.SignatureCount, $stat.Ratio)
+    if ($stat.PSObject.Properties['InitialSignatureCount']) {
+        Write-Host ('  Template passes : {0} masked ({1}:1) -> {2} after slot promotion ({3}:1)' -f `
+            $stat.InitialSignatureCount, $stat.InitialRatio, $stat.SignatureCount, $stat.Ratio)
+    }
     if ($stat.LoudestKey) {
         Write-Host ('  Loudest         : {0} at {1}% of all records' -f $stat.LoudestKey, $stat.LoudestShare)
     }
@@ -158,6 +162,11 @@ function ConvertTo-LVTextReport {
     Add-LVLine $sb ('Channels      : {0}' -f ($Result.Channels -join ', '))
     Add-LVLine $sb ('Records read  : {0}' -f $Result.Reduction.RecordCount)
     Add-LVLine $sb ('Signatures    : {0} (reduction {1}:1)' -f $Result.Reduction.SignatureCount, $Result.Reduction.Ratio)
+    if ($Result.Reduction.PSObject.Properties['InitialSignatureCount']) {
+        Add-LVLine $sb ('Template pass : {0} masked ({1}:1) -> {2} after low-cardinality promotion ({3}:1; {4} slot(s) promoted)' -f `
+            $Result.Reduction.InitialSignatureCount, $Result.Reduction.InitialRatio, $Result.Reduction.SignatureCount,
+            $Result.Reduction.Ratio, $Result.Reduction.PromotedSlotCount)
+    }
     if ($Result.Stability) {
         # Windows' own 1-10 stability score. Rate escalation answers "is this signature
         # frequent"; this answers "is the machine getting worse", which a single scan
@@ -349,6 +358,11 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         Add-LVLine $sb ('<div class="stat"><div class="k">Stability ({0})</div><div class="v">{1}/10</div></div>' -f (ConvertTo-LVHtmlEncoded $Result.Stability.Direction), $Result.Stability.Current)
     }
     Add-LVLine $sb '</div>'
+    if ($Result.Reduction.PSObject.Properties['InitialSignatureCount']) {
+        Add-LVLine $sb ('<div class="sub">Template passes: {0} fully masked signatures ({1}:1 reduction) &rarr; {2} signatures after promoting {3} low-cardinality slot(s) ({4}:1 reduction).</div>' -f `
+            $Result.Reduction.InitialSignatureCount, $Result.Reduction.InitialRatio, $Result.Reduction.SignatureCount,
+            $Result.Reduction.PromotedSlotCount, $Result.Reduction.Ratio)
+    }
 
     if ($Result.PSObject.Properties['Redacted'] -and $Result.Redacted) {
         Add-LVLine $sb '<div class="warn"><strong>Redacted.</strong> Account name, machine name, profile paths, SIDs and mail addresses were masked in the evidence below. Identifiers Windows wrote in a form this tool does not recognize may remain, so read this before sending it on.</div>'

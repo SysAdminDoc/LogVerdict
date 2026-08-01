@@ -163,6 +163,8 @@ function ConvertFrom-LVArchivedSignature {
         Provider      = [string]$Finding.Provider
         Id            = [int]$Finding.Id
         Template      = $Finding.Template
+        TemplateTokenCount = $(if ($Finding.PSObject.Properties['TemplateTokenCount']) { [int]$Finding.TemplateTokenCount } else { 0 })
+        PromotedSlots = $(if ($Finding.PSObject.Properties['PromotedSlots']) { @($Finding.PromotedSlots) } else { @() })
         Count         = [int]$Finding.Count
         UndatedCount  = [int]$Finding.UndatedCount
         FirstSeen     = ConvertFrom-LVArchivedDate -Value $Finding.FirstSeen
@@ -315,7 +317,8 @@ function Invoke-LVOfflineScan {
             if ($data.Truncated) { $truncatedChannels.Add($data.Channel) | Out-Null }
         }
 
-        $eventSignatures = @(Group-LVSignature -Record @($records.ToArray()) -WindowDays $effectiveDays)
+        $eventGrouping = Get-LVSignatureReduction -Record @($records.ToArray()) -WindowDays $effectiveDays
+        $eventSignatures = @($eventGrouping.Signatures)
         $signatureByKey = @{}
         foreach ($signature in $eventSignatures) { $signatureByKey[$signature.Key] = $signature }
 
@@ -358,10 +361,18 @@ function Invoke-LVOfflineScan {
         $signatures = @($signatureByKey.Values | Sort-Object Count -Descending)
         $recordCount = [long]$records.Count + $archivedRecordCount
         $loudest = $signatures | Select-Object -First 1
+        $initialSignatureCount = $signatures.Count
+        if ($sourceReport -and $evtx.Count -eq 0 -and $sourceReport.Reduction.PSObject.Properties['InitialSignatureCount']) {
+            $initialSignatureCount = [int]$sourceReport.Reduction.InitialSignatureCount
+        }
+        $initialRatio = $(if ($initialSignatureCount -gt 0) { [Math]::Round($recordCount / $initialSignatureCount, 1) } else { 0 })
         $stat = [pscustomobject]@{
             RecordCount    = $recordCount
+            InitialSignatureCount = $initialSignatureCount
+            InitialRatio   = $initialRatio
             SignatureCount = $signatures.Count
             Ratio          = $(if ($signatures.Count -gt 0) { [Math]::Round($recordCount / $signatures.Count, 1) } else { 0 })
+            PromotedSlotCount = [int]$eventGrouping.PromotedSlotCount
             LoudestKey     = $(if ($loudest) { $loudest.Key } else { $null })
             LoudestShare   = $(if ($loudest -and $recordCount -gt 0) { [Math]::Round(100 * $loudest.Count / $recordCount, 1) } else { 0 })
         }

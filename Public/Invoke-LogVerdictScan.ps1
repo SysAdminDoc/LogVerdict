@@ -162,9 +162,12 @@ function Invoke-LogVerdictScan {
 
     $all = @($records.ToArray())
     Write-LVLog -Level info -Message ('Reducing {0} record(s) to signatures...' -f $all.Count)
-    $signatures = Group-LVSignature -Record $all -WindowDays $DaysBack
-    $stat = Get-LVReductionStat -Record $all -Signature $signatures
-    Write-LVLog -Level ok -Message ('{0} signature(s) - reduction {1}:1' -f $stat.SignatureCount, $stat.Ratio)
+    $grouped = Get-LVSignatureReduction -Record $all -WindowDays $DaysBack
+    $signatures = @($grouped.Signatures)
+    $stat = Get-LVReductionStat -Record $all -Signature $signatures `
+        -InitialSignatureCount $grouped.InitialSignatureCount -PromotedSlotCount $grouped.PromotedSlotCount
+    Write-LVLog -Level ok -Message ('Masked pass: {0} signature(s), {1}:1 reduction; low-cardinality slot pass: {2} signature(s), {3}:1 reduction ({4} slot(s) promoted)' -f `
+        $stat.InitialSignatureCount, $stat.InitialRatio, $stat.SignatureCount, $stat.Ratio, $stat.PromotedSlotCount)
 
     $db = Get-LogVerdictDatabase -Path $DatabasePath
     Write-LVLog -Level info -Message ('Applying {0} rule(s) from the verdict database...' -f @($db.rules).Count)

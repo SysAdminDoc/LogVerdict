@@ -42,6 +42,12 @@ $script:LVRuleStatus = @('stable', 'test', 'experimental', 'deprecated', 'unsupp
 $script:LVActiveRuleStatus = @('stable', 'test', 'experimental')
 $script:LVRuleConfidence = @('high', 'medium', 'low', 'draft')
 
+# Numeric, error-code, and version slots can carry a small diagnostic vocabulary.
+# Identity and volatile slots are never promoted even when a tiny sample makes them
+# look low-cardinality; doing so would split on timestamps and expose paths or accounts.
+$script:LVPromotableTemplateSlot = @('NUM', 'HEX', 'VER')
+$script:LVLowCardinalityMax = 3
+
 # A ruling that asserts "Microsoft says ignore this" is only as good as the day it was
 # checked. Rules older than this without re-verification are reported as stale.
 $script:LVVerificationMaxAgeMonths = 24
@@ -188,64 +194,124 @@ function Get-LVVerdictRank {
     return $script:LVVerdictRank['unknown']
 }
 
-function ConvertTo-LVTemplate {
+function Get-LVNormalizedSlotValue {
+    param(
+        [Parameter(Mandatory)][string]$Type,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value
+    )
+
+    $v = $Value.Trim()
+    switch ($Type) {
+        'HEX'  { return ($v -replace '^(?i)0x', '').ToLowerInvariant() }
+        'GUID' { return $v.Trim('{}').ToLowerInvariant() }
+        'MAC'  { return ($v -replace '-', ':').ToLowerInvariant() }
+        'FQDN' { return $v.ToLowerInvariant() }
+        'UPN'  { return $v.ToLowerInvariant() }
+        'URL'  { return $v.ToLowerInvariant() }
+        'VER'  { return ($v -replace '^(?i)v', '') }
+        default { return $v }
+    }
+}
+
+function Add-LVTemplateMask {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '',
+        Justification = 'Type, Slot, and Predicate are captured by the Regex.Replace evaluator closure; static analysis does not follow that closure.')]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Text,
+        [Parameter(Mandatory)][string]$Pattern,
+        [Parameter(Mandatory)][string]$Type,
+        [Parameter(Mandatory)]$Slot,
+        [scriptblock]$Predicate
+    )
+
+    return [regex]::Replace($Text, $Pattern, {
+        param($Match)
+        if ($Predicate -and -not (& $Predicate $Match.Value)) { return $Match.Value }
+
+        # Letters only. A numeric marker would itself be consumed by the generic number
+        # mask during a later pass. Repeating X avoids a practical slot-count ceiling.
+        $marker = '__LVSLOT' + ('X' * ($Slot.Count + 1)) + '__'
+        $Slot.Add([pscustomobject]@{
+            Index  = $Slot.Count
+            Type   = $Type
+            Value  = Get-LVNormalizedSlotValue -Type $Type -Value $Match.Value
+            Marker = $marker
+        }) | Out-Null
+        return $marker
+    })
+}
+
+function ConvertTo-LVTemplateData {
     <#
         .SYNOPSIS
-        Collapses the variable parts of a log line so that repeated occurrences
-        group into one signature. This is the same idea as Drain template mining,
-        reduced to a masking pass that needs no dependencies.
+        Return a masked template plus the typed values removed from each slot.
 
         .DESCRIPTION
-        Order matters: longer/more specific patterns are masked before shorter ones,
-        otherwise the number mask eats the insides of GUIDs and paths.
-
-        One value is deliberately NOT masked. On CBS, DISM and Windows Update the error
-        code IS the diagnosis - 0x800f081f (no source), 0x80073712 (component store
-        corrupt) and 0x800f0922 (system partition full) are three different problems
-        with three different fixes. Masking them reported all three as one finding,
-        which defeated the whole point of the tool on the log families it is most
-        useful for. Short hex is therefore preserved inside the placeholder; long hex
-        is an address or a handle and stays masked.
+        The reducer uses the slot values in a second pass: low-cardinality NUM, HEX and
+        VER slots are promoted back into the final template, while volatile or identifying
+        slots remain masked. Order matters because generic masks must not consume pieces
+        of structured identities first.
     #>
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
 
     $t = $Text
+    $slots = New-Object System.Collections.Generic.List[object]
+    $tokenCount = @([regex]::Matches($Text, '\S+')).Count
 
-    # Structured identities first. Each contains digits, hex and dots that the generic
-    # masks below would otherwise chew apart from the inside out.
-    $t = $t -replace '\{?[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}?', '<GUID>'
+    $t = Add-LVTemplateMask $t '\{?[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}?' 'GUID' $slots
+    $t = Add-LVTemplateMask $t '\bS-\d-\d+(?:-\d+){1,14}\b' 'SID' $slots
     # Windows package identity: name~publicKeyToken~arch~language~version. Masked whole
     # so one servicing failure recurring across thirty updates is one signature and not
     # thirty. The trailing version is consumed here, which is also what stops it being
     # misread as an IP address below.
-    $t = $t -replace '[\w.\-]+~[0-9A-Fa-f]{16}~\w*~\w*~[\d.]+', '<PKG>'
-    $t = $t -replace '\bKB\d{5,}\b', '<KB>'
-    $t = $t -replace '\b[A-Za-z]:\\[^\s,;"'')]*', '<PATH>'
-    $t = $t -replace '\\\\[^\s,;"'')]+', '<UNC>'
+    $t = Add-LVTemplateMask $t '[\w.\-]+~[0-9A-Fa-f]{16}~\w*~\w*~[\d.]+' 'PKG' $slots
+    $t = Add-LVTemplateMask $t '(?i)\b(?:https?|ftp)://[^\s<>"'']+' 'URL' $slots
+    $t = Add-LVTemplateMask $t '\b[\w.+-]+@[\w-]+\.[\w.-]+\b' 'UPN' $slots
+    $t = Add-LVTemplateMask $t '\b\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}:\d{2}\S*)?' 'TIME' $slots
+    $t = Add-LVTemplateMask $t '\b\d{2}:\d{2}:\d{2}(\.\d+)?\b' 'TIME' $slots
+    $t = Add-LVTemplateMask $t '\b[A-Za-z]:\\[^\s,;"'')]*' 'PATH' $slots
+    $t = Add-LVTemplateMask $t '\\\\[^\s,;"'') ]+' 'UNC' $slots
+    $t = Add-LVTemplateMask $t '(?i)(?<![0-9A-F])(?:[0-9A-F]{2}[:-]){5}[0-9A-F]{2}(?![0-9A-F])' 'MAC' $slots
 
     # A build number and an IPv4 address are both dotted integers, so the octet range
     # is what separates them: no octet can exceed 255, but a version segment routinely
     # does. Anything dotted that fails the address test is treated as a version.
-    $t = $t -replace '\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b', '<IP>'
-    $t = $t -replace '\b\d+(?:\.\d+){2,}\b', '<VER>'
-
-    $t = $t -replace '\b\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}:\d{2}\S*)?', '<TIME>'
-    $t = $t -replace '\b\d{2}:\d{2}:\d{2}(\.\d+)?\b', '<TIME>'
-    $t = $t -replace '\b\d+\b', '<NUM>'
-
-    # Error codes run AFTER the number mask, not before. The preserved value sits
-    # between non-word characters, so an all-digit code such as 0x12345678 would
-    # otherwise be re-masked into <HEX:<NUM>>. Normalized to lower case so 0x800F081F
-    # and 0x800f081f are the same signature.
-    $t = [regex]::Replace($t, '\b0x([0-9A-Fa-f]{1,8})\b', {
-        param($Match)
-        '<HEX:' + $Match.Groups[1].Value.ToLowerInvariant() + '>'
-    })
-    $t = $t -replace '\b0x[0-9A-Fa-f]{9,}\b', '<ADDR>'
-    $t = $t -replace '\b[0-9A-Fa-f]{16,}\b', '<ADDR>'
+    $t = Add-LVTemplateMask $t '\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b' 'IP' $slots
+    $ipv6 = {
+        param($Value)
+        $address = $null
+        return ([Net.IPAddress]::TryParse($Value, [ref]$address) -and
+            $address.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetworkV6)
+    }
+    $t = Add-LVTemplateMask $t '(?i)(?<![0-9A-F:])(?:[0-9A-F]{0,4}:){2,7}[0-9A-F]{0,4}(?![0-9A-F:])' 'IPV6' $slots $ipv6
+    $t = Add-LVTemplateMask $t '\bKB\d{5,}\b' 'KB' $slots
+    $t = Add-LVTemplateMask $t '(?i)(?<![\w.])v?\d+(?:\.\d+){1,4}(?![\w.])' 'VER' $slots
+    $t = Add-LVTemplateMask $t '(?i)\b(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,63}\b' 'FQDN' $slots
+    $t = Add-LVTemplateMask $t '\b0x[0-9A-Fa-f]{9,}\b' 'ADDR' $slots
+    $t = Add-LVTemplateMask $t '\b[0-9A-Fa-f]{16,}\b' 'ADDR' $slots
+    $t = Add-LVTemplateMask $t '\b0x[0-9A-Fa-f]{1,8}\b' 'HEX' $slots
+    $t = Add-LVTemplateMask $t '\b\d+\b' 'NUM' $slots
 
     $t = $t -replace '\s+', ' '
-    return $t.Trim()
+    $marked = $t.Trim()
+    $masked = $marked
+    foreach ($slot in $slots) { $masked = $masked.Replace($slot.Marker, ('<{0}>' -f $slot.Type)) }
+
+    return [pscustomobject]@{
+        MaskedTemplate = $masked
+        MarkedTemplate = $marked
+        Slots          = @($slots.ToArray())
+        TokenCount     = $tokenCount
+    }
+}
+
+function ConvertTo-LVTemplate {
+    <#
+        .SYNOPSIS
+        Collapse the variable parts of one line into typed placeholders.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+    return (ConvertTo-LVTemplateData -Text $Text).MaskedTemplate
 }
 
 function ConvertTo-LVRedactedText {

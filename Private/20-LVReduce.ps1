@@ -3,7 +3,7 @@
 # on a typical machine it turns roughly 1,800 error records into 70 signatures,
 # and the noisiest single signature is usually one Microsoft documents as harmless.
 
-function Group-LVSignature {
+function Get-LVSignatureReduction {
     <#
         .SYNOPSIS
         Deduplicate normalized records into signatures.
@@ -19,11 +19,72 @@ function Group-LVSignature {
         [int]$WindowDays = 30
     )
 
-    if ($Record.Count -eq 0) { return @() }
+    if ($Record.Count -eq 0) {
+        return [pscustomobject]@{ Signatures=@(); InitialSignatureCount=0; PromotedSlotCount=0 }
+    }
 
-    $buckets = @{}
-
+    # Pass one: capture typed slots and count their distinct values inside each masked
+    # template family. The channel and original token count are part of family identity;
+    # two lines do not become relatives merely because masking erased their structure.
+    $prepared = New-Object System.Collections.Generic.List[object]
+    $families = @{}
+    $initialKeys = @{}
     foreach ($r in $Record) {
+        $kind = 'stable'
+        $initialKey = $null
+        $data = $null
+        if ($r.PSObject.Properties['SignatureKey'] -and $r.SignatureKey) {
+            $initialKey = [string]$r.SignatureKey
+        } elseif ($r.Source -eq 'event') {
+            $initialKey = '{0}/{1}' -f $r.Provider, $r.Id
+        } elseif ($r.Source -eq 'reliability') {
+            $initialKey = 'Reliability/{0}/{1}' -f $r.Provider, $r.Id
+        } else {
+            $kind = 'text'
+            $data = ConvertTo-LVTemplateData -Text $r.Message
+            $familyKey = '{0}|{1}|{2}' -f $r.Channel, $data.TokenCount, $data.MaskedTemplate
+            $hashInput = '{0}|{1}' -f $data.TokenCount, $data.MaskedTemplate
+            $initialKey = '{0}/{1}' -f $r.Channel, (Get-LVShortHash -Text $hashInput)
+            if (-not $families.ContainsKey($familyKey)) {
+                $families[$familyKey] = [pscustomobject]@{ Values=@{}; Types=@{} }
+            }
+            $family = $families[$familyKey]
+            foreach ($slot in @($data.Slots)) {
+                $slotKey = '{0}|{1}' -f $slot.Index, $slot.Type
+                if (-not $family.Values.ContainsKey($slotKey)) { $family.Values[$slotKey] = @{} }
+                $family.Values[$slotKey][[string]$slot.Value] = $true
+                $family.Types[$slotKey] = [string]$slot.Type
+            }
+        }
+
+        $initialKeys[$initialKey] = $true
+        $prepared.Add([pscustomobject]@{
+            Record=$r; Kind=$kind; InitialKey=$initialKey; TemplateData=$data
+            FamilyKey=$(if ($kind -eq 'text') { $familyKey } else { $null })
+        }) | Out-Null
+    }
+
+    # One promotion decision per family slot, made from the whole corpus rather than
+    # from whichever line happens to arrive first.
+    $promotion = @{}
+    $promotedSlotCount = 0
+    foreach ($familyKey in $families.Keys) {
+        $promotion[$familyKey] = @{}
+        $family = $families[$familyKey]
+        foreach ($slotKey in $family.Values.Keys) {
+            $promote = ($script:LVPromotableTemplateSlot -contains $family.Types[$slotKey] -and
+                $family.Values[$slotKey].Count -le $script:LVLowCardinalityMax)
+            $promotion[$familyKey][$slotKey] = $promote
+            if ($promote) { $promotedSlotCount++ }
+        }
+    }
+
+    # Pass two: build final keys with promoted values, then aggregate exactly as before.
+    $buckets = @{}
+    foreach ($item in $prepared) {
+        $r = $item.Record
+        $promotedSlots = @()
+        $templateTokenCount = 0
         if ($r.PSObject.Properties['SignatureKey'] -and $r.SignatureKey) {
             # Decoded crash artifacts already have a small, stable identity: WER uses
             # application + faulting module, and a kernel dump uses its stop code.
@@ -42,8 +103,23 @@ function Group-LVSignature {
             $key = 'Reliability/{0}/{1}' -f $r.Provider, $r.Id
             $template = $null
         } else {
-            $template = ConvertTo-LVTemplate -Text $r.Message
-            $key = '{0}/{1}' -f $r.Channel, (Get-LVShortHash -Text $template)
+            $data = $item.TemplateData
+            $template = $data.MarkedTemplate
+            $templateTokenCount = $data.TokenCount
+            $promoted = New-Object System.Collections.Generic.List[string]
+            foreach ($slot in @($data.Slots)) {
+                $slotKey = '{0}|{1}' -f $slot.Index, $slot.Type
+                if ($promotion[$item.FamilyKey][$slotKey]) {
+                    $literal = '<{0}:{1}>' -f $slot.Type, $slot.Value
+                    $template = $template.Replace($slot.Marker, $literal)
+                    $promoted.Add($literal) | Out-Null
+                } else {
+                    $template = $template.Replace($slot.Marker, ('<{0}>' -f $slot.Type))
+                }
+            }
+            $promotedSlots = @($promoted.ToArray())
+            $hashInput = '{0}|{1}' -f $templateTokenCount, $template
+            $key = '{0}/{1}' -f $r.Channel, (Get-LVShortHash -Text $hashInput)
         }
 
         if (-not $buckets.ContainsKey($key)) {
@@ -54,6 +130,8 @@ function Group-LVSignature {
                 Provider      = $r.Provider
                 Id            = $r.Id
                 Template      = $template
+                TemplateTokenCount = $templateTokenCount
+                PromotedSlots = @($promotedSlots)
                 Count         = 0
                 UndatedCount  = 0
                 FirstSeen     = $null
@@ -127,7 +205,30 @@ function Group-LVSignature {
         $b
     }
 
-    return ConvertTo-LVArrayOutput -Value @($signatures | Sort-Object -Property Count -Descending)
+    return [pscustomobject]@{
+        Signatures = @($signatures | Sort-Object -Property Count -Descending)
+        InitialSignatureCount = $initialKeys.Count
+        PromotedSlotCount = $promotedSlotCount
+    }
+}
+
+function Group-LVSignature {
+    <#
+        .SYNOPSIS
+        Deduplicate normalized records into signatures.
+
+        .DESCRIPTION
+        Compatibility wrapper returning only signatures. Scan callers use
+        Get-LVSignatureReduction so they can also report the masked first pass.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Record,
+        [int]$WindowDays = 30
+    )
+
+    $grouped = Get-LVSignatureReduction -Record $Record -WindowDays $WindowDays
+    return ConvertTo-LVArrayOutput -Value @($grouped.Signatures)
 }
 
 function Get-LVReductionStat {
@@ -137,11 +238,17 @@ function Get-LVReductionStat {
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Record,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Signature
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Signature,
+        [Nullable[int]]$InitialSignatureCount,
+        [int]$PromotedSlotCount = 0
     )
 
     $ratio = 0
     if ($Signature.Count -gt 0) { $ratio = [Math]::Round($Record.Count / $Signature.Count, 1) }
+    $initialCount = $Signature.Count
+    if ($null -ne $InitialSignatureCount) { $initialCount = [int]$InitialSignatureCount }
+    $initialRatio = 0
+    if ($initialCount -gt 0) { $initialRatio = [Math]::Round($Record.Count / $initialCount, 1) }
 
     $loudest = $Signature | Select-Object -First 1
     $loudestShare = 0
@@ -155,8 +262,11 @@ function Get-LVReductionStat {
 
     return [pscustomobject]@{
         RecordCount    = $Record.Count
+        InitialSignatureCount = $initialCount
+        InitialRatio   = $initialRatio
         SignatureCount = $Signature.Count
         Ratio          = $ratio
+        PromotedSlotCount = $PromotedSlotCount
         LoudestKey     = $loudestKey
         LoudestShare   = $loudestShare
     }
