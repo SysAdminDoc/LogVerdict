@@ -1231,6 +1231,39 @@ Describe 'Event collection failure handling' {
     }
 }
 
+Describe 'Event sequence coverage' {
+    It 'reports missing record IDs with the channel and observed range' {
+        InModuleScope LogVerdict {
+            $script:LVTruncatedChannel = @()
+            $base = [datetime]'2026-08-01 10:00:00'
+            $records = @(
+                [pscustomobject]@{ Source='event'; Channel='System'; RecordId=10; TimeCreated=$base }
+                [pscustomobject]@{ Source='event'; Channel='System'; RecordId=11; TimeCreated=$base.AddSeconds(1) }
+                [pscustomobject]@{ Source='event'; Channel='System'; RecordId=15; TimeCreated=$base.AddSeconds(2) }
+            )
+            $notes = @(Get-LVEventSequenceGap -Record $records)
+            $notes.Count | Should -Be 1
+            $notes[0] | Should -Match "Event channel 'System'"
+            $notes[0] | Should -Match 'from 11 to 15'
+            $notes[0] | Should -Match '3 observed IDs missing'
+        }
+    }
+
+    It 'reports backwards timestamps and suppresses already-truncated channels' {
+        InModuleScope LogVerdict {
+            $script:LVTruncatedChannel = @()
+            $base = [datetime]'2026-08-01 10:00:00'
+            $records = 1..3 | ForEach-Object {
+                [pscustomobject]@{ Source='event'; Channel='System'; RecordId=$_; TimeCreated=$base.AddMinutes((3 - $_)) }
+            }
+            @(Get-LVEventSequenceGap -Record $records) | Should -Match 'backwards timestamp'
+
+            $script:LVTruncatedChannel = @('System')
+            @(Get-LVEventSequenceGap -Record $records) | Should -BeNullOrEmpty
+        }
+    }
+}
+
 Describe 'Verdict resolution' {
     BeforeAll {
         $script:TestDb = [pscustomobject]@{

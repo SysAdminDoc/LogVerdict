@@ -136,6 +136,8 @@ function Invoke-LogVerdictScan {
     $records = New-Object System.Collections.Generic.List[object]
     foreach ($r in (Get-LVEventRecord -Channel $channels -DaysBack $DaysBack -ChannelStatus $channelStatus)) { $records.Add($r) | Out-Null }
     Write-LVLog -Level ok -Message ('{0} event record(s)' -f $records.Count)
+    $sequenceNotes = @(Get-LVEventSequenceGap -Record @($records.ToArray()))
+    foreach ($note in $sequenceNotes) { Write-LVLog -Level warn -Message $note }
 
     $crash = @()
     $setupDiag = $null
@@ -266,6 +268,7 @@ function Invoke-LogVerdictScan {
     if (@($script:LVTruncatedChannel).Count -gt 0) {
         $coverageNotes.Add(('These channel(s) hit the per-channel record cap and are truncated: {0}. Counts and rates for them are lower bounds.' -f (@($script:LVTruncatedChannel) -join ', '))) | Out-Null
     }
+    foreach ($note in $sequenceNotes) { $coverageNotes.Add($note) | Out-Null }
     if (-not $elevated) {
         $coverageNotes.Add('Scan ran without elevation. The Security channel and some text logs require administrator rights.') | Out-Null
     }

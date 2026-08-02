@@ -261,3 +261,58 @@ function Get-LVEventRecord {
 
     return ConvertTo-LVArrayOutput -Value @($records.ToArray())
 }
+
+function Get-LVEventSequenceGap {
+    <#
+        .SYNOPSIS
+        Identify record-id discontinuities and backwards timestamps in event channels.
+
+        .DESCRIPTION
+        A cleared, truncated, or tampered log can look healthy because the missing
+        records are indistinguishable from silence. This is a coverage signal, not a
+        verdict: level filters, retention and concurrent writers can also create gaps,
+        so the note names the channel and the observed range without claiming tampering.
+        Truncated channels are excluded because their collector cap already explains why
+        the sequence is incomplete.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Record)
+
+    $notes = New-Object System.Collections.Generic.List[string]
+    $eventRecords = @($Record | Where-Object {
+        $_ -and $_.Source -eq 'event' -and $null -ne $_.RecordId -and
+        [string]$_.RecordId -match '^\d+$' -and $_.Channel
+    })
+    foreach ($group in @($eventRecords | Group-Object Channel)) {
+        if (@($script:LVTruncatedChannel) -contains $group.Name) { continue }
+        $ordered = @($group.Group | Sort-Object { [long]$_.RecordId })
+        if ($ordered.Count -lt 3) { continue }
+
+        $missing = [long]0
+        $firstGap = $null
+        $lastGap = $null
+        $backwards = New-Object System.Collections.Generic.List[string]
+        for ($i = 1; $i -lt $ordered.Count; $i++) {
+            $previous = $ordered[$i - 1]
+            $current = $ordered[$i]
+            $delta = [long]$current.RecordId - [long]$previous.RecordId
+            if ($delta -gt 1) {
+                $missing += $delta - 1
+                if ($null -eq $firstGap) { $firstGap = [long]$previous.RecordId }
+                $lastGap = [long]$current.RecordId
+            }
+            if ($previous.TimeCreated -and $current.TimeCreated -and $current.TimeCreated -lt $previous.TimeCreated) {
+                $backwards.Add(('{0:yyyy-MM-dd HH:mm:ss} follows {1:yyyy-MM-dd HH:mm:ss} at RecordId {2}->{3}' -f `
+                    $current.TimeCreated, $previous.TimeCreated, $previous.RecordId, $current.RecordId)) | Out-Null
+            }
+        }
+        if ($missing -gt 0) {
+            $notes.Add(("Event channel '{0}' has a RecordId discontinuity from {1} to {2} ({3} observed IDs missing). Retention, filtering, or log clearing can cause this; treat it as a coverage warning, not proof of tampering." -f `
+                $group.Name, $firstGap, $lastGap, $missing)) | Out-Null
+        }
+        foreach ($backward in @($backwards | Select-Object -First 3)) {
+            $notes.Add(("Event channel '{0}' has a backwards timestamp in RecordId order: {1}. This may indicate an out-of-order writer or reconstructed records; inspect the raw log." -f $group.Name, $backward)) | Out-Null
+        }
+    }
+    return ConvertTo-LVArrayOutput -Value @($notes.ToArray())
+}

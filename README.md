@@ -283,6 +283,11 @@ Runs without admin; elevation unlocks the Security channel and some text logs.
 
 Every scan probes each channel for readability before reading it, and reports what it could **not** see under "what this scan could not see": channels denied by ACL, channels whose metadata would not enumerate, channels truncated at the per-channel record cap, and requested channels that do not exist. This matters because `Get-WinEvent -FilterHashtable` reports a denied channel identically to an empty one - a scan that trusts that path would tell you a channel is clean when it was never allowed to open it.
 
+Readable event channels also carry sequence coverage notes. A discontinuity in observed `RecordId` values or a
+timestamp that runs backwards in record order is named with its channel and range. Retention, level filtering,
+concurrent writers, and log clearing can all create a gap, so this is a coverage warning to inspect rather than a
+claim that tampering occurred.
+
 Tests need [Pester](https://pester.dev/) 5+:
 
 ```powershell
