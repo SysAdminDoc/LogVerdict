@@ -3377,6 +3377,64 @@ The article explains the affected writer and the permissions that should be chec
     }
 }
 
+Describe 'EvtxECmd map importer' {
+    BeforeAll {
+        $script:EvtxImporter = Join-Path (Split-Path $PSScriptRoot -Parent) 'Tools\Import-EvtxECmdMap.ps1'
+
+        function Export-EvtxMapFixtureCorpus {
+            param([string]$Root)
+            $maps = Join-Path $Root 'evtx\Maps'
+            New-Item -ItemType Directory -Path $maps -Force | Out-Null
+            @'
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy.
+'@ | Set-Content -LiteralPath (Join-Path $Root 'evtx\LICENSE') -Encoding UTF8
+            @'
+Author: Eric Zimmerman
+Description: Application Error
+EventId: 1000
+Channel: Application
+Provider: "Application Error"
+Maps:
+  -
+    Property: ExecutableInfo
+    PropertyValue: "%ExecutableInfo%"
+'@ | Set-Content -LiteralPath (Join-Path $maps 'Application_Application-Error_1000.map') -Encoding UTF8
+        }
+    }
+
+    It 'emits attributed experimental drafts with empty human prose and salient fields' {
+        $root = Join-Path $TestDrive 'evtx-maps'
+        Export-EvtxMapFixtureCorpus -Root $root
+        $outputPath = Join-Path $TestDrive 'evtx-drafts.json'
+        $drafts = @(& $script:EvtxImporter -MapsPath (Join-Path $root 'evtx\Maps') -OutputPath $outputPath -Retrieved '2026-08-01')
+
+        $drafts.Count | Should -Be 1
+        $drafts[0].status | Should -BeExactly 'experimental'
+        $drafts[0].verdict | Should -BeExactly 'unknown'
+        $drafts[0].title | Should -BeExactly ''
+        $drafts[0].plain | Should -BeExactly ''
+        $drafts[0].why | Should -BeExactly ''
+        $drafts[0].action | Should -BeExactly ''
+        $drafts[0].match.channel | Should -BeExactly 'Application'
+        $drafts[0].match.provider | Should -BeExactly 'Application Error'
+        $drafts[0].match.eventId | Should -Be 1000
+        $drafts[0].candidateFields | Should -Contain 'ExecutableInfo'
+        $drafts[0].sources[0].licence | Should -BeExactly 'MIT'
+        $drafts[0].sources[0].author | Should -BeExactly 'Eric Zimmerman'
+        (Get-Content -LiteralPath $outputPath -Raw | ConvertFrom-Json).status | Should -BeExactly 'experimental'
+    }
+
+    It 'fails closed when the checkout does not carry the expected MIT licence' {
+        $root = Join-Path $TestDrive 'unlicensed-maps'
+        $maps = Join-Path $root 'evtx\Maps'
+        New-Item -ItemType Directory -Path $maps -Force | Out-Null
+        'Not a licence' | Set-Content -LiteralPath (Join-Path $root 'evtx\LICENSE') -Encoding UTF8
+        { & $script:EvtxImporter -MapsPath $maps } | Should -Throw '*not recognizably MIT*'
+    }
+}
+
 Describe 'Rule regression fixtures' {
     BeforeAll {
         $script:DataDir     = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data'

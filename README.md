@@ -267,6 +267,12 @@ Every shipped rule also carries a regression fixture in [`Data/fixtures.json`](D
 
 The Microsoft support corpus has a guarded import path. `Tools\Import-MsDocsEvent.ps1` reads a local `MicrosoftDocs/SupportArticles-docs` checkout, verifies its CC-BY-4.0 licence, discovers event-ID articles, and turns only reviewed, paraphrased prose into attributed rule objects. It refuses copied prose and never edits the database on discovery alone.
 
+The [EvtxECmd Maps](https://github.com/EricZimmerman/evtx/tree/master/evtx/Maps) are another guarded bootstrap
+path. `Tools\Import-EvtxECmdMap.ps1 -MapsPath <checkout>\evtx\Maps` verifies the checkout's MIT licence and
+emits attributed `experimental` drafts containing the channel, provider, event ID, and salient EventData fields.
+Their title, explanation, why, action, and verdict are intentionally empty: the output is a human review queue,
+not a publishable database and never edits `Data\verdicts.json`.
+
 `match` accepts `source`, `channel`, `provider` (trailing `*` wildcard allowed), `eventId`, and `messagePattern` (regex). More match keys means higher specificity, and the most specific matching rule wins.
 
 ## Requirements
