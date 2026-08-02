@@ -314,6 +314,13 @@ emits attributed `experimental` drafts containing the channel, provider, event I
 Their title, explanation, why, action, and verdict are intentionally empty: the output is a human review queue,
 not a publishable database and never edits `Data\verdicts.json`.
 
+Sigma rules have the same guarded boundary. `Tools\Import-SigmaRule.ps1 -RulesPath <checkout> -LicensePolicy DRL-1.1`
+reads a local Sigma YAML checkout, verifies a recognizable repository licence, maps only the common Windows logsource
+and simple detection fields, and emits attributed `unsupported`/`draft` candidates. The queue retains Sigma IDs,
+levels, tags, false positives, references, authors, conditions, mapping warnings, source hashes, and a `reviewStatus`
+of `pending`; no imported rule can become active. Use `-ExistingPath` with `-DiffPath` to review added, changed, and
+removed candidates between imports. The importer is offline and never edits `Data\verdicts.json`.
+
 `match` accepts `source`, `channel`, `provider` (trailing `*` wildcard allowed), `eventId`, and `messagePattern` (regex). More match keys means higher specificity, and the most specific matching rule wins.
 
 ## Requirements

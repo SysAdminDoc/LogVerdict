@@ -3988,6 +3988,100 @@ Maps:
     }
 }
 
+Describe 'Sigma rule importer' {
+    BeforeAll {
+        $script:SigmaImporter = Join-Path (Split-Path $PSScriptRoot -Parent) 'Tools\Import-SigmaRule.ps1'
+
+        function Export-SigmaFixtureCorpus {
+            param([string]$Root, [string]$Title = 'PowerShell process creation')
+            $rules = Join-Path $Root 'rules\windows'
+            New-Item -ItemType Directory -Path $rules -Force | Out-Null
+            @'
+Detection Rule License (DRL) 1.1
+'@ | Set-Content -LiteralPath (Join-Path $Root 'LICENSE') -Encoding UTF8
+            @"
+title: $Title
+id: 11111111-1111-1111-1111-111111111111
+status: experimental
+description: A review-only process rule
+author: Sigma Fixture Author
+date: 2026-08-01
+references:
+  - https://example.test/sigma/process
+tags:
+  - attack.execution
+  - attack.t1059
+logsource:
+  product: windows
+  service: sysmon
+detection:
+  selection:
+    EventID: 1
+    Image|endswith:
+      - '\\powershell.exe'
+  condition: selection
+falsepositives:
+  - Administrative scripts
+level: high
+"@ | Set-Content -LiteralPath (Join-Path $rules 'process.yml') -Encoding UTF8
+        }
+    }
+
+    It 'emits inactive attributed candidates with mappings and a review diff' {
+        $root = Join-Path $TestDrive 'sigma'
+        Export-SigmaFixtureCorpus -Root $root
+        $queuePath = Join-Path $TestDrive 'sigma-queue.json'
+        $diffPath = Join-Path $TestDrive 'sigma-diff.json'
+        $candidates = @(& $script:SigmaImporter -RulesPath (Join-Path $root 'rules') -OutputPath $queuePath -DiffPath $diffPath -Retrieved '2026-08-02')
+
+        $candidates.Count | Should -Be 1
+        $candidates[0].status | Should -BeExactly 'unsupported'
+        $candidates[0].confidence | Should -BeExactly 'draft'
+        $candidates[0].match.channel | Should -BeExactly 'Microsoft-Windows-Sysmon/Operational'
+        $candidates[0].match.provider | Should -BeExactly 'Microsoft-Windows-Sysmon'
+        $candidates[0].match.eventId | Should -Be 1
+        $candidates[0].sigma.tags | Should -Contain 'attack.execution'
+        $candidates[0].falsepositives | Should -Contain 'Administrative scripts'
+        $candidates[0].sources[0].licence | Should -BeExactly 'DRL-1.1'
+        $candidates[0].sources[0].author | Should -BeExactly 'Sigma Fixture Author'
+        (Get-Content -LiteralPath $queuePath -Raw | ConvertFrom-Json).diff.counts.added | Should -Be 1
+        (Get-Content -LiteralPath $diffPath -Raw | ConvertFrom-Json).schemaVersion | Should -Be 1
+    }
+
+    It 'reports changed rules by stable Sigma id' {
+        $root = Join-Path $TestDrive 'sigma-changed'
+        Export-SigmaFixtureCorpus -Root $root
+        $firstPath = Join-Path $TestDrive 'sigma-first.json'
+        & $script:SigmaImporter -RulesPath (Join-Path $root 'rules') -OutputPath $firstPath -Retrieved '2026-08-02' | Out-Null
+        Export-SigmaFixtureCorpus -Root $root -Title 'Changed PowerShell process creation'
+        $diffPath = Join-Path $TestDrive 'sigma-changed-diff.json'
+        & $script:SigmaImporter -RulesPath (Join-Path $root 'rules') -ExistingPath $firstPath -DiffPath $diffPath -Retrieved '2026-08-02' | Out-Null
+        $diff = Get-Content -LiteralPath $diffPath -Raw | ConvertFrom-Json
+        @($diff.changed).Count | Should -Be 1
+        @($diff.added).Count | Should -Be 0
+        @($diff.removed).Count | Should -Be 0
+    }
+
+    It 'fails closed for missing or disallowed licenses' {
+        $root = Join-Path $TestDrive 'sigma-unlicensed'
+        $rules = Join-Path $root 'rules'
+        New-Item -ItemType Directory -Path $rules -Force | Out-Null
+        @'
+title: Unlicensed
+id: 22222222-2222-2222-2222-222222222222
+logsource:
+  product: windows
+detection:
+  selection:
+    EventID: 1
+  condition: selection
+'@ | Set-Content -LiteralPath (Join-Path $rules 'rule.yml') -Encoding UTF8
+        { & $script:SigmaImporter -RulesPath $rules } | Should -Throw '*no root LICENSE*'
+        "MIT License`nPermission is hereby granted" | Set-Content -LiteralPath (Join-Path $root 'LICENSE') -Encoding UTF8
+        { & $script:SigmaImporter -RulesPath $rules -LicensePolicy 'DRL-1.1' } | Should -Throw '*does not satisfy*'
+    }
+}
+
 Describe 'Rule regression fixtures' {
     BeforeAll {
         $script:DataDir     = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data'

@@ -32,6 +32,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   and STIX 2.1 JSON adapters. All projections preserve normalized findings, source/provider/
   event fields, confidence, references, timestamps, coverage, health context, and explicit
   raw-versus-redacted state; round-trip fixtures cover each mapping.
+- Added `Tools\Import-SigmaRule.ps1`, a local-only, licence-aware Sigma compatibility importer
+  that emits attributed inactive review candidates, bounded field mappings, retained Sigma
+  metadata, and stable-ID added/changed/removed diffs without modifying the curated database.
 
 ## [0.8.0] - 2026-08-01
 
