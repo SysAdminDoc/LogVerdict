@@ -31,6 +31,10 @@ function Invoke-LogVerdictScan {
         Skip Reliability Monitor. That source supplies the software install and removal
         history, which no error-level channel sweep can see.
 
+        .PARAMETER PerformanceTelemetry
+        Opt in to content-free source timing and bounded-count records in the result and
+        reports. Telemetry contains no messages, paths, identifiers or signature data.
+
         .PARAMETER IncludeBenign
         Keep signatures ruled benign in the result. Off by default - the entire point
         is to remove them.
@@ -93,6 +97,7 @@ function Invoke-LogVerdictScan {
         [switch]$DiagnosticChannels,
         [switch]$SkipTextLogs,
         [switch]$SkipReliability,
+        [switch]$PerformanceTelemetry,
         [switch]$IncludeBenign,
         [string]$DatabasePath,
         [string]$EvidencePath,
@@ -116,6 +121,7 @@ function Invoke-LogVerdictScan {
             Channel        = $Channel
             SkipTextLogs   = $SkipTextLogs
             SkipReliability = $SkipReliability
+            PerformanceTelemetry = $PerformanceTelemetry
             IncludeBenign  = $IncludeBenign
             DatabasePath   = $DatabasePath
             ExplainUnknown = $ExplainUnknown
@@ -132,6 +138,40 @@ function Invoke-LogVerdictScan {
     }
 
     $started = Get-Date
+    $performance = New-Object System.Collections.Generic.List[object]
+    $performanceEnabled = [bool]$PerformanceTelemetry
+    $recordPerformance = {
+        param(
+            [string]$Source, [string]$Kind, [string]$Name, [string]$Status,
+            [int64]$ObservedRecords, [int64]$SkippedRecords, $Cap,
+            [int64]$ElapsedMilliseconds, [string]$Origin
+        )
+        if (-not $performanceEnabled) { return }
+        $performance.Add((New-LVPerformanceRecord -Source $Source -Kind $Kind -Name $Name -Status $Status `
+                -ObservedRecords $ObservedRecords -SkippedRecords $SkippedRecords -Cap $Cap `
+                -ElapsedMilliseconds $ElapsedMilliseconds -Origin $Origin)) | Out-Null
+    }
+    $performanceStatus = {
+        param([object[]]$Coverage, [int64]$ObservedRecords)
+        $statuses = @($Coverage | Where-Object { $_ } | ForEach-Object { [string]$_.Status })
+        if ($statuses -contains 'unreadable') { return 'unreadable' }
+        if ($statuses -contains 'not-observed') { return 'not-observed' }
+        if ($statuses -contains 'truncated') { return 'truncated' }
+        if ($ObservedRecords -gt 0) { return 'readable' }
+        return 'empty'
+    }
+    $performanceCap = {
+        param([object[]]$Coverage)
+        $caps = @($Coverage | Where-Object { $_ -and $null -ne $_.Cap } | ForEach-Object { $_.Cap } | Select-Object -Unique)
+        if ($caps.Count -eq 1) { return $caps[0] }
+        return $null
+    }
+    $performanceSkipped = {
+        param([object[]]$Coverage)
+        $sum = @($Coverage | Where-Object { $_ -and $null -ne $_.SkippedRecords } | ForEach-Object { [int64]$_.SkippedRecords } | Measure-Object -Sum).Sum
+        return [int64]$sum
+    }
+    $scanTimer = [Diagnostics.Stopwatch]::StartNew()
     $elevated = Test-LVElevated
     $advisoryContext = Get-LVAdvisoryScanContext -Path $AdvisoryPath -Package $AdvisoryPackage -Version $AdvisoryVersion
     $script:LVReliabilityAvailable = $true
@@ -177,7 +217,16 @@ function Invoke-LogVerdictScan {
     $readable = @($channelStatus.Values | Where-Object { $_.Access -eq 'readable' }).Count
     Write-LVLog -Level info -Message ('Reading {0} readable channel(s)...' -f $readable)
     $records = New-Object System.Collections.Generic.List[object]
+    $eventTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
     foreach ($r in (Get-LVEventRecord -Channel $channels -DaysBack $DaysBack -ChannelStatus $channelStatus)) { $records.Add($r) | Out-Null }
+    if ($eventTimer) {
+        $eventTimer.Stop()
+        $eventCoverage = @($script:LVEventCoverage)
+        & $recordPerformance -Source 'event' -Kind 'collector' -Name 'event channels' `
+            -Status (& $performanceStatus -Coverage $eventCoverage -ObservedRecords $records.Count) `
+            -ObservedRecords $records.Count -SkippedRecords (& $performanceSkipped -Coverage $eventCoverage) `
+            -Cap (& $performanceCap -Coverage $eventCoverage) -ElapsedMilliseconds ([int64][Math]::Round($eventTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
+    }
     Write-LVLog -Level ok -Message ('{0} event record(s)' -f $records.Count)
     $sequenceNotes = @(Get-LVEventSequenceGap -Record @($records.ToArray()))
     foreach ($note in $sequenceNotes) { Write-LVLog -Level warn -Message $note }
@@ -188,10 +237,29 @@ function Invoke-LogVerdictScan {
     $decodedCrashCount = 0
     if (-not $SkipTextLogs) {
         Write-LVLog -Level info -Message 'Reading plain-text logs...'
+        $textRecordStart = $records.Count
+        $textTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
         foreach ($r in (Get-LVTextLogRecord -DaysBack $DaysBack)) { $records.Add($r) | Out-Null }
+        if ($textTimer) {
+            $textTimer.Stop()
+            $textCoverage = @($script:LVTextLogCoverage)
+            $textObserved = [int64]($records.Count - $textRecordStart)
+            & $recordPerformance -Source 'textlog' -Kind 'collector' -Name 'text logs' `
+                -Status (& $performanceStatus -Coverage $textCoverage -ObservedRecords $textObserved) `
+                -ObservedRecords $textObserved -SkippedRecords (& $performanceSkipped -Coverage $textCoverage) `
+                -Cap (& $performanceCap -Coverage $textCoverage) -ElapsedMilliseconds ([int64][Math]::Round($textTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
+        }
 
+        $setupTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
         $setupDiag = Get-LVSetupDiagRecord -DaysBack $DaysBack
         foreach ($r in @($setupDiag.Records | Where-Object { $_ })) { $records.Add($r) | Out-Null }
+        if ($setupTimer) {
+            $setupTimer.Stop()
+            $setupObserved = [int64]@($setupDiag.Records | Where-Object { $_ }).Count
+            $setupPerformanceStatus = if ($setupDiag.Status -in @('absent', 'no-recent-logs', 'untrusted')) { 'not-observed' } elseif ($setupDiag.Status -in @('execution-failed', 'requires-elevation', 'invalid-output', 'no-output')) { 'unreadable' } elseif ($setupObserved -eq 0) { 'empty' } else { 'readable' }
+            & $recordPerformance -Source 'setupdiag' -Kind 'tool' -Name 'SetupDiag tool' -Status $setupPerformanceStatus `
+                -ObservedRecords $setupObserved -SkippedRecords 0 -Cap $null -ElapsedMilliseconds ([int64][Math]::Round($setupTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
+        }
         # Records are merged into the ordinary pipeline above. Keep only execution
         # status in the public result so raw SetupDiag evidence is not duplicated in
         # JSON (and cannot bypass the finding redaction path on export).
@@ -202,7 +270,14 @@ function Invoke-LogVerdictScan {
             }
         }
 
+        $crashTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
         $crash = @(Get-LVCrashArtifact -DaysBack ([Math]::Max($DaysBack, 90)))
+        if ($crashTimer) {
+            $crashTimer.Stop()
+            & $recordPerformance -Source 'crash' -Kind 'inventory' -Name 'crash artifacts' `
+                -Status $(if ($crash.Count -eq 0) { 'empty' } else { 'readable' }) -ObservedRecords $crash.Count -SkippedRecords 0 -Cap $null `
+                -ElapsedMilliseconds ([int64][Math]::Round($crashTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
+        }
         $decodedCrashCount = @($crash | Where-Object { $_.Decoded }).Count
         $scanCutoff = $started.AddDays(-1 * [Math]::Abs($DaysBack))
         foreach ($artifact in $crash) {
@@ -215,11 +290,16 @@ function Invoke-LogVerdictScan {
         } else {
             Write-LVLog -Level info -Message 'No readable Report.wer or kernel minidump was present; the crash-artifact source was skipped, not treated as clean.'
         }
+    } elseif ($performanceEnabled) {
+        & $recordPerformance -Source 'textlog' -Kind 'collector' -Name 'text logs' -Status 'skipped' -ObservedRecords 0 -SkippedRecords 0 -Cap $null -ElapsedMilliseconds 0 -Origin 'live'
+        & $recordPerformance -Source 'setupdiag' -Kind 'tool' -Name 'SetupDiag tool' -Status 'skipped' -ObservedRecords 0 -SkippedRecords 0 -Cap $null -ElapsedMilliseconds 0 -Origin 'live'
+        & $recordPerformance -Source 'crash' -Kind 'inventory' -Name 'crash artifacts' -Status 'skipped' -ObservedRecords 0 -SkippedRecords 0 -Cap $null -ElapsedMilliseconds 0 -Origin 'live'
     }
 
     $stability = $null
     if (-not $SkipReliability) {
         Write-LVLog -Level info -Message 'Reading Reliability Monitor...'
+        $reliabilityTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
         # Handed the records collected so far so it can drop anything already seen in a
         # channel. Order matters: this has to run after the channel and text-log reads.
         $reliabilityRecords = @(Get-LVReliabilityRecord -DaysBack $DaysBack -ExistingRecord @($records.ToArray()))
@@ -230,19 +310,36 @@ function Invoke-LogVerdictScan {
         if ($stability) {
             Write-LVLog -Level info -Message ('System stability index {0}/10, {1} over the window (low {2})' -f $stability.Current, $stability.Direction, $stability.Lowest)
         }
+        if ($reliabilityTimer) {
+            $reliabilityTimer.Stop()
+            $reliabilityStatus = if (-not $script:LVReliabilityAvailable) { 'unreadable' } elseif (@($reliabilityRecords).Count -eq 0) { 'empty' } else { 'readable' }
+            & $recordPerformance -Source 'reliability' -Kind 'provider' -Name 'Reliability Monitor' -Status $reliabilityStatus `
+                -ObservedRecords @($reliabilityRecords).Count -SkippedRecords 0 -Cap $null -ElapsedMilliseconds ([int64][Math]::Round($reliabilityTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
+        }
     } else {
         $reliabilityRecords = @()
+        if ($performanceEnabled) {
+            & $recordPerformance -Source 'reliability' -Kind 'provider' -Name 'Reliability Monitor' -Status 'skipped' -ObservedRecords 0 -SkippedRecords 0 -Cap $null -ElapsedMilliseconds 0 -Origin 'live'
+        }
     }
 
     $all = @($records.ToArray())
     Write-LVLog -Level info -Message ('Reducing {0} record(s) to signatures...' -f $all.Count)
+    $reductionTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
     $grouped = Get-LVSignatureReduction -Record $all -WindowDays $DaysBack
     $signatures = @($grouped.Signatures)
     $stat = Get-LVReductionStat -Record $all -Signature $signatures `
         -InitialSignatureCount $grouped.InitialSignatureCount -PromotedSlotCount $grouped.PromotedSlotCount
     Write-LVLog -Level ok -Message ('Masked pass: {0} signature(s), {1}:1 reduction; low-cardinality slot pass: {2} signature(s), {3}:1 reduction ({4} slot(s) promoted)' -f `
         $stat.InitialSignatureCount, $stat.InitialRatio, $stat.SignatureCount, $stat.Ratio, $stat.PromotedSlotCount)
+    if ($reductionTimer) {
+        $reductionTimer.Stop()
+        & $recordPerformance -Source 'reduction' -Kind 'stage' -Name 'signature reduction' `
+            -Status $(if ($all.Count -eq 0) { 'empty' } else { 'completed' }) -ObservedRecords $all.Count -SkippedRecords 0 -Cap $null `
+            -ElapsedMilliseconds ([int64][Math]::Round($reductionTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
+    }
 
+    $resolutionTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
     $db = Get-LogVerdictDatabase -Path $DatabasePath
     Write-LVLog -Level info -Message ('Applying {0} rule(s) from the verdict database...' -f @($db.rules).Count)
     $findings = Resolve-LVVerdict -Signature $signatures -Database $db
@@ -254,6 +351,12 @@ function Invoke-LogVerdictScan {
     $correlations = @(Resolve-LVCorrelation -Finding @($findings) -Database $db)
     if ($correlations.Count -gt 0) {
         Write-LVLog -Level warn -Message ('{0} correlated finding(s): signatures that occurred together and mean more than they do apart' -f $correlations.Count)
+    }
+    if ($resolutionTimer) {
+        $resolutionTimer.Stop()
+        & $recordPerformance -Source 'resolution' -Kind 'stage' -Name 'rule resolution' `
+            -Status $(if ($signatures.Count -eq 0) { 'empty' } else { 'completed' }) -ObservedRecords $signatures.Count -SkippedRecords 0 -Cap $null `
+            -ElapsedMilliseconds ([int64][Math]::Round($resolutionTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
     }
 
     if (-not $IncludeBenign) {
@@ -406,6 +509,11 @@ function Invoke-LogVerdictScan {
         'unknown'     { $exitCode = 1 }
     }
 
+    $scanTimer.Stop()
+    & $recordPerformance -Source 'scan' -Kind 'stage' -Name 'scan total' `
+        -Status $(if ($all.Count -eq 0) { 'empty' } else { 'completed' }) -ObservedRecords $all.Count -SkippedRecords 0 -Cap $null `
+        -ElapsedMilliseconds ([int64][Math]::Round($scanTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
+
     return [pscustomobject]@{
         Tool           = 'LogVerdict'
         Version        = $script:LVVersion
@@ -421,6 +529,8 @@ function Invoke-LogVerdictScan {
         MetadataUnreadableCount = [int]$script:LVChannelMetadataErrorCount
         CoverageNotes  = @($coverageNotes)
         Coverage       = @($coverageSources.ToArray())
+        PerformanceTelemetry = [bool]$PerformanceTelemetry
+        Performance    = @($performance.ToArray())
         HealthProfiles = @($healthProfiles)
         Reduction      = $stat
         Findings       = @($findings)
@@ -441,6 +551,7 @@ function Invoke-LogVerdictScan {
             diagnosticChannels = [bool]$DiagnosticChannels
             skipTextLogs = [bool]$SkipTextLogs
             skipReliability = [bool]$SkipReliability
+            performanceTelemetry = [bool]$PerformanceTelemetry
             includeBenign = [bool]$IncludeBenign
             explainUnknown = [bool]$ExplainUnknown
             promoteToRule = [bool]$PromoteToRule

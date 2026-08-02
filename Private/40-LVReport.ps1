@@ -267,8 +267,11 @@ function ConvertTo-LVFlatFindingRow {
             HealthEnabledEventIds = $null; HealthFilteredEventIds = $null; HealthProvider = $null; HealthProviderId = $null; HealthChannel = $null
             HealthEventIds = $null; HealthEventVersions = $null; HealthMetadataStatus = $null
             HealthReadExistingEvents = $null; HealthHeartbeatIntervalSeconds = $null; HealthBookmarkState = $null
-            HealthRetentionMode = $null; HealthRecordCount = $null; HealthOldestRecord = $null; HealthMaximumSizeBytes = $null
-            HealthClockOffsetMinutes = $null; HealthReason = $null; HealthAdvice = $null; HealthPath = $null
+         HealthRetentionMode = $null; HealthRecordCount = $null; HealthOldestRecord = $null; HealthMaximumSizeBytes = $null
+         HealthClockOffsetMinutes = $null; HealthReason = $null; HealthAdvice = $null; HealthPath = $null
+            PerformanceSource = $null; PerformanceKind = $null; PerformanceName = $null; PerformanceStatus = $null
+            PerformanceObservedRecords = $null; PerformanceSkippedRecords = $null; PerformanceCap = $null
+            PerformanceElapsedMilliseconds = $null; PerformanceSlow = $null; PerformanceSlowThresholdMilliseconds = $null; PerformanceOrigin = $null
         }
     }
 }
@@ -311,6 +314,9 @@ function ConvertTo-LVCoverageCsvRow {
         HealthReadExistingEvents = $null; HealthHeartbeatIntervalSeconds = $null; HealthBookmarkState = $null
         HealthRetentionMode = $null; HealthRecordCount = $null; HealthOldestRecord = $null; HealthMaximumSizeBytes = $null
         HealthClockOffsetMinutes = $null; HealthReason = $null; HealthAdvice = $null; HealthPath = $null
+        PerformanceSource = $null; PerformanceKind = $null; PerformanceName = $null; PerformanceStatus = $null
+        PerformanceObservedRecords = $null; PerformanceSkippedRecords = $null; PerformanceCap = $null
+        PerformanceElapsedMilliseconds = $null; PerformanceSlow = $null; PerformanceSlowThresholdMilliseconds = $null; PerformanceOrigin = $null
     }
 }
 
@@ -349,7 +355,31 @@ function ConvertTo-LVHealthCsvRow {
          HealthDroppedRecords = if ($Health.PSObject.Properties['DroppedRecords']) { $Health.DroppedRecords } else { $null }
          HealthAverageLatencyMilliseconds = if ($Health.PSObject.Properties['AverageLatencyMilliseconds']) { $Health.AverageLatencyMilliseconds } else { $null }
          HealthMaxLatencyMilliseconds = if ($Health.PSObject.Properties['MaxLatencyMilliseconds']) { $Health.MaxLatencyMilliseconds } else { $null }
+        PerformanceSource = $null; PerformanceKind = $null; PerformanceName = $null; PerformanceStatus = $null
+        PerformanceObservedRecords = $null; PerformanceSkippedRecords = $null; PerformanceCap = $null
+        PerformanceElapsedMilliseconds = $null; PerformanceSlow = $null; PerformanceSlowThresholdMilliseconds = $null; PerformanceOrigin = $null
     }
+}
+
+function ConvertTo-LVPerformanceCsvRow {
+    param([Parameter(Mandatory)]$Result, [Parameter(Mandatory)]$Performance)
+
+    # Reuse the complete coverage projection so the CSV header remains stable even
+    # when a clean scan emits telemetry as its only non-empty row type.
+    $row = ConvertTo-LVCoverageCsvRow -Result $Result -Coverage ([pscustomobject]@{})
+    $row.RowType = 'performance'
+    $row.PerformanceSource = $Performance.Source
+    $row.PerformanceKind = $Performance.Kind
+    $row.PerformanceName = $Performance.Name
+    $row.PerformanceStatus = $Performance.Status
+    $row.PerformanceObservedRecords = $Performance.ObservedRecords
+    $row.PerformanceSkippedRecords = $Performance.SkippedRecords
+    $row.PerformanceCap = $Performance.Cap
+    $row.PerformanceElapsedMilliseconds = $Performance.ElapsedMilliseconds
+    $row.PerformanceSlow = $Performance.Slow
+    $row.PerformanceSlowThresholdMilliseconds = $Performance.SlowThresholdMilliseconds
+    $row.PerformanceOrigin = $Performance.Origin
+    return $row
 }
 
 function ConvertTo-LVCsvReport {
@@ -362,6 +392,9 @@ function ConvertTo-LVCsvReport {
     }
     foreach ($health in @($Result.HealthProfiles | Where-Object { $_ })) {
         $rows += ConvertTo-LVHealthCsvRow -Result $Result -Health $health
+    }
+    foreach ($performance in @($Result.Performance | Where-Object { $_ })) {
+        $rows += ConvertTo-LVPerformanceCsvRow -Result $Result -Performance $performance
     }
     if ($rows.Count -gt 0) {
         return (($rows | ConvertTo-Csv -NoTypeInformation) -join [Environment]::NewLine) + [Environment]::NewLine
@@ -391,6 +424,9 @@ function ConvertTo-LVCsvReport {
         HealthReadExistingEvents = $null; HealthHeartbeatIntervalSeconds = $null; HealthBookmarkState = $null
         HealthRetentionMode = $null; HealthRecordCount = $null; HealthOldestRecord = $null; HealthMaximumSizeBytes = $null
         HealthClockOffsetMinutes = $null; HealthReason = $null; HealthAdvice = $null; HealthPath = $null
+        PerformanceSource = $null; PerformanceKind = $null; PerformanceName = $null; PerformanceStatus = $null
+        PerformanceObservedRecords = $null; PerformanceSkippedRecords = $null; PerformanceCap = $null
+        PerformanceElapsedMilliseconds = $null; PerformanceSlow = $null; PerformanceSlowThresholdMilliseconds = $null; PerformanceOrigin = $null
     }
     $headerLine = @($header | ConvertTo-Csv -NoTypeInformation)[0]
     return ([string]$headerLine) + [Environment]::NewLine
@@ -510,6 +546,21 @@ function ConvertTo-LVTextReport {
             if ($health.ObservedConfiguration) { $detail += '; observed: ' + $health.ObservedConfiguration }
             if ($health.Reason) { $detail += '; reason: ' + $health.Reason }
             if ($health.Advice) { $detail += '; advice: ' + $health.Advice }
+            Add-LVLine $sb ('  - ' + $detail)
+        }
+        Add-LVLine $sb
+    }
+    $performanceRows = @($Result.Performance | Where-Object { $_ })
+    if ($performanceRows.Count -gt 0) {
+        Add-LVLine $sb 'PERFORMANCE TELEMETRY (OPT-IN; CONTENT-FREE)'
+        Add-LVLine $sb 'Source class, bounded counts and elapsed time only; messages, paths, identifiers and signatures are not recorded.'
+        foreach ($metric in $performanceRows) {
+            $state = [string]$metric.Status
+            if ($metric.Slow) { $state += ' (slow)' }
+            $detail = '{0}/{1} {2} - {3}; elapsed {4} ms' -f $metric.Source, $metric.Kind, $metric.Name, $state, $metric.ElapsedMilliseconds
+            if ($null -ne $metric.ObservedRecords) { $detail += ('; {0} observed' -f $metric.ObservedRecords) }
+            if ($null -ne $metric.SkippedRecords) { $detail += ('; {0} skipped' -f $metric.SkippedRecords) }
+            if ($null -ne $metric.Cap) { $detail += ('; cap {0}' -f $metric.Cap) }
             Add-LVLine $sb ('  - ' + $detail)
         }
         Add-LVLine $sb
@@ -840,6 +891,18 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             if ($health.Reason) { $detail.Add('reason: ' + [string]$health.Reason) | Out-Null }
             if ($health.Advice) { $detail.Add('advice: ' + [string]$health.Advice) | Out-Null }
             Add-LVLine $sb ('<div class="row"><div class="lbl">{0}</div><div>{1}</div></div>' -f (ConvertTo-LVHtmlEncoded $label), (ConvertTo-LVHtmlEncoded ($detail -join '; ')))
+        }
+    }
+    $performanceRows = @($Result.Performance | Where-Object { $_ })
+    if ($performanceRows.Count -gt 0) {
+        Add-LVLine $sb '<h2>Performance telemetry (opt-in; content-free)</h2><div class="sub">Source class, bounded counts and elapsed time only. Messages, paths, identifiers and signatures are not recorded.</div>'
+        foreach ($metric in $performanceRows) {
+            $state = [string]$metric.Status
+            if ($metric.Slow) { $state += ' (slow)' }
+            $label = '{0}/{1} - {2}' -f $metric.Source, $metric.Kind, $metric.Name
+            $detail = '{0}; elapsed {1} ms; {2} observed; {3} skipped' -f $state, $metric.ElapsedMilliseconds, $metric.ObservedRecords, $metric.SkippedRecords
+            if ($null -ne $metric.Cap) { $detail += '; cap ' + [string]$metric.Cap }
+            Add-LVLine $sb ('<div class="row"><div class="lbl">{0}</div><div>{1}</div></div>' -f (ConvertTo-LVHtmlEncoded $label), (ConvertTo-LVHtmlEncoded $detail))
         }
     }
 

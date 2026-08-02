@@ -18,6 +18,10 @@
     Scan System and Application plus six focused operational channels for storage,
     code integrity, device setup, packaged apps, memory pressure, and boot security.
 
+    .PARAMETER PerformanceTelemetry
+    Opt in to content-free source timing and bounded-count records. Telemetry contains
+    no messages, paths, identifiers or signature data.
+
     .PARAMETER IncludeBenign
     Show signatures the database rules as harmless. Off by default.
 
@@ -89,6 +93,7 @@ param(
     [switch]$DiagnosticChannels,
     [switch]$SkipTextLogs,
     [switch]$SkipReliability,
+    [switch]$PerformanceTelemetry,
     [switch]$IncludeBenign,
     [string]$OutputDir,
     [switch]$NoReport,
@@ -154,6 +159,7 @@ try {
         IncludeBenign   = $IncludeBenign
         SkipTextLogs    = $SkipTextLogs
         SkipReliability = $SkipReliability
+        PerformanceTelemetry = $PerformanceTelemetry
         AllChannels     = $AllChannels
         DiagnosticChannels = $DiagnosticChannels
         ExplainUnknown  = $ExplainUnknown

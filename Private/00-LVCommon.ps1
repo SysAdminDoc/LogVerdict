@@ -232,6 +232,47 @@ function New-LVCoverageRecord {
     }
 }
 
+function New-LVPerformanceRecord {
+    <#
+        .SYNOPSIS
+        Create an opt-in, content-free diagnostic timing record.
+
+        .DESCRIPTION
+        Performance telemetry describes source class, bounded counts, status and
+        elapsed time only. It deliberately has no message, path, machine, provider,
+        event identifier or signature fields, so enabling it cannot widen the
+        evidence contract.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Status,
+        [int64]$ObservedRecords = 0,
+        [int64]$SkippedRecords = 0,
+        [AllowNull()]$Cap,
+        [int64]$ElapsedMilliseconds = 0,
+        [AllowNull()][string]$Origin
+    )
+
+    $elapsed = [Math]::Max(0, [int64]$ElapsedMilliseconds)
+    return [pscustomobject][ordered]@{
+        SchemaVersion = 1
+        Source = $Source
+        Kind = $Kind
+        Name = $Name
+        Status = $Status
+        ObservedRecords = [Math]::Max(0, [int64]$ObservedRecords)
+        SkippedRecords = [Math]::Max(0, [int64]$SkippedRecords)
+        Cap = $Cap
+        ElapsedMilliseconds = $elapsed
+        Slow = ($elapsed -ge 1000)
+        SlowThresholdMilliseconds = 1000
+        Origin = $Origin
+    }
+}
+
 function Get-LVLogTranscript {
     return ConvertTo-LVArrayOutput -Value @($script:LVLogLines.ToArray())
 }

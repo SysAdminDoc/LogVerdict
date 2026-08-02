@@ -2604,6 +2604,36 @@ Describe 'Report rendering' {
         }
     }
 
+    It 'renders opt-in content-free performance telemetry and distinguishes empty from slow' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $metric = New-LVPerformanceRecord -Source 'event' -Kind 'collector' -Name 'event channels' `
+                -Status 'empty' -ObservedRecords 0 -SkippedRecords 2 -Cap 20000 -ElapsedMilliseconds 1200 -Origin 'live'
+            $result | Add-Member -NotePropertyName PerformanceTelemetry -NotePropertyValue $true
+            $result | Add-Member -NotePropertyName Performance -NotePropertyValue @($metric)
+
+            $text = ConvertTo-LVTextReport -Result $result
+            $html = ConvertTo-LVHtmlReport -Result $result
+            $csv = ConvertTo-LVCsvReport -Result $result
+            $text | Should -Match 'PERFORMANCE TELEMETRY \(OPT-IN; CONTENT-FREE\)'
+            $text | Should -Match 'event/collector event channels - empty \(slow\); elapsed 1200 ms; 0 observed; 2 skipped; cap 20000'
+            $html | Should -Match 'Performance telemetry \(opt-in; content-free\)'
+            $html | Should -Match 'empty \(slow\); elapsed 1200 ms'
+            $perfRows = @($csv | ConvertFrom-Csv | Where-Object RowType -eq 'performance')
+            $perfRows.Count | Should -Be 1
+            $perfRows[0].PerformanceStatus | Should -BeExactly 'empty'
+            $perfRows[0].PerformanceSlow | Should -BeExactly 'True'
+
+            $telemetryJson = $metric | ConvertTo-Json -Depth 5
+            $telemetryJson | Should -Not -Match 'Message|Path|HOST|C:\\|secret'
+            $ecs = (Export-LogVerdictStandard -Result $result -Format Ecs).Document
+            $ecs.logverdict.scan.performanceTelemetry | Should -BeTrue
+            $ecs.logverdict.scan.performance[0].status | Should -BeExactly 'empty'
+            $ecs.logverdict.scan.performance[0].elapsedMilliseconds | Should -Be 1200
+        }
+    }
+
     It 'round-trips ECS, OCSF, OpenTelemetry, and STIX adapter JSON' {
         InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
             param($r)
@@ -2881,6 +2911,18 @@ Describe 'GUI and console feature parity' {
         $text | Should -Match 'Redact\s*=\s*\[bool\]\$ui\.ChkOverviewRedact\.IsChecked'
         $text | Should -Match 'IncludeEvidence\s*=\s*\[bool\]\$ui\.ChkOverviewEvidence\.IsChecked'
         $text | Should -Match 'AllowRawEvidence\s*=\s*\[bool\]'
+    }
+
+    It 'keeps diagnostic performance telemetry opt-in and content-free on a live scan' {
+        $result = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability -PerformanceTelemetry 6>$null
+        $result.PerformanceTelemetry | Should -BeTrue
+        @($result.Performance | Where-Object Source -eq 'event').Count | Should -Be 1
+        @($result.Performance | Where-Object Name -eq 'scan total').Count | Should -Be 1
+        ($result.Performance | ConvertTo-Json -Depth 5) | Should -Not -Match 'Message|Path|HOST|C:\\|secret'
+
+        $default = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
+        $default.PerformanceTelemetry | Should -BeFalse
+        @($default.Performance).Count | Should -Be 0
     }
 
     It 'documents every intentionally console-only option' {
@@ -3857,13 +3899,17 @@ Describe 'Offline evidence analysis' {
                 }
             }
 
-            $result = Invoke-LVOfflineScan -EvidencePath $EvtxPath -DaysBack 1 -SkipTextLogs -SkipReliability
+            $result = Invoke-LVOfflineScan -EvidencePath $EvtxPath -DaysBack 1 -SkipTextLogs -SkipReliability -PerformanceTelemetry
             $result.Offline | Should -BeTrue
             @($result.EvidenceManifest).Count | Should -Be 1
             $result.EvidenceManifest[0].Status | Should -BeExactly 'parsed'
             $result.EvidenceManifest[0].SHA256 | Should -Match '^[0-9A-F]{64}$'
             $result.EvidenceManifest[0].RecordCount | Should -Be 1
             $result.EvidenceManifest[0].ParseMilliseconds | Should -Not -BeNullOrEmpty
+            $result.PerformanceTelemetry | Should -BeTrue
+            @($result.Performance | Where-Object Source -eq 'offline-evtx').Count | Should -Be 1
+            @($result.Performance | Where-Object Name -eq 'scan total').Count | Should -Be 1
+            ($result.Performance | ConvertTo-Json -Depth 5) | Should -Not -Match 'bad block|ARCHIVE-HOST|single\.evtx'
             @($result.CoverageNotes | Where-Object { $_ -match 'SHA-256 [0-9A-F]{64}' }).Count | Should -Be 1
             $manifest = Format-LVEvidenceManifest -Result $result -Content @()
             $manifest | Should -Match ('SHA-256 ' + $result.EvidenceManifest[0].SHA256)

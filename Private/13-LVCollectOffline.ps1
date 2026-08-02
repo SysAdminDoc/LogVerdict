@@ -427,6 +427,7 @@ function Invoke-LVOfflineScan {
         [string[]]$Channel,
         [switch]$SkipTextLogs,
         [switch]$SkipReliability,
+        [switch]$PerformanceTelemetry,
         [switch]$IncludeBenign,
         [string]$DatabasePath,
         [int]$MaxPerChannel = 20000,
@@ -442,6 +443,20 @@ function Invoke-LVOfflineScan {
     )
 
     $started = Get-Date
+    $performance = New-Object System.Collections.Generic.List[object]
+    $performanceEnabled = [bool]$PerformanceTelemetry
+    $recordPerformance = {
+        param(
+            [string]$Source, [string]$Kind, [string]$Name, [string]$Status,
+            [int64]$ObservedRecords, [int64]$SkippedRecords, $Cap,
+            [int64]$ElapsedMilliseconds, [string]$Origin
+        )
+        if (-not $performanceEnabled) { return }
+        $performance.Add((New-LVPerformanceRecord -Source $Source -Kind $Kind -Name $Name -Status $Status `
+                -ObservedRecords $ObservedRecords -SkippedRecords $SkippedRecords -Cap $Cap `
+                -ElapsedMilliseconds $ElapsedMilliseconds -Origin $Origin)) | Out-Null
+    }
+    $scanTimer = [Diagnostics.Stopwatch]::StartNew()
     $package = $null
     try {
         $package = Expand-LVEvidencePackage -Path $EvidencePath
@@ -496,6 +511,8 @@ function Invoke-LVOfflineScan {
             if ($data.ParseMilliseconds -gt ($MaxEvtxParseSeconds * 1000)) {
                 $manifestEntry.Status = 'timeout'
                 $manifestEntry.Reason = ('parser exceeded the {0} second cap' -f $MaxEvtxParseSeconds)
+                & $recordPerformance -Source 'offline-evtx' -Kind 'parser' -Name 'archived event channel' -Status 'timeout' `
+                    -ObservedRecords @($data.Records).Count -SkippedRecords 0 -Cap $MaxPerChannel -ElapsedMilliseconds $data.ParseMilliseconds -Origin 'offline'
                 $failedChannels.Add($data.Channel) | Out-Null
                 Write-LVLog -Level warn -Message ("Archived channel '{0}' exceeded the {1}-second offline parse cap." -f $data.Channel, $MaxEvtxParseSeconds)
                 continue
@@ -503,27 +520,41 @@ function Invoke-LVOfflineScan {
             if ($Channel -and $Channel -notcontains $data.Channel) {
                 $manifestEntry.Status = 'filtered'
                 $manifestEntry.Reason = 'channel filter excluded this source'
+                & $recordPerformance -Source 'offline-evtx' -Kind 'parser' -Name 'archived event channel' -Status 'filtered' `
+                    -ObservedRecords @($data.Records).Count -SkippedRecords 0 -Cap $MaxPerChannel -ElapsedMilliseconds $data.ParseMilliseconds -Origin 'offline'
                 continue
             }
             if ($data.Error) {
                 $manifestEntry.Status = 'unreadable'
                 $manifestEntry.Reason = [string]$data.Error
+                & $recordPerformance -Source 'offline-evtx' -Kind 'parser' -Name 'archived event channel' -Status 'unreadable' `
+                    -ObservedRecords @($data.Records).Count -SkippedRecords 0 -Cap $MaxPerChannel -ElapsedMilliseconds $data.ParseMilliseconds -Origin 'offline'
                 $failedChannels.Add($data.Channel) | Out-Null
                 $channelStatus[$data.Channel] = [pscustomobject]@{ Channel=$data.Channel; Access='unreadable'; Oldest=$data.Oldest; Origin='evidence' }
                 Write-LVLog -Level warn -Message ("Archived channel '{0}' could not be read: {1}" -f $data.Channel, $data.Error)
                 continue
             }
             $manifestEntry.Status = 'parsed'
+            & $recordPerformance -Source 'offline-evtx' -Kind 'parser' -Name 'archived event channel' `
+                -Status $(if (@($data.Records).Count -eq 0) { 'empty' } else { 'readable' }) -ObservedRecords @($data.Records).Count -SkippedRecords 0 `
+                -Cap $MaxPerChannel -ElapsedMilliseconds $data.ParseMilliseconds -Origin 'offline'
             $parsedChannels.Add($data.Channel) | Out-Null
             $channelStatus[$data.Channel] = [pscustomobject]@{ Channel=$data.Channel; Access='readable'; Oldest=$data.Oldest; Origin='evidence' }
             foreach ($record in @($data.Records)) { $records.Add($record) | Out-Null }
             if ($data.Truncated) { $truncatedChannels.Add($data.Channel) | Out-Null }
         }
 
+        $reductionTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
         $eventGrouping = Get-LVSignatureReduction -Record @($records.ToArray()) -WindowDays $effectiveDays
         $eventSignatures = @($eventGrouping.Signatures)
         $signatureByKey = @{}
         foreach ($signature in $eventSignatures) { $signatureByKey[$signature.Key] = $signature }
+        if ($reductionTimer) {
+            $reductionTimer.Stop()
+            & $recordPerformance -Source 'reduction' -Kind 'stage' -Name 'signature reduction' `
+                -Status $(if ($records.Count -eq 0) { 'empty' } else { 'completed' }) -ObservedRecords $records.Count -SkippedRecords 0 -Cap $null `
+                -ElapsedMilliseconds ([int64][Math]::Round($reductionTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'offline'
+        }
 
         [long]$archivedRecordCount = 0
         if ($sourceReport) {
@@ -581,10 +612,17 @@ function Invoke-LVOfflineScan {
         }
         Write-LVLog -Level ok -Message ('{0} captured record(s), {1} signature(s) available offline' -f $recordCount, $signatures.Count)
 
+        $resolutionTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
         $db = Get-LogVerdictDatabase -Path $DatabasePath
         Write-LVLog -Level info -Message ('Applying {0} rule(s) from the verdict database...' -f @($db.rules).Count)
         $findings = @(Resolve-LVVerdict -Signature $signatures -Database $db)
         $correlations = @(Resolve-LVCorrelation -Finding $findings -Database $db)
+        if ($resolutionTimer) {
+            $resolutionTimer.Stop()
+            & $recordPerformance -Source 'resolution' -Kind 'stage' -Name 'rule resolution' `
+                -Status $(if ($signatures.Count -eq 0) { 'empty' } else { 'completed' }) -ObservedRecords $signatures.Count -SkippedRecords 0 -Cap $null `
+                -ElapsedMilliseconds ([int64][Math]::Round($resolutionTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'offline'
+        }
         if (-not $IncludeBenign) { $findings = @($findings | Where-Object { $_.Verdict -ne 'benign' }) }
         $modelRequested = [bool]($ExplainUnknown -or $PromoteToRule)
         $promotedDrafts = @()
@@ -668,6 +706,11 @@ function Invoke-LVOfflineScan {
             'unknown'     { $exitCode = 1 }
         }
 
+        $scanTimer.Stop()
+        & $recordPerformance -Source 'scan' -Kind 'stage' -Name 'scan total' `
+            -Status $(if ($recordCount -eq 0) { 'empty' } else { 'completed' }) -ObservedRecords $recordCount -SkippedRecords 0 -Cap $null `
+            -ElapsedMilliseconds ([int64][Math]::Round($scanTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'offline'
+
         $machineName = '(offline evidence)'
         if ($sourceReport -and $sourceReport.MachineName) { $machineName = [string]$sourceReport.MachineName }
         elseif ($records.Count -gt 0 -and $records[0].MachineName) { $machineName = [string]$records[0].MachineName }
@@ -723,6 +766,8 @@ function Invoke-LVOfflineScan {
             CrashArtifacts = @($crash)
             EvidenceManifest = @($evtxPlan.Manifest)
             Coverage       = @($coverageSources.ToArray())
+            PerformanceTelemetry = [bool]$PerformanceTelemetry
+            Performance    = @($performance.ToArray())
             HealthProfiles = @($healthProfiles)
             Horizon        = $horizon
             HorizonWarning = $horizonWarning

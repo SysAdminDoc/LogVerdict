@@ -103,6 +103,27 @@ function ConvertTo-LVStandardHealth {
     }
 }
 
+function ConvertTo-LVStandardPerformance {
+    param([AllowNull()][object[]]$Performance)
+
+    foreach ($metric in @($Performance | Where-Object { $_ })) {
+        [pscustomobject][ordered]@{
+            schemaVersion = $metric.SchemaVersion
+            source = $metric.Source
+            kind = $metric.Kind
+            name = $metric.Name
+            status = $metric.Status
+            observedRecords = $metric.ObservedRecords
+            skippedRecords = $metric.SkippedRecords
+            cap = $metric.Cap
+            elapsedMilliseconds = $metric.ElapsedMilliseconds
+            slow = [bool]$metric.Slow
+            slowThresholdMilliseconds = $metric.SlowThresholdMilliseconds
+            origin = $metric.Origin
+        }
+    }
+}
+
 function ConvertTo-LVStandardFinding {
     param([Parameter(Mandatory)]$Finding)
 
@@ -245,6 +266,8 @@ function Get-LVStandardContext {
             channels = @($Result.Channels)
             worstVerdict = $Result.WorstVerdict
             exitCode = $Result.ExitCode
+            performanceTelemetry = if ($Result.PSObject.Properties['PerformanceTelemetry']) { [bool]$Result.PerformanceTelemetry } else { $false }
+            performance = @(ConvertTo-LVStandardPerformance -Performance $(if ($Result.PSObject.Properties['Performance']) { $Result.Performance } else { @() }))
         }
         coverage = @(ConvertTo-LVStandardCoverage -Coverage @($Result.Coverage))
         healthProfiles = @(ConvertTo-LVStandardHealth -HealthProfiles @($Result.HealthProfiles))

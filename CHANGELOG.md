@@ -45,6 +45,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added an STA GUI smoke runner covering UI Automation names, keyboard targets, normal and
   high-contrast resources, long/error text, and 125% layout bounds without changing display
   or accessibility settings.
+- Added opt-in, content-free performance telemetry for live and offline scans. Reports and
+  standard exports carry source status, bounded counts, caps, elapsed timing, and slow-source
+  markers without messages, paths, identifiers, or signature data.
 - Added the versioned `Export-LogVerdictStandard` command with ECS, OCSF, OpenTelemetry Logs,
   and STIX 2.1 JSON adapters. All projections preserve normalized findings, source/provider/
   event fields, confidence, references, timestamps, coverage, health context, and explicit
