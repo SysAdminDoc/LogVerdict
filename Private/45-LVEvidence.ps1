@@ -140,7 +140,9 @@ function Format-LVEvidenceManifest {
         [Parameter(Mandatory)]$Result,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Content,
         [AllowEmptyCollection()][string[]]$Omission = @(),
-        [switch]$Redact
+        [switch]$Redact,
+        [AllowNull()]$PrivacyAudit,
+        [switch]$AllowRawEvidence
     )
 
     $sb = New-Object System.Text.StringBuilder
@@ -151,6 +153,28 @@ function Format-LVEvidenceManifest {
     Add-LVLine $sb ('Window    : last {0} day(s)' -f $Result.DaysBack)
     Add-LVLine $sb ('Elevated  : {0}' -f $Result.Elevated)
     Add-LVLine $sb ('Redacted  : {0}' -f $(if ($Redact) { 'yes' } else { 'no' }))
+    Add-LVLine $sb ('Sanitized : {0}' -f $(if ($PrivacyAudit -and $PrivacyAudit.Sanitized) { 'yes' } else { 'no' }))
+    if ($PrivacyAudit) {
+        Add-LVLine $sb ('Privacy audit: {0}; {1} finding(s); {2} substitution(s)' -f `
+            $PrivacyAudit.Status, $PrivacyAudit.FindingCount, $PrivacyAudit.SubstitutionCount)
+        if ($AllowRawEvidence) {
+            Add-LVLine $sb 'Raw evidence: explicitly authorized for forensic use; this bundle is not sanitized.'
+        }
+        if (@($PrivacyAudit.Substitutions.PSObject.Properties).Count -gt 0) {
+            Add-LVLine $sb 'SUBSTITUTIONS'
+            foreach ($substitution in @($PrivacyAudit.Substitutions.PSObject.Properties)) {
+                Add-LVLine $sb ('  {0}: {1}' -f $substitution.Name, $substitution.Value)
+            }
+        }
+        if (@($PrivacyAudit.Findings).Count -gt 0) {
+            Add-LVLine $sb 'PRIVACY AUDIT FINDINGS (values are fingerprinted, never copied here)'
+            foreach ($finding in @($PrivacyAudit.Findings)) {
+                $line = if (@($finding.Lines).Count -gt 0) { '; line(s) ' + (@($finding.Lines) -join ',') } else { '' }
+                Add-LVLine $sb ('  - {0} in {1}{2}; fingerprint {3}; {4}' -f `
+                    $finding.Category, $finding.Artifact, $line, $finding.Fingerprint, $finding.Disposition)
+            }
+        }
+    }
     Add-LVLine $sb
     Add-LVLine $sb 'CONTENTS'
     foreach ($c in $Content) { Add-LVLine $sb ('  {0}' -f (Split-Path -Leaf $c)) }
@@ -224,10 +248,17 @@ function New-LVEvidenceBundle {
         [Parameter(Mandatory)]$Result,
         [Parameter(Mandatory)][string]$OutputDir,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ReportFile,
-        [switch]$Redact
+        [switch]$Redact,
+        [switch]$AllowRawEvidence,
+        [AllowNull()][string]$OriginalMachineName,
+        [AllowNull()][string]$OriginalUserName,
+        [AllowNull()][ref]$Audit
     )
 
     if (-not $PSCmdlet.ShouldProcess($OutputDir, 'Write an evidence bundle')) { return $null }
+    if (-not $Redact -and -not $AllowRawEvidence) {
+        throw 'Raw evidence packaging requires the explicit -AllowRawEvidence override.'
+    }
 
     $staging = Join-Path $OutputDir 'evidence'
     if (-not (Test-Path -LiteralPath $staging)) {
@@ -255,8 +286,28 @@ function New-LVEvidenceBundle {
         foreach ($s in @($channels.Skipped)) { $omission.Add($s) | Out-Null }
     }
 
-    Write-LVTextFile -Path (Join-Path $staging 'MANIFEST.txt') `
-        -Content (Format-LVEvidenceManifest -Result $Result -Content @($content.ToArray()) -Omission @($omission.ToArray()) -Redact:$Redact)
+    $auditPaths = @($content.ToArray() | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+    $privacyAudit = New-LVPrivacyAudit -Path $auditPaths `
+        -MachineName $(if ($OriginalMachineName) { $OriginalMachineName } else { $Result.MachineName }) `
+        -UserName $(if ($OriginalUserName) { $OriginalUserName } else { $env:USERNAME }) `
+        -Redacted:$Redact -AllowRawEvidence:$AllowRawEvidence
+    if ($Audit) { $Audit.Value = $privacyAudit }
+
+    $auditPath = Join-Path $staging 'PRIVACY-AUDIT.json'
+    Write-LVTextFile -Path $auditPath -Content ($privacyAudit | ConvertTo-Json -Depth 8)
+    $content.Add($auditPath) | Out-Null
+
+    $manifestPath = Join-Path $staging 'MANIFEST.txt'
+    Write-LVTextFile -Path $manifestPath `
+        -Content (Format-LVEvidenceManifest -Result $Result -Content @($content.ToArray()) `
+            -Omission @($omission.ToArray()) -Redact:$Redact -PrivacyAudit $privacyAudit -AllowRawEvidence:$AllowRawEvidence)
+    $content.Add($manifestPath) | Out-Null
+
+    if ($Redact -and -not $privacyAudit.Sanitized) {
+        Write-LVLog -Level error -Message ('Privacy audit blocked the redacted bundle: {0} finding(s). Staging was retained at {1} for review.' -f `
+            $privacyAudit.FindingCount, $staging)
+        return $null
+    }
 
     $zip = Join-Path $OutputDir ('LogVerdict-Evidence_{0}_{1:yyyyMMdd-HHmmss}.zip' -f `
         (ConvertTo-LVSafeName -Text $Result.MachineName), $Result.ScanTime)

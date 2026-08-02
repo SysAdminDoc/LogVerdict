@@ -42,6 +42,10 @@
     .PARAMETER NoReport
     Console only; write nothing to disk.
 
+    .PARAMETER AllowRawEvidence
+    Explicitly authorize a forensic raw evidence bundle when -IncludeEvidence is used
+    without -Redact. Raw bundles are never described as sanitized.
+
     .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\Invoke-LogVerdict.ps1
 
@@ -71,6 +75,7 @@ param(
     [switch]$NoReport,
     [switch]$Redact,
     [switch]$IncludeEvidence,
+    [switch]$AllowRawEvidence,
     [ValidateSet('Text', 'Json', 'Csv', 'Html', 'All')][string[]]$Format = @('All'),
     [string]$EvidencePath,
     [switch]$ExplainUnknown,
@@ -144,7 +149,7 @@ try {
     Show-LogVerdictReport -Result $result
 
     if (-not $NoReport) {
-        $exportArgs = @{ Result = $result; Redact = $Redact; IncludeEvidence = $IncludeEvidence; Format = $Format }
+        $exportArgs = @{ Result = $result; Redact = $Redact; IncludeEvidence = $IncludeEvidence; AllowRawEvidence = $AllowRawEvidence; Format = $Format }
         if ($OutputDir) { $exportArgs['OutputDir'] = $OutputDir }
         $out = Export-LogVerdictReport @exportArgs
         Write-Host ''

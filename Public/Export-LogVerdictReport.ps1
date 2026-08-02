@@ -26,6 +26,11 @@ function Export-LogVerdictReport {
         with -Redact the channel exports are deliberately omitted, because .evtx is a
         binary format carrying the identifiers redaction strips out of the text.
 
+        .PARAMETER AllowRawEvidence
+        Explicitly authorize a forensic raw evidence bundle. Required with
+        -IncludeEvidence when -Redact is not selected. Raw bundles are never described
+        as sanitized and their privacy audit records any sensitive patterns found.
+
         .EXAMPLE
         Invoke-LogVerdictScan | Export-LogVerdictReport
 
@@ -33,18 +38,23 @@ function Export-LogVerdictReport {
         Invoke-LogVerdictScan | Export-LogVerdictReport -Redact
 
         .EXAMPLE
-        Invoke-LogVerdictScan | Export-LogVerdictReport -IncludeEvidence
+        Invoke-LogVerdictScan | Export-LogVerdictReport -IncludeEvidence -AllowRawEvidence
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, ValueFromPipeline)]$Result,
         [string]$OutputDir,
-    [ValidateSet('Text', 'Json', 'Csv', 'Html', 'All')][string[]]$Format = @('All'),
+        [ValidateSet('Text', 'Json', 'Csv', 'Html', 'All')][string[]]$Format = @('All'),
         [switch]$Redact,
-        [switch]$IncludeEvidence
+        [switch]$IncludeEvidence,
+        [switch]$AllowRawEvidence
     )
 
     process {
+        if ($IncludeEvidence -and -not $Redact -and -not $AllowRawEvidence) {
+            throw 'Raw evidence packaging requires -AllowRawEvidence, or use -Redact for a shareable bundle.'
+        }
+
         # Captured before redacting. The folder name keeps the real machine name because
         # the person running the scan has to find it on their own desktop - redaction is
         # about what leaves the machine, not about hiding the output from its author.
@@ -108,15 +118,18 @@ function Export-LogVerdictReport {
         }
 
         $bundle = $null
+        $privacyAudit = $null
         if ($IncludeEvidence) {
             $bundle = New-LVEvidenceBundle -Result $Result -OutputDir $OutputDir `
-                -ReportFile @($written.ToArray()) -Redact:$Redact
+                -ReportFile @($written.ToArray()) -Redact:$Redact -AllowRawEvidence:$AllowRawEvidence `
+                -OriginalMachineName $folderMachine -OriginalUserName $env:USERNAME -Audit ([ref]$privacyAudit)
         }
 
         return [pscustomobject]@{
             OutputDir      = $OutputDir
             Files          = @($written.ToArray())
             EvidenceBundle = $bundle
+            PrivacyAudit   = $privacyAudit
         }
     }
 }

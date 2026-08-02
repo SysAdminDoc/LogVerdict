@@ -40,6 +40,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   advisory WEF `wecutil` configuration/runtime intake.
 - Added committed cross-version and locale fixtures, explicit malformed-EVTX/elevation/theme
   coverage records, and Windows PowerShell 5.1/PowerShell 7 STA CI runs with uploaded reports.
+- Added deterministic staged-artifact privacy audits for evidence bundles, hashed-only findings,
+  substitution counts, redacted-bundle blocking, and an explicit `-AllowRawEvidence` forensic
+  override for bundles that intentionally retain raw event channels.
 
 ## [0.8.0] - 2026-08-01
 

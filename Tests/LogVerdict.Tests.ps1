@@ -126,6 +126,13 @@ Describe 'Entry script launch behaviour' {
         $text | Should -Match '\[switch\]\$NoPause'
     }
 
+    It 'exposes and forwards the explicit raw-evidence override' {
+        $entry = Join-Path (Split-Path $PSScriptRoot -Parent) 'Invoke-LogVerdict.ps1'
+        $text = Get-Content -LiteralPath $entry -Raw
+        $text | Should -Match '\[switch\]\$AllowRawEvidence'
+        $text | Should -Match 'AllowRawEvidence\s*=\s*\$AllowRawEvidence'
+    }
+
     It 'exposes the explicit local-model opt-in on the entry script' {
         $entry = Join-Path (Split-Path $PSScriptRoot -Parent) 'Invoke-LogVerdict.ps1'
         $text = Get-Content -LiteralPath $entry -Raw
@@ -2498,6 +2505,7 @@ Describe 'GUI and console feature parity' {
         $text | Should -Match "exportArgs\['OutputDir'\]"
         $text | Should -Match 'Redact\s*=\s*\[bool\]\$ui\.ChkOverviewRedact\.IsChecked'
         $text | Should -Match 'IncludeEvidence\s*=\s*\[bool\]\$ui\.ChkOverviewEvidence\.IsChecked'
+        $text | Should -Match 'AllowRawEvidence\s*=\s*\[bool\]'
     }
 
     It 'documents every intentionally console-only option' {
@@ -3175,13 +3183,20 @@ Describe 'Evidence bundle' {
 
     It 'writes a zip carrying the reports and a manifest' {
         $dir = Join-Path $TestDrive 'bundle-plain'
-        $out = Export-LogVerdictReport -Result $script:Scan -OutputDir $dir -IncludeEvidence 6>$null
+        $out = Export-LogVerdictReport -Result $script:Scan -OutputDir $dir -IncludeEvidence -AllowRawEvidence 6>$null
         $out.EvidenceBundle | Should -Not -BeNullOrEmpty
         Test-Path -LiteralPath $out.EvidenceBundle | Should -BeTrue
 
         $names = Get-ZipEntry -Path $out.EvidenceBundle
         $names | Should -Contain 'MANIFEST.txt'
         $names | Should -Contain 'LogVerdict-Report.json'
+        $names | Should -Contain 'PRIVACY-AUDIT.json'
+    }
+
+    It 'requires an explicit override before packaging raw evidence' {
+        $dir = Join-Path $TestDrive 'bundle-raw-confirmation'
+        { Export-LogVerdictReport -Result $script:Scan -OutputDir $dir -IncludeEvidence } |
+            Should -Throw '*AllowRawEvidence*'
     }
 
     It 'omits the channel exports when the bundle is redacted' {
@@ -3203,8 +3218,34 @@ Describe 'Evidence bundle' {
 
         $manifest = Get-ZipText -Path $out.EvidenceBundle -Entry 'MANIFEST.txt'
         $manifest | Should -Match 'Redacted  : yes'
+        $manifest | Should -Match 'Sanitized : yes'
+        $manifest | Should -Match 'Privacy audit: passed; 0 finding'
         $manifest | Should -Match 'WHAT IS DELIBERATELY NOT HERE'
         $manifest | Should -Match '(?s)Event channel exports.*sanitized'
+    }
+
+    It 'blocks a redacted bundle when a staged report retains a secret' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $dir = Join-Path $Root 'bundle-blocked'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $report = Join-Path $dir 'dirty-report.txt'
+            Set-Content -LiteralPath $report -Value 'access_token=not-safe-to-share' -Encoding UTF8
+            $result = [pscustomobject]@{
+                Version='0.8.0'; MachineName='HOST-9'; ScanTime=(Get-Date); DaysBack=1; Elevated=$false
+                Channels=@(); Reduction=[pscustomobject]@{ RecordCount=0; SignatureCount=0; Ratio=0 }
+                DatabaseName='fixture'; RuleCount=0; DatabaseDate='2026-08-02'; WorstVerdict='benign'
+                Findings=@(); Correlations=@(); Coverage=@(); HealthProfiles=@(); CoverageNotes=@()
+            }
+            $audit = $null
+            $zip = New-LVEvidenceBundle -Result $result -OutputDir $dir -ReportFile @($report) -Redact `
+                -OriginalMachineName 'HOST-9' -OriginalUserName 'jsmith' -Audit ([ref]$audit)
+            $zip | Should -BeNullOrEmpty
+            $audit.Status | Should -BeExactly 'blocked'
+            $audit.FindingCount | Should -BeGreaterThan 0
+            Test-Path -LiteralPath (Join-Path $dir 'evidence') | Should -BeTrue
+            (Get-Content -LiteralPath (Join-Path $dir 'evidence\PRIVACY-AUDIT.json') -Raw) | Should -Not -Match 'not-safe-to-share'
+        }
     }
 
     It 'leaks no hostname into any text member of a redacted bundle' {
@@ -3230,7 +3271,7 @@ Describe 'Evidence bundle' {
 
     It 'removes the staging directory once the zip exists' {
         $dir = Join-Path $TestDrive 'bundle-staging'
-        Export-LogVerdictReport -Result $script:Scan -OutputDir $dir -IncludeEvidence 6>$null | Out-Null
+        Export-LogVerdictReport -Result $script:Scan -OutputDir $dir -IncludeEvidence -AllowRawEvidence 6>$null | Out-Null
         Test-Path -LiteralPath (Join-Path $dir 'evidence') | Should -BeFalse
     }
 
@@ -3775,6 +3816,38 @@ Describe 'Report redaction' {
         InModuleScope LogVerdict {
             $clean = ConvertTo-LVRedactedText -Text 'C:\Users\bob\AppData\Local\Programs\Python\Python312\python.exe crashed' -UserName 'bob' -MachineName 'm'
             $clean | Should -Match 'Python312\\python\.exe'
+        }
+    }
+
+    It 'passes the privacy audit when known identifiers were substituted' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $path = Join-Path $Root 'masked.txt'
+            Set-Content -LiteralPath $path -Value 'report <MACHINE> <USER> S-1-5-21-<SID> <UPN>' -Encoding UTF8
+            $audit = New-LVPrivacyAudit -Path @($path) -MachineName 'HOST-9' -UserName 'jsmith' -Redacted
+            $audit.Status | Should -BeExactly 'passed'
+            $audit.Sanitized | Should -BeTrue
+            $audit.FindingCount | Should -Be 0
+            $audit.SubstitutionCount | Should -BeGreaterThan 0
+        }
+    }
+
+    It 'reports credential, profile, token, SID, and script-block findings without retaining values' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $path = Join-Path $Root 'dirty.txt'
+            Set-Content -LiteralPath $path -Value 'password=super-secret SID S-1-5-21-1-2-3-1000 C:\Users\bob\x.log bearer Bearer abcdefghijklmnop ScriptBlockText=Get-Process' -Encoding UTF8
+            $audit = New-LVPrivacyAudit -Path @($path) -MachineName 'HOST-9' -UserName 'jsmith' -AllowRawEvidence
+            $audit.Status | Should -BeExactly 'raw-override-approved'
+            $audit.Sanitized | Should -BeFalse
+            @($audit.Findings | Where-Object Category -eq 'credential-or-secret').Count | Should -BeGreaterThan 0
+            @($audit.Findings | Where-Object Category -eq 'profile-path').Count | Should -BeGreaterThan 0
+            @($audit.Findings | Where-Object Category -eq 'SID').Count | Should -BeGreaterThan 0
+            @($audit.Findings | Where-Object Category -eq 'bearer-token').Count | Should -BeGreaterThan 0
+            @($audit.Findings | Where-Object Category -eq 'PowerShell-script-block').Count | Should -BeGreaterThan 0
+            foreach ($finding in @($audit.Findings)) {
+                $finding.PSObject.Properties.Name | Should -Not -Contain 'Value'
+            }
         }
     }
 

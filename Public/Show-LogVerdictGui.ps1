@@ -832,6 +832,9 @@ function Show-LogVerdictGui {
                 Result          = $state.Result
                 Redact          = [bool]$ui.ChkOverviewRedact.IsChecked
                 IncludeEvidence = [bool]$ui.ChkOverviewEvidence.IsChecked
+                # Checking the evidence box is the GUI's explicit raw-evidence choice
+                # when redaction is off; the public command still requires its switch.
+                AllowRawEvidence = [bool]($ui.ChkOverviewEvidence.IsChecked -and -not $ui.ChkOverviewRedact.IsChecked)
             }
             $outputDir = $ui.TxtOverviewOutputDir.Text.Trim()
             if ($outputDir) { $exportArgs['OutputDir'] = $outputDir }
