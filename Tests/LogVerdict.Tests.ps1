@@ -2731,6 +2731,8 @@ Describe 'GUI markup' {
                 SampleMessage = 'x'; Verdict = 'actionable'; Title = 'T'; RuleId = 'LV-0001'
             }
             $row = @(ConvertTo-LVGuiRow -Finding @($sig))[0]
+            $row.FindingIndex | Should -Be 0
+            $row.PSObject.Properties.Name | Should -Not -Contain 'Finding'
             $names = $row.PSObject.Properties.Name
 
             $xaml = Get-LVGuiXaml
@@ -3116,6 +3118,19 @@ Describe 'GUI row projection' {
 }
 
 Describe 'GUI list binding safety' {
+    It 'keeps the findings list virtualized and resolves detail by index' {
+        InModuleScope LogVerdict {
+            $xaml = Get-LVGuiXaml
+            $xaml | Should -Match 'VirtualizingPanel\.IsVirtualizing="True"'
+            $xaml | Should -Match 'VirtualizingPanel\.VirtualizationMode="Recycling"'
+            $gui = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1'
+            $text = Get-Content -LiteralPath $gui -Raw
+            $text | Should -Match 'FindingStore'
+            $text | Should -Match 'FindingIndex'
+            $text | Should -Not -Match '\$Row\.Finding\b'
+        }
+    }
+
     It 'never hands a bare string to an ItemsSource' {
         # A string is IEnumerable. Assigning one directly to ItemsSource binds to its
         # characters, and a rule caveat renders one letter per line - which is exactly

@@ -98,6 +98,7 @@ function Show-LogVerdictGui {
     # mutating a hashtable's keys does not have that problem.
     $state = @{
         Result     = $null
+        FindingStore = @()
         Rows       = $null
         View       = $null
         Job        = $null
@@ -194,6 +195,15 @@ function Show-LogVerdictGui {
         }
     }
 
+    $resolveFinding = {
+        param($Row)
+        if ($null -eq $Row -or $null -eq $state.FindingStore) { return $null }
+        $index = -1
+        if ($Row.PSObject.Properties['FindingIndex']) { $index = [int]$Row.FindingIndex }
+        if ($index -lt 0 -or $index -ge $state.FindingStore.Count) { return $null }
+        return $state.FindingStore[$index]
+    }
+
     $showDetail = {
         param($Row)
 
@@ -204,7 +214,14 @@ function Show-LogVerdictGui {
             return
         }
 
-        $detail = ConvertTo-LVGuiDetail -Finding $Row.Finding
+        $finding = & $resolveFinding $Row
+        if ($null -eq $finding) {
+            $ui.ScrDetail.Visibility = 'Collapsed'
+            $ui.TxtNoSelection.Visibility = 'Visible'
+            $ui.BtnCopy.IsEnabled = $false
+            return
+        }
+        $detail = ConvertTo-LVGuiDetail -Finding $finding
 
         $ui.TxtNoSelection.Visibility = 'Collapsed'
         $ui.ScrDetail.Visibility = 'Visible'
@@ -315,7 +332,8 @@ function Show-LogVerdictGui {
         param($Result)
 
         $state.Result = $Result
-        $rows = ConvertTo-LVGuiRow -Finding @($Result.Findings)
+        $state.FindingStore = @($Result.Findings)
+        $rows = ConvertTo-LVGuiRow -Finding $state.FindingStore -StartIndex 0
 
         $observable = New-Object 'System.Collections.ObjectModel.ObservableCollection[object]'
         foreach ($r in $rows) { $observable.Add($r) }
@@ -909,7 +927,8 @@ function Show-LogVerdictGui {
     $ui.BtnCopy.Add_Click({
         $row = $ui.LvFindings.SelectedItem
         if ($null -eq $row) { return }
-        $f = $row.Finding
+        $f = & $resolveFinding $row
+        if ($null -eq $f) { return }
 
         $lines = New-Object System.Collections.Generic.List[string]
         $lines.Add(('[{0}] {1}' -f ([string]$f.Verdict).ToUpperInvariant(), $f.Title))

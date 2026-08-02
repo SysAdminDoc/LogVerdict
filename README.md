@@ -97,6 +97,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Dependency/tool advisory cache | Offline cache/query path; displayed separately and never used to change event verdicts | `-AdvisoryPath`, `-AdvisoryPackage`, `-AdvisoryVersion`, `Get-LogVerdictAdvisory` |
 | Case profile and responder handoff | Bounded collection metadata, redaction policy, source hashes, recipes, and attributed timelines | `New-LogVerdictCaseProfile`, `Export-LogVerdictHandoff` |
 | Bounded live event tail and bookmark resume | Module-only, opt-in workflow with reconnect/drop/latency coverage and optional WEF health intake | `Watch-LogVerdict` |
+| Large finding captures | Virtualized, recycling findings lists with indexed lazy detail resolution | GUI |
 | Output format selection | The window always saves Text, JSON, CSV, and HTML together | `-Format` (`Text`, `Json`, `Csv`, `Html`, or `All`) |
 | Console lifecycle | Not applicable to a persistent window | `-NoReport`, `-Pause`, `-NoPause` |
 

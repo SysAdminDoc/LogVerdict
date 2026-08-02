@@ -434,14 +434,18 @@ function ConvertTo-LVGuiRow {
 
         .DESCRIPTION
         WPF bindings resolve against plain properties, so everything the grid shows is
-        precomputed here rather than converted per cell. The original finding travels
-        along on .Finding so the detail pane never has to look it up again, and
-        .Haystack is the lowercased text the search box matches against - built once,
-        not rebuilt on every keystroke.
+        precomputed here rather than converted per cell. Rows carry only a FindingIndex;
+        the selected finding is resolved when the detail pane opens, so a large list does
+        not retain a second object graph for every finding. Haystack is built once, not
+        rebuilt on every keystroke.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Finding)
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Finding,
+        [int]$StartIndex = 0
+    )
 
+    $index = 0
     $rows = foreach ($f in $Finding) {
         $style = Get-LVVerdictStyle -Verdict $f.Verdict
 
@@ -485,8 +489,9 @@ function ConvertTo-LVGuiRow {
             Origin         = $origin
             Haystack       = $haystack
             AutomationName = $automationName
-            Finding        = $f
+            FindingIndex   = $StartIndex + $index
         }
+        $index++
     }
 
     return ConvertTo-LVArrayOutput -Value @($rows)

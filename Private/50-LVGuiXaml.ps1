@@ -843,7 +843,10 @@ function Get-LVGuiXaml {
                   </Grid>
                   <ListView x:Name="LvPriority" Grid.Row="1" Background="Transparent" BorderThickness="0"
                             MaxHeight="132" ItemContainerStyle="{StaticResource FindingRow}"
-                            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                            ScrollViewer.CanContentScroll="True"
+                            VirtualizingPanel.IsVirtualizing="True"
+                            VirtualizingPanel.VirtualizationMode="Recycling">
                     <ListView.View><GridView AllowsColumnReorder="False">
                       <GridViewColumn Header="VERDICT" Width="105">
                         <GridViewColumn.CellTemplate><DataTemplate><Border CornerRadius="4" Padding="6,2" Background="{Binding VerdictFill}" HorizontalAlignment="Left"><TextBlock Text="{Binding VerdictLabel}" Foreground="{Binding VerdictInk}" FontSize="9.5" FontWeight="SemiBold"/></Border></DataTemplate></GridViewColumn.CellTemplate>
@@ -1067,7 +1070,11 @@ function Get-LVGuiXaml {
                   Margin="22,0,16,14"
                   AutomationProperties.Name="Findings, worst first"
                   ItemContainerStyle="{StaticResource FindingRow}"
-                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                  ScrollViewer.CanContentScroll="True"
+                  VirtualizingPanel.IsVirtualizing="True"
+                  VirtualizingPanel.VirtualizationMode="Recycling"
+                  VirtualizingPanel.ScrollUnit="Pixel">
           <ListView.View>
             <GridView AllowsColumnReorder="False">
               <GridViewColumn Header="VERDICT" Width="102">
