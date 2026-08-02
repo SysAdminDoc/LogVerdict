@@ -201,7 +201,8 @@ function Get-LVEventRecord {
         [int]$DaysBack = 30,
         [int[]]$Level = @(1, 2, 3),
         [int]$MaxPerChannel = 20000,
-        [hashtable]$ChannelStatus
+        [hashtable]$ChannelStatus,
+        [AllowNull()]$CollectionBudget
     )
 
     $since = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
@@ -222,6 +223,16 @@ function Get-LVEventRecord {
                 -PercentComplete ([Math]::Min(100, [int](100 * $done / $total)))
         }
 
+        $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+        if ($budgetStop) {
+            $truncated.Add($ch) | Out-Null
+            $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status $budgetStop `
+                -Reason ('The shared collection {0} budget stopped this channel before it was read.' -f $budgetStop) `
+                -WindowStart $windowStart -WindowEnd (Get-Date) -Cap $MaxPerChannel `
+                -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
+            break
+        }
+
         # A denied channel answers the FilterHashtable query with "no events found",
         # so trust the -LogName probe instead of asking and believing the answer.
         if ($ChannelStatus -and $ChannelStatus.ContainsKey($ch)) {
@@ -230,17 +241,17 @@ function Get-LVEventRecord {
             if ($access -eq 'denied') {
                 $denied.Add($ch) | Out-Null
                 $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'not-observed' `
-                    -Reason 'Access was denied during the channel probe.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $probe.Reason -Origin 'live')) | Out-Null
+                    -Reason 'Access was denied during the channel probe.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $probe.Reason -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
                 continue
             }
             if ($access -eq 'missing') {
                 $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'not-observed' `
-                    -Reason 'The requested channel does not exist on this machine.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $probe.Reason -Origin 'live')) | Out-Null
+                    -Reason 'The requested channel does not exist on this machine.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $probe.Reason -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
                 continue
             }
             if ($access -eq 'unreadable') {
                 $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'unreadable' `
-                    -Reason 'The channel probe failed, so events were not observed.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $probe.Reason -Origin 'live')) | Out-Null
+                    -Reason 'The channel probe failed, so events were not observed.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $probe.Reason -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
                 continue
             }
         }
@@ -250,7 +261,20 @@ function Get-LVEventRecord {
 
         $events = $null
         try {
-            $events = Get-WinEvent -FilterHashtable $filter -MaxEvents $MaxPerChannel -ErrorAction Stop
+            $readLimit = $MaxPerChannel
+            if ($CollectionBudget) {
+                $remainingRecords = [int64]$CollectionBudget.MaxRecords - [int64]$CollectionBudget.RecordsRead
+                $readLimit = [Math]::Min([int64]$readLimit, $remainingRecords)
+            }
+            if ($readLimit -lt 1) {
+                $truncated.Add($ch) | Out-Null
+                $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'truncated' `
+                    -Reason 'The shared collection record budget was exhausted before the channel was read.' `
+                    -WindowStart $windowStart -WindowEnd (Get-Date) -Cap $MaxPerChannel `
+                    -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
+                break
+            }
+            $events = Get-WinEvent -FilterHashtable $filter -MaxEvents $readLimit -ErrorAction Stop
         } catch {
             # Deliberately if/elseif, not switch: `continue` inside a switch continues
             # the SWITCH rather than this foreach, so the loop body would fall through
@@ -259,14 +283,14 @@ function Get-LVEventRecord {
             if ($kind -eq 'denied') {
                 $denied.Add($ch) | Out-Null
                 $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'not-observed' `
-                    -Reason 'Access was denied while reading the channel.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $_.Exception.Message -Origin 'live')) | Out-Null
+                    -Reason 'Access was denied while reading the channel.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $_.Exception.Message -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
             } elseif ($kind -eq 'other') {
                 Write-LVLog -Level warn -Message ("Channel '{0}' unreadable: {1}" -f $ch, $_.Exception.Message)
                 $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'unreadable' `
-                    -Reason 'The channel parser failed before records could be observed.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $_.Exception.Message -Origin 'live')) | Out-Null
+                    -Reason 'The channel parser failed before records could be observed.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $_.Exception.Message -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
             } else {
                 $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'empty' `
-                    -Reason 'No matching error or warning event was observed in the requested window.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -Origin 'live')) | Out-Null
+                    -Reason 'No matching error or warning event was observed in the requested window.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
             }
             continue
         }
@@ -274,9 +298,12 @@ function Get-LVEventRecord {
         $events = @($events)
         $isTruncated = ($events.Count -ge $MaxPerChannel)
         if ($isTruncated) { $truncated.Add($ch) | Out-Null }
+        $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+        $observedThisChannel = 0
         $metadataMissing = 0
 
         foreach ($e in $events) {
+            if ($budgetStop) { break }
             $message = $e.Message
             $fallbackMessage = $null
             if ([string]::IsNullOrWhiteSpace($message)) {
@@ -289,6 +316,13 @@ function Get-LVEventRecord {
 
             $providerLocale = if ($e.PSObject.Properties['ProviderLocale']) { [string]$e.ProviderLocale } elseif ($e.PSObject.Properties['Locale']) { [string]$e.Locale } else { [string]$script:LVUICulture }
             $errorContext = New-LVErrorContext -InputObject $e -Message ([string]$message) -FallbackMessage $fallbackMessage -ProviderLocale $providerLocale
+
+            $estimatedBytes = 256
+            if ($message) { $estimatedBytes += [Text.Encoding]::UTF8.GetByteCount([string]$message) }
+            if ($CollectionBudget -and (([int64]$CollectionBudget.BytesRead + $estimatedBytes) -gt [int64]$CollectionBudget.MaxBytes)) {
+                $budgetStop = 'truncated'
+                break
+            }
 
             $records.Add([pscustomobject]@{
                 Source       = 'event'
@@ -313,18 +347,24 @@ function Get-LVEventRecord {
                 FallbackMessage = $errorContext.FallbackMessage
                 ErrorContext = $errorContext
             }) | Out-Null
+            if ($CollectionBudget) { Add-LVCollectionBudgetUsage -Budget $CollectionBudget -Bytes $estimatedBytes -Records 1 }
+            $observedThisChannel++
+            $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
         }
-        $coverageStatus = if ($isTruncated) { 'truncated' } elseif ($events.Count -eq 0) { 'empty' } else { 'readable' }
-        $coverageReason = if ($isTruncated) {
+        if ($budgetStop) { $isTruncated = $true; $truncated.Add($ch) | Out-Null }
+        $coverageStatus = if ($budgetStop) { $budgetStop } elseif ($isTruncated) { 'truncated' } elseif ($observedThisChannel -eq 0) { 'empty' } else { 'readable' }
+        $coverageReason = if ($budgetStop) {
+            ('The shared collection {0} budget stopped this channel; observed records are a lower bound.' -f $budgetStop)
+        } elseif ($isTruncated) {
             ('The per-channel record cap of {0} was reached; observed records are a lower bound.' -f $MaxPerChannel)
-        } elseif ($events.Count -eq 0) {
+        } elseif ($observedThisChannel -eq 0) {
             'No matching error or warning event was observed in the requested window.'
         } elseif ($metadataMissing -gt 0) {
             ('{0} record(s) had no provider message template on this machine.' -f $metadataMissing)
         } else { $null }
         $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status $coverageStatus `
             -Reason $coverageReason -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel `
-            -ObservedRecords $events.Count -Origin 'live')) | Out-Null
+            -ObservedRecords $observedThisChannel -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
     }
 
     if ($total -gt 8) { Write-Progress -Id 2 -Activity 'LogVerdict: reading event channels' -Completed }

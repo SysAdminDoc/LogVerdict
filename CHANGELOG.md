@@ -8,6 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Restored Windows PowerShell 5.1 compatibility for manifest validation and test hashing by
   using `Test-ModuleManifest` and a runtime-neutral SHA-256 helper.
+- Added shared byte, normalized-record, and elapsed-time collection budgets across live and
+  offline collectors, with partial findings retained and explicit `truncated`/`timeout`
+  coverage for every source stopped by a limit.
 
 ## [0.8.1] - 2026-08-02
 

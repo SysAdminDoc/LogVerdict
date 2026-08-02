@@ -62,6 +62,16 @@
     .PARAMETER CaseProfilePath
     Optional validated case profile to attach for collection and handoff attribution.
 
+    .PARAMETER MaxCollectionBytes
+    Shared byte budget for live and offline collection. Incomplete sources are reported
+    as truncated rather than treated as clean.
+
+    .PARAMETER MaxCollectionRecords
+    Shared normalized-record budget for collection.
+
+    .PARAMETER MaxCollectionSeconds
+    Shared elapsed-time budget for collection.
+
     .PARAMETER NoReport
     Console only; write nothing to disk.
 
@@ -113,6 +123,9 @@ param(
     [string]$AdvisoryPackage,
     [string]$AdvisoryVersion,
     [string]$CaseProfilePath,
+    [ValidateRange(1, 8589934592)][long]$MaxCollectionBytes = 536870912,
+    [ValidateRange(1, 10000000)][int]$MaxCollectionRecords = 100000,
+    [ValidateRange(1, 86400)][int]$MaxCollectionSeconds = 600,
     [switch]$Pause,
     [switch]$NoPause
 )
@@ -173,6 +186,9 @@ try {
         AdvisoryPackage = $AdvisoryPackage
         AdvisoryVersion = $AdvisoryVersion
         CaseProfilePath = $CaseProfilePath
+        MaxCollectionBytes = $MaxCollectionBytes
+        MaxCollectionRecords = $MaxCollectionRecords
+        MaxCollectionSeconds = $MaxCollectionSeconds
     }
     if (-not $EvidencePath -or $PSBoundParameters.ContainsKey('DaysBack')) { $scanArgs['DaysBack'] = $DaysBack }
     if ($EvidencePath) { $scanArgs['EvidencePath'] = $EvidencePath }

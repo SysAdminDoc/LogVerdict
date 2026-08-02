@@ -278,7 +278,8 @@ function Get-LVOfflineEvtxPlan {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$File,
         [ValidateRange(1, 512)][int]$MaxFiles = 64,
         [ValidateRange(1, 4294967296)][long]$MaxFileBytes = 536870912,
-        [ValidateRange(1, 8589934592)][long]$MaxTotalBytes = 2147483648
+        [ValidateRange(1, 8589934592)][long]$MaxTotalBytes = 2147483648,
+        [AllowNull()]$CollectionBudget
     )
 
     $selected = New-Object System.Collections.Generic.List[object]
@@ -299,6 +300,13 @@ function Get-LVOfflineEvtxPlan {
             $manifest.Add($entry) | Out-Null
             continue
         }
+        $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+        if ($budgetStop) {
+            $entry.Status = $budgetStop
+            $entry.Reason = ('The shared collection {0} budget stopped this source before hashing.' -f $budgetStop)
+            $manifest.Add($entry) | Out-Null
+            continue
+        }
         if ($size -gt $MaxFileBytes) {
             $entry.Reason = ('file exceeds the {0} byte per-file cap' -f $MaxFileBytes)
             $manifest.Add($entry) | Out-Null
@@ -309,10 +317,24 @@ function Get-LVOfflineEvtxPlan {
             $manifest.Add($entry) | Out-Null
             continue
         }
+        if ($CollectionBudget -and $size -gt ([int64]$CollectionBudget.MaxBytes - [int64]$CollectionBudget.BytesRead)) {
+            $entry.Status = 'truncated'
+            $entry.Reason = 'The shared collection byte budget would be exceeded by this source.'
+            $manifest.Add($entry) | Out-Null
+            continue
+        }
         try {
             $entry.SHA256 = Get-LVEvtxSha256 -Path $path
         } catch {
             $entry.Reason = ('source hash failed: {0}' -f $_.Exception.Message)
+            $manifest.Add($entry) | Out-Null
+            continue
+        }
+        if ($CollectionBudget) { Add-LVCollectionBudgetUsage -Budget $CollectionBudget -Bytes $size }
+        $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+        if ($budgetStop) {
+            $entry.Status = $budgetStop
+            $entry.Reason = ('The shared collection {0} budget was reached while hashing this source.' -f $budgetStop)
             $manifest.Add($entry) | Out-Null
             continue
         }
@@ -339,13 +361,18 @@ function Read-LVArchivedEventFile {
         [Parameter(Mandatory)][string]$Path,
         [int]$DaysBack = 30,
         [int[]]$Level = @(1, 2, 3),
-        [int]$MaxEvents = 20000
+        [int]$MaxEvents = 20000,
+        [AllowNull()]$CollectionBudget
     )
 
     $fallbackChannel = [IO.Path]::GetFileNameWithoutExtension($Path)
     $channel = $fallbackChannel
     $oldest = $null
     $timer = [Diagnostics.Stopwatch]::StartNew()
+    $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+    if ($budgetStop) {
+        return [pscustomobject]@{ Channel=$channel; Oldest=$null; Records=@(); Truncated=($budgetStop -eq 'truncated'); BudgetStop=$budgetStop; Error=$null; ParseMilliseconds=0 }
+    }
     try {
         $first = Get-WinEvent -Path $Path -Oldest -MaxEvents 1 -ErrorAction Stop
         if ($first) {
@@ -354,24 +381,40 @@ function Read-LVArchivedEventFile {
         }
     } catch {
         $timer.Stop()
-        return [pscustomobject]@{ Channel=$channel; Oldest=$null; Records=@(); Truncated=$false; Error=$_.Exception.Message; ParseMilliseconds=[math]::Round($timer.Elapsed.TotalMilliseconds, 0) }
+        return [pscustomobject]@{ Channel=$channel; Oldest=$null; Records=@(); Truncated=$false; BudgetStop=$null; Error=$_.Exception.Message; ParseMilliseconds=[math]::Round($timer.Elapsed.TotalMilliseconds, 0) }
+    }
+
+    $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+    if ($budgetStop) {
+        $timer.Stop()
+        return [pscustomobject]@{ Channel=$channel; Oldest=$oldest; Records=@(); Truncated=($budgetStop -eq 'truncated'); BudgetStop=$budgetStop; Error=$null; ParseMilliseconds=[math]::Round($timer.Elapsed.TotalMilliseconds, 0) }
     }
 
     $filter = @{ Path = $Path; StartTime = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack)) }
     if ($Level -and $Level.Count -gt 0) { $filter['Level'] = $Level }
     try {
-        $events = @(Get-WinEvent -FilterHashtable $filter -MaxEvents $MaxEvents -ErrorAction Stop)
+        $readLimit = $MaxEvents
+        if ($CollectionBudget) {
+            $readLimit = [Math]::Min([int64]$readLimit, [int64]$CollectionBudget.MaxRecords - [int64]$CollectionBudget.RecordsRead)
+        }
+        if ($readLimit -lt 1) {
+            $timer.Stop()
+            return [pscustomobject]@{ Channel=$channel; Oldest=$oldest; Records=@(); Truncated=$true; BudgetStop='truncated'; Error=$null; ParseMilliseconds=[math]::Round($timer.Elapsed.TotalMilliseconds, 0) }
+        }
+        $events = @(Get-WinEvent -FilterHashtable $filter -MaxEvents $readLimit -ErrorAction Stop)
     } catch {
         $kind = Get-LVErrorKind -ErrorRecord $_
         if ($kind -eq 'empty') { $events = @() }
         else {
             $timer.Stop()
-            return [pscustomobject]@{ Channel=$channel; Oldest=$oldest; Records=@(); Truncated=$false; Error=$_.Exception.Message; ParseMilliseconds=[math]::Round($timer.Elapsed.TotalMilliseconds, 0) }
+            return [pscustomobject]@{ Channel=$channel; Oldest=$oldest; Records=@(); Truncated=$false; BudgetStop=$null; Error=$_.Exception.Message; ParseMilliseconds=[math]::Round($timer.Elapsed.TotalMilliseconds, 0) }
         }
     }
 
     $records = New-Object System.Collections.Generic.List[object]
     foreach ($eventRecord in $events) {
+        $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+        if ($budgetStop) { break }
         $message = $null
         try { $message = $eventRecord.Message } catch { $message = $null }
         $fallbackMessage = $null
@@ -383,6 +426,12 @@ function Read-LVArchivedEventFile {
         if ($eventRecord.LogName) { $recordChannel = [string]$eventRecord.LogName }
         $errorContext = New-LVErrorContext -InputObject $eventRecord -Message ([string]$message) `
             -FallbackMessage $fallbackMessage
+        $estimatedBytes = 256
+        if ($message) { $estimatedBytes += [Text.Encoding]::UTF8.GetByteCount([string]$message) }
+        if ($CollectionBudget -and (([int64]$CollectionBudget.BytesRead + $estimatedBytes) -gt [int64]$CollectionBudget.MaxBytes)) {
+            $budgetStop = 'truncated'
+            break
+        }
         $records.Add([pscustomobject]@{
             Source      = 'event'
             Channel     = $recordChannel
@@ -402,14 +451,17 @@ function Read-LVArchivedEventFile {
             FallbackMessage = $errorContext.FallbackMessage
             ErrorContext = $errorContext
         }) | Out-Null
+        if ($CollectionBudget) { Add-LVCollectionBudgetUsage -Budget $CollectionBudget -Bytes $estimatedBytes -Records 1 }
     }
 
     $timer.Stop()
+    if (-not $budgetStop) { $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget }
     return [pscustomobject]@{
         Channel   = $channel
         Oldest    = $oldest
         Records   = @($records.ToArray())
-        Truncated = ($events.Count -ge $MaxEvents)
+        Truncated = (($events.Count -ge $MaxEvents) -or ($budgetStop -eq 'truncated'))
+        BudgetStop = $budgetStop
         Error     = $null
         ParseMilliseconds = [math]::Round($timer.Elapsed.TotalMilliseconds, 0)
     }
@@ -439,7 +491,8 @@ function Invoke-LVOfflineScan {
         [string]$OllamaModel = 'llama3.2',
         [string]$OllamaEndpoint = 'http://127.0.0.1:11434',
         [switch]$PromoteToRule,
-        [string]$LocalRulePath
+        [string]$LocalRulePath,
+        [AllowNull()]$CollectionBudget
     )
 
     $started = Get-Date
@@ -487,7 +540,7 @@ function Invoke-LVOfflineScan {
             throw 'Evidence package contains neither a LogVerdict JSON report nor an .evtx file.'
         }
         $evtxPlan = Get-LVOfflineEvtxPlan -File @($evtxDiscovery.Files) -MaxFiles $MaxEvtxFiles `
-            -MaxFileBytes $MaxEvtxFileBytes -MaxTotalBytes $MaxEvtxTotalBytes
+            -MaxFileBytes $MaxEvtxFileBytes -MaxTotalBytes $MaxEvtxTotalBytes -CollectionBudget $CollectionBudget
         $evtx = @($evtxPlan.Files)
 
         Write-LVLog -Level step -Message ('LogVerdict {0} starting offline analysis - window {1} day(s)' -f $script:LVVersion, $effectiveDays)
@@ -502,12 +555,23 @@ function Invoke-LVOfflineScan {
         foreach ($source in $evtx) {
             $file = $source.File
             $manifestEntry = $source.Manifest
-            $data = Read-LVArchivedEventFile -Path $file.FullName -DaysBack $effectiveDays -MaxEvents $MaxPerChannel
+            $data = Read-LVArchivedEventFile -Path $file.FullName -DaysBack $effectiveDays -MaxEvents $MaxPerChannel -CollectionBudget $CollectionBudget
             $manifestEntry.ParseMilliseconds = $data.ParseMilliseconds
             $manifestEntry.Channel = $data.Channel
             $manifestEntry.Oldest = $data.Oldest
             $manifestEntry.RecordCount = @($data.Records).Count
             $manifestEntry.Truncated = [bool]$data.Truncated
+            if ($data.BudgetStop) {
+                $manifestEntry.Status = $data.BudgetStop
+                $manifestEntry.Reason = ('The shared collection {0} budget stopped this source; observed records are a lower bound.' -f $data.BudgetStop)
+                & $recordPerformance -Source 'offline-evtx' -Kind 'parser' -Name 'archived event channel' -Status $data.BudgetStop `
+                    -ObservedRecords @($data.Records).Count -SkippedRecords 0 -Cap $MaxPerChannel -ElapsedMilliseconds $data.ParseMilliseconds -Origin 'offline'
+                $failedChannels.Add($data.Channel) | Out-Null
+                foreach ($record in @($data.Records)) { $records.Add($record) | Out-Null }
+                if ($data.Truncated) { $truncatedChannels.Add($data.Channel) | Out-Null }
+                Write-LVLog -Level warn -Message ("Archived channel '{0}' stopped by the shared {1} collection budget." -f $data.Channel, $data.BudgetStop)
+                continue
+            }
             if ($data.ParseMilliseconds -gt ($MaxEvtxParseSeconds * 1000)) {
                 $manifestEntry.Status = 'timeout'
                 $manifestEntry.Reason = ('parser exceeded the {0} second cap' -f $MaxEvtxParseSeconds)
@@ -663,6 +727,10 @@ function Invoke-LVOfflineScan {
         if ($truncatedChannels.Count -gt 0) {
             $coverageNotes.Add(('Archived channel file(s) hit the {0}-record offline cap: {1}.' -f $MaxPerChannel, ($truncatedChannels -join ', '))) | Out-Null
         }
+        $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+        if ($budgetStop) {
+            $coverageNotes.Add(('The shared offline collection {0} budget was reached. Archived findings are partial and incomplete sources are not clean.' -f $budgetStop)) | Out-Null
+        }
         if ($sourceReport -and $evtx.Count -eq 0) {
             if (@($evtxPlan.Manifest).Count -eq 0) {
                 $coverageNotes.Add('The package contains no raw event channel export. Findings were re-evaluated from the captured report summaries only.') | Out-Null
@@ -729,7 +797,8 @@ function Invoke-LVOfflineScan {
             $coverageSources.Add((New-LVCoverageRecord -Source 'offline-evtx' -Kind 'file' -Name $source.Name -Status $source.Status `
                 -Reason $source.Reason -Path $source.Path -WindowStart ($started.AddDays(-1 * [Math]::Abs($effectiveDays))) -WindowEnd $started `
                 -Cap $MaxPerChannel -ObservedRecords $source.RecordCount -RecordGap $null -ParserError $(if ($source.Status -eq 'unreadable') { $source.Reason } else { $null }) `
-                -SizeBytes $source.SizeBytes -ParseMilliseconds $source.ParseMilliseconds -SHA256 $source.SHA256 -Origin 'offline')) | Out-Null
+                -SizeBytes $source.SizeBytes -ParseMilliseconds $source.ParseMilliseconds -SHA256 $source.SHA256 `
+                -CollectionBudget $CollectionBudget -Origin 'offline')) | Out-Null
         }
         if ($sourceReport -and $sourceReport.PSObject.Properties['Coverage']) {
             foreach ($source in @($sourceReport.Coverage | Where-Object { $_ })) { $coverageSources.Add($source) | Out-Null }
@@ -766,6 +835,7 @@ function Invoke-LVOfflineScan {
             CrashArtifacts = @($crash)
             EvidenceManifest = @($evtxPlan.Manifest)
             Coverage       = @($coverageSources.ToArray())
+            CollectionBudget = Get-LVCollectionBudgetSnapshot -Budget $CollectionBudget
             PerformanceTelemetry = [bool]$PerformanceTelemetry
             Performance    = @($performance.ToArray())
             HealthProfiles = @($healthProfiles)

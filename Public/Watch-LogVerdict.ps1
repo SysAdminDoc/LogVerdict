@@ -23,6 +23,9 @@ function Watch-LogVerdict {
         .PARAMETER MaxEvents
         Maximum normalized records returned by this watch. Default 1000.
 
+        .PARAMETER MaxBytes
+        Maximum estimated UTF-8 evidence bytes retained by this watch. Default 512 MB.
+
         .PARAMETER IdleTimeoutSeconds
         Stop after this many seconds without a new event. Zero disables the idle stop.
 
@@ -39,6 +42,7 @@ function Watch-LogVerdict {
         [string]$BookmarkPath,
         [ValidateRange(1, 86400)][int]$DurationSeconds = 300,
         [ValidateRange(1, 100000)][int]$MaxEvents = 1000,
+        [ValidateRange(1, 8589934592)][long]$MaxBytes = 536870912,
         [ValidateRange(0, 86400)][int]$IdleTimeoutSeconds = 0,
         [ValidateRange(100, 60000)][int]$PollMilliseconds = 1000,
         [ValidateRange(1, 4096)][int]$PageSize = 256,
@@ -50,6 +54,7 @@ function Watch-LogVerdict {
     if ($channels.Count -eq 0) { throw 'At least one event channel is required.' }
 
     $started = Get-Date
+    $collectionBudget = New-LVCollectionBudget -MaxBytes $MaxBytes -MaxRecords $MaxEvents -MaxSeconds $DurationSeconds
     $bookmark = Read-LVWatchBookmark -Path $BookmarkPath
     $records = New-Object System.Collections.Generic.List[object]
     $states = @{}
@@ -87,7 +92,11 @@ function Watch-LogVerdict {
         while ($true) {
             $pollCount++
             $limitReached = $false
+            $budgetStop = Get-LVCollectionBudgetStopReason -Budget $collectionBudget
+            if ($budgetStop) { $stopReason = $budgetStop; break }
             foreach ($channelName in $channels) {
+                $budgetStop = Get-LVCollectionBudgetStopReason -Budget $collectionBudget
+                if ($budgetStop) { $stopReason = $budgetStop; break }
                 $state = $states[$channelName]
                 try {
                     $page = @(Get-WinEvent -LogName $channelName -MaxEvents $PageSize -ErrorAction Stop)
@@ -119,6 +128,15 @@ function Watch-LogVerdict {
                     if (-not $isNew) { continue }
                     if ($records.Count -ge $MaxEvents) { $limitReached = $true; break }
 
+                    $messageForBudget = if ($eventItem.PSObject.Properties['Message']) { [string]$eventItem.Message } else { '' }
+                    $estimatedBytes = 256 + [Text.Encoding]::UTF8.GetByteCount($messageForBudget)
+                    if (($collectionBudget.BytesRead + $estimatedBytes) -gt $collectionBudget.MaxBytes) {
+                        $budgetStop = 'truncated'
+                        $stopReason = $budgetStop
+                        $limitReached = $true
+                        break
+                    }
+
                     if ($null -ne $recordId -and $null -ne $state.LastRecordId -and $recordId -gt ($state.LastRecordId + 1)) {
                         $gap = $recordId - $state.LastRecordId - 1
                         $state.Dropped += $gap
@@ -131,6 +149,7 @@ function Watch-LogVerdict {
                         $state.Latencies.Add([double]$latency) | Out-Null
                     }
                     $records.Add((ConvertTo-LVWatchEventRecord -EventObject $eventItem -Channel $channelName)) | Out-Null
+                    Add-LVCollectionBudgetUsage -Budget $collectionBudget -Bytes $estimatedBytes -Records 1
                     $state.Observed++
                     if ($null -ne $recordId) { $state.LastRecordId = $recordId }
                     if ($null -ne $eventTime) { $state.LastTimeCreated = $eventTime }
@@ -150,7 +169,10 @@ function Watch-LogVerdict {
                 Write-LVWatchBookmark -Path $BookmarkPath -Bookmark $bookmark
                 $bookmarkDirty = $false
             }
-            if ($limitReached) { $stopReason = 'max-events'; break }
+            if ($limitReached) {
+                if (-not $budgetStop) { $stopReason = 'max-events' }
+                break
+            }
             $now = Get-Date
             if (($now - $started).TotalSeconds -ge $DurationSeconds) { $stopReason = 'duration'; break }
             if ($IdleTimeoutSeconds -gt 0 -and ($now - $lastActivity).TotalSeconds -ge $IdleTimeoutSeconds) { $stopReason = 'idle'; break }
@@ -167,15 +189,15 @@ function Watch-LogVerdict {
     foreach ($channelName in $channels) {
         $state = $states[$channelName]
         $latencies = @($state.Latencies.ToArray())
-        $status = if ($state.Observed -gt 0) { 'readable' } elseif ($state.PollErrors -gt 0) { 'unreadable' } else { 'empty' }
+        $status = if ($stopReason -in @('timeout', 'truncated')) { $stopReason } elseif ($state.Observed -gt 0) { 'readable' } elseif ($state.PollErrors -gt 0) { 'unreadable' } else { 'empty' }
         $gapText = if ($state.Dropped -gt 0) {
             "RecordId gap after $($state.FirstGap) before $($state.LastGap); $($state.Dropped) record(s) were not observed. Rollover, filtering, or a dropped subscription can cause this."
         } else { $null }
-        $reason = if ($state.PollErrors -gt 0) { "The watch encountered $($state.PollErrors) read error(s); the last was: $($state.LastError)" } elseif ($state.Observed -eq 0) { 'No new event was observed during the watch window.' } else { $null }
+        $reason = if ($stopReason -in @('timeout', 'truncated')) { "The shared watch $stopReason budget stopped collection; observed records are a lower bound." } elseif ($state.PollErrors -gt 0) { "The watch encountered $($state.PollErrors) read error(s); the last was: $($state.LastError)" } elseif ($state.Observed -eq 0) { 'No new event was observed during the watch window.' } else { $null }
         $entry = New-LVCoverageRecord -Source 'event-watch' -Kind 'channel' -Name $channelName -Status $status `
             -Reason $reason -WindowStart $started -WindowEnd $ended -Cap $MaxEvents `
             -ObservedRecords $state.Observed -SkippedRecords $state.Dropped -RecordGap $gapText `
-            -ParserError $state.LastError -Origin 'live-watch'
+            -ParserError $state.LastError -CollectionBudget $collectionBudget -Origin 'live-watch'
         $entry | Add-Member -NotePropertyName PollCount -NotePropertyValue $pollCount
         $entry | Add-Member -NotePropertyName PollErrors -NotePropertyValue $state.PollErrors
         $entry | Add-Member -NotePropertyName ReconnectCount -NotePropertyValue $state.Reconnects
@@ -221,6 +243,7 @@ function Watch-LogVerdict {
         CoverageNotes = @($coverageNotes.ToArray())
         Coverage      = @($coverage.ToArray())
         HealthProfiles = @($health.ToArray())
+        CollectionBudget = Get-LVCollectionBudgetSnapshot -Budget $collectionBudget
         Findings      = @()
         Correlations  = @()
         Reduction     = [pscustomobject]@{ RecordCount = $records.Count; SignatureCount = $null; Ratio = $null }

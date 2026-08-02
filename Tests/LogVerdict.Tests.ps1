@@ -1349,6 +1349,21 @@ Describe 'Text-log collection against fixtures' {
             $script:LVTextLogCoverage[0].Status | Should -BeExactly 'not-observed'
         }
     }
+
+    It 'marks a text source truncated when the shared byte budget is exhausted' {
+        InModuleScope LogVerdict -Parameters @{ dir = $script:FixtureDir } {
+            param($dir)
+            $p = Join-Path $dir 'budget.log'
+            '!!!  inf: this line is intentionally larger than the budget' | Set-Content -LiteralPath $p -Encoding UTF8
+            $target = @(@{ Name='BUDGET'; Path=$p; Pattern='^\s*!!!'; Area='t'; Hint='t' })
+            $budget = New-LVCollectionBudget -MaxBytes 2 -MaxRecords 100 -MaxSeconds 60
+            $rec = @(Get-LVTextLogRecord -DaysBack 30 -Target $target -CollectionBudget $budget)
+            $rec.Count | Should -Be 0
+            $script:LVTextLogCoverage[0].Status | Should -BeExactly 'truncated'
+            $script:LVTextLogCoverage[0].CollectionBudget.MaxBytes | Should -Be 2
+            $budget.BytesRead | Should -BeGreaterThan 0
+        }
+    }
 }
 
 Describe 'SetupDiag Panther integration' {
@@ -1728,6 +1743,24 @@ Describe 'Event collection failure handling' {
             }
             $rec = @(Get-LVEventRecord -Channel @('Fake') -DaysBack 30 -MaxPerChannel 100)
             $rec[0].Message | Should -Match 'no message template'
+        }
+    }
+
+    It 'preserves partial event records and marks later channels when the shared record budget ends' {
+        InModuleScope LogVerdict {
+            Mock Get-WinEvent {
+                1..3 | ForEach-Object {
+                    [pscustomobject]@{
+                        ProviderName = 'Fake'; Id = 1; Level = 2; LevelDisplayName = 'Error'
+                        TimeCreated = (Get-Date); MachineName = 'T'; RecordId = $_; Message = "m$_"
+                    }
+                }
+            }
+            $budget = New-LVCollectionBudget -MaxBytes 100000 -MaxRecords 1 -MaxSeconds 60
+            $rec = @(Get-LVEventRecord -Channel @('Fake', 'Later') -DaysBack 30 -CollectionBudget $budget)
+            $rec.Count | Should -Be 1
+            @($script:LVEventCoverage | Where-Object Status -eq 'truncated').Count | Should -Be 2
+            $budget.RecordsRead | Should -Be 1
         }
     }
 }

@@ -111,9 +111,13 @@ function Invoke-LogVerdictScan {
         [string]$AdvisoryPath,
         [string]$AdvisoryPackage,
         [string]$AdvisoryVersion,
-        [string]$CaseProfilePath
+        [string]$CaseProfilePath,
+        [ValidateRange(1, 8589934592)][long]$MaxCollectionBytes = 536870912,
+        [ValidateRange(1, 10000000)][int]$MaxCollectionRecords = 100000,
+        [ValidateRange(1, 86400)][int]$MaxCollectionSeconds = 600
     )
 
+    $collectionBudget = New-LVCollectionBudget -MaxBytes $MaxCollectionBytes -MaxRecords $MaxCollectionRecords -MaxSeconds $MaxCollectionSeconds
     $caseProfile = if ($CaseProfilePath) { Read-LVCaseProfile -Path $CaseProfilePath } else { $null }
     if ($EvidencePath) {
         $offlineArgs = @{
@@ -129,6 +133,7 @@ function Invoke-LogVerdictScan {
             OllamaEndpoint = $OllamaEndpoint
             PromoteToRule  = $PromoteToRule
             LocalRulePath  = $LocalRulePath
+            CollectionBudget = $collectionBudget
         }
         if ($PSBoundParameters.ContainsKey('DaysBack')) { $offlineArgs['DaysBack'] = $DaysBack }
         $offlineResult = Invoke-LVOfflineScan @offlineArgs
@@ -176,6 +181,7 @@ function Invoke-LogVerdictScan {
     $advisoryContext = Get-LVAdvisoryScanContext -Path $AdvisoryPath -Package $AdvisoryPackage -Version $AdvisoryVersion
     $script:LVReliabilityAvailable = $true
     $script:LVReliabilitySkipReason = $null
+    $script:LVReliabilityBudgetStop = $null
 
     Write-LVLog -Level step -Message ('LogVerdict {0} starting - window {1} day(s)' -f $script:LVVersion, $DaysBack)
     if (-not $elevated) {
@@ -218,7 +224,7 @@ function Invoke-LogVerdictScan {
     Write-LVLog -Level info -Message ('Reading {0} readable channel(s)...' -f $readable)
     $records = New-Object System.Collections.Generic.List[object]
     $eventTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
-    foreach ($r in (Get-LVEventRecord -Channel $channels -DaysBack $DaysBack -ChannelStatus $channelStatus)) { $records.Add($r) | Out-Null }
+    foreach ($r in (Get-LVEventRecord -Channel $channels -DaysBack $DaysBack -ChannelStatus $channelStatus -CollectionBudget $collectionBudget)) { $records.Add($r) | Out-Null }
     if ($eventTimer) {
         $eventTimer.Stop()
         $eventCoverage = @($script:LVEventCoverage)
@@ -234,12 +240,14 @@ function Invoke-LogVerdictScan {
     $crash = @()
     $setupDiag = $null
     $setupDiagStatus = $null
+    $setupDiagBudgetStop = $null
+    $crashBudgetStop = $null
     $decodedCrashCount = 0
     if (-not $SkipTextLogs) {
         Write-LVLog -Level info -Message 'Reading plain-text logs...'
         $textRecordStart = $records.Count
         $textTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
-        foreach ($r in (Get-LVTextLogRecord -DaysBack $DaysBack)) { $records.Add($r) | Out-Null }
+        foreach ($r in (Get-LVTextLogRecord -DaysBack $DaysBack -CollectionBudget $collectionBudget)) { $records.Add($r) | Out-Null }
         if ($textTimer) {
             $textTimer.Stop()
             $textCoverage = @($script:LVTextLogCoverage)
@@ -251,12 +259,17 @@ function Invoke-LogVerdictScan {
         }
 
         $setupTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
-        $setupDiag = Get-LVSetupDiagRecord -DaysBack $DaysBack
+        $setupDiagBudgetStop = Get-LVCollectionBudgetStopReason -Budget $collectionBudget
+        if ($setupDiagBudgetStop) {
+            $setupDiag = [pscustomobject]@{ Records=@(); Status=$setupDiagBudgetStop; Message=('The shared collection {0} budget stopped SetupDiag before execution.' -f $setupDiagBudgetStop) }
+        } else {
+            $setupDiag = Get-LVSetupDiagRecord -DaysBack $DaysBack
+        }
         foreach ($r in @($setupDiag.Records | Where-Object { $_ })) { $records.Add($r) | Out-Null }
         if ($setupTimer) {
             $setupTimer.Stop()
             $setupObserved = [int64]@($setupDiag.Records | Where-Object { $_ }).Count
-            $setupPerformanceStatus = if ($setupDiag.Status -in @('absent', 'no-recent-logs', 'untrusted')) { 'not-observed' } elseif ($setupDiag.Status -in @('execution-failed', 'requires-elevation', 'invalid-output', 'no-output')) { 'unreadable' } elseif ($setupObserved -eq 0) { 'empty' } else { 'readable' }
+            $setupPerformanceStatus = if ($setupDiag.Status -in @('timeout', 'truncated')) { $setupDiag.Status } elseif ($setupDiag.Status -in @('absent', 'no-recent-logs', 'untrusted')) { 'not-observed' } elseif ($setupDiag.Status -in @('execution-failed', 'requires-elevation', 'invalid-output', 'no-output')) { 'unreadable' } elseif ($setupObserved -eq 0) { 'empty' } else { 'readable' }
             & $recordPerformance -Source 'setupdiag' -Kind 'tool' -Name 'SetupDiag tool' -Status $setupPerformanceStatus `
                 -ObservedRecords $setupObserved -SkippedRecords 0 -Cap $null -ElapsedMilliseconds ([int64][Math]::Round($setupTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
         }
@@ -271,11 +284,12 @@ function Invoke-LogVerdictScan {
         }
 
         $crashTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
-        $crash = @(Get-LVCrashArtifact -DaysBack ([Math]::Max($DaysBack, 90)))
+        $crashBudgetStop = Get-LVCollectionBudgetStopReason -Budget $collectionBudget
+        if ($crashBudgetStop) { $crash = @() } else { $crash = @(Get-LVCrashArtifact -DaysBack ([Math]::Max($DaysBack, 90))) }
         if ($crashTimer) {
             $crashTimer.Stop()
             & $recordPerformance -Source 'crash' -Kind 'inventory' -Name 'crash artifacts' `
-                -Status $(if ($crash.Count -eq 0) { 'empty' } else { 'readable' }) -ObservedRecords $crash.Count -SkippedRecords 0 -Cap $null `
+                -Status $(if ($crashBudgetStop) { $crashBudgetStop } elseif ($crash.Count -eq 0) { 'empty' } else { 'readable' }) -ObservedRecords $crash.Count -SkippedRecords 0 -Cap $null `
                 -ElapsedMilliseconds ([int64][Math]::Round($crashTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
         }
         $decodedCrashCount = @($crash | Where-Object { $_.Decoded }).Count
@@ -302,17 +316,17 @@ function Invoke-LogVerdictScan {
         $reliabilityTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
         # Handed the records collected so far so it can drop anything already seen in a
         # channel. Order matters: this has to run after the channel and text-log reads.
-        $reliabilityRecords = @(Get-LVReliabilityRecord -DaysBack $DaysBack -ExistingRecord @($records.ToArray()))
+        $reliabilityRecords = @(Get-LVReliabilityRecord -DaysBack $DaysBack -ExistingRecord @($records.ToArray()) -CollectionBudget $collectionBudget)
         foreach ($r in $reliabilityRecords) {
             $records.Add($r) | Out-Null
         }
-        $stability = Get-LVStabilityTrend -DaysBack $DaysBack
+        if (-not $script:LVReliabilityBudgetStop) { $stability = Get-LVStabilityTrend -DaysBack $DaysBack }
         if ($stability) {
             Write-LVLog -Level info -Message ('System stability index {0}/10, {1} over the window (low {2})' -f $stability.Current, $stability.Direction, $stability.Lowest)
         }
         if ($reliabilityTimer) {
             $reliabilityTimer.Stop()
-            $reliabilityStatus = if (-not $script:LVReliabilityAvailable) { 'unreadable' } elseif (@($reliabilityRecords).Count -eq 0) { 'empty' } else { 'readable' }
+            $reliabilityStatus = if ($script:LVReliabilityBudgetStop) { $script:LVReliabilityBudgetStop } elseif (-not $script:LVReliabilityAvailable) { 'unreadable' } elseif (@($reliabilityRecords).Count -eq 0) { 'empty' } else { 'readable' }
             & $recordPerformance -Source 'reliability' -Kind 'provider' -Name 'Reliability Monitor' -Status $reliabilityStatus `
                 -ObservedRecords @($reliabilityRecords).Count -SkippedRecords 0 -Cap $null -ElapsedMilliseconds ([int64][Math]::Round($reliabilityTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
         }
@@ -430,6 +444,10 @@ function Invoke-LogVerdictScan {
     if (@($script:LVTruncatedChannel).Count -gt 0) {
         $coverageNotes.Add(('These channel(s) hit the per-channel record cap and are truncated: {0}. Counts and rates for them are lower bounds.' -f (@($script:LVTruncatedChannel) -join ', '))) | Out-Null
     }
+    $budgetStop = Get-LVCollectionBudgetStopReason -Budget $collectionBudget
+    if ($budgetStop) {
+        $coverageNotes.Add(('The shared collection {0} budget was reached. Sources marked truncated or timeout are incomplete; their findings are partial, not clean.' -f $budgetStop)) | Out-Null
+    }
     foreach ($note in $sequenceNotes) { $coverageNotes.Add($note) | Out-Null }
     if (-not $elevated) {
         $coverageNotes.Add('Scan ran without elevation. The Security channel and some text logs require administrator rights.') | Out-Null
@@ -457,7 +475,7 @@ function Invoke-LogVerdictScan {
     if ($script:LVChannelMetadataErrorCount -gt 0) {
         $coverageSources.Add((New-LVCoverageRecord -Source 'event' -Kind 'metadata' -Name 'channel enumeration' -Status 'not-observed' `
             -Reason 'Channel metadata could not be read, so those channels were not enumerated.' `
-            -ParserError (($script:LVChannelMetadataFailures | Where-Object { $_ }) -join ' | ') -Origin 'live')) | Out-Null
+            -ParserError (($script:LVChannelMetadataFailures | Where-Object { $_ }) -join ' | ') -CollectionBudget $collectionBudget -Origin 'live')) | Out-Null
     }
     foreach ($note in $sequenceNotes) {
         $match = [regex]::Match([string]$note, "^Event channel '([^']+)' has")
@@ -467,19 +485,19 @@ function Invoke-LogVerdictScan {
         }
     }
     if ($setupDiagStatus) {
-        $setupStatus = if ($setupDiagStatus.Status -in @('absent', 'no-recent-logs', 'untrusted')) { 'not-observed' } elseif ($setupDiagStatus.Status -in @('execution-failed', 'requires-elevation', 'invalid-output', 'no-output')) { 'unreadable' } else { 'readable' }
+        $setupStatus = if ($setupDiagStatus.Status -in @('timeout', 'truncated')) { $setupDiagStatus.Status } elseif ($setupDiagStatus.Status -in @('absent', 'no-recent-logs', 'untrusted')) { 'not-observed' } elseif ($setupDiagStatus.Status -in @('execution-failed', 'requires-elevation', 'invalid-output', 'no-output')) { 'unreadable' } else { 'readable' }
         $coverageSources.Add((New-LVCoverageRecord -Source 'SetupDiag' -Kind 'tool' -Name 'SetupDiag' -Status $setupStatus `
             -Reason ([string]$setupDiagStatus.Message) -Path $setupDiagStatus.ExecutablePath -WindowStart $cutoff -WindowEnd $started `
-            -ObservedRecords @($setupDiag.Records).Count -ParserError $(if ($setupStatus -eq 'unreadable') { [string]$setupDiagStatus.Message } else { $null }) -Origin 'live')) | Out-Null
+            -ObservedRecords @($setupDiag.Records).Count -ParserError $(if ($setupStatus -eq 'unreadable') { [string]$setupDiagStatus.Message } else { $null }) -CollectionBudget $collectionBudget -Origin 'live')) | Out-Null
     }
-    $reliabilityStatus = if ($SkipReliability) { 'not-observed' } elseif (-not $script:LVReliabilityAvailable) { 'unreadable' } elseif (@($reliabilityRecords).Count -eq 0) { 'empty' } else { 'readable' }
+    $reliabilityStatus = if ($SkipReliability) { 'not-observed' } elseif ($script:LVReliabilityBudgetStop) { $script:LVReliabilityBudgetStop } elseif (-not $script:LVReliabilityAvailable) { 'unreadable' } elseif (@($reliabilityRecords).Count -eq 0) { 'empty' } else { 'readable' }
     $coverageSources.Add((New-LVCoverageRecord -Source 'reliability' -Kind 'provider' -Name 'Reliability Monitor' -Status $reliabilityStatus `
         -Reason $(if ($SkipReliability) { 'Skipped by request.' } elseif (-not $script:LVReliabilityAvailable) { [string]$script:LVReliabilitySkipReason } elseif (@($reliabilityRecords).Count -eq 0) { 'No reliability records were observed in the requested window.' } else { $null }) `
-        -WindowStart $cutoff -WindowEnd $started -ObservedRecords @($reliabilityRecords).Count -Origin 'live')) | Out-Null
+        -WindowStart $cutoff -WindowEnd $started -ObservedRecords @($reliabilityRecords).Count -CollectionBudget $collectionBudget -Origin 'live')) | Out-Null
     $coverageSources.Add((New-LVCoverageRecord -Source 'crash' -Kind 'directory' -Name 'WER and minidump inventory' `
-        -Status $(if ($SkipTextLogs) { 'not-observed' } elseif ($crash.Count -eq 0) { 'empty' } else { 'readable' }) `
-        -Reason $(if ($SkipTextLogs) { 'Skipped by request.' } elseif ($crash.Count -eq 0) { 'No readable crash artifact was observed in the inventory window.' } else { $null }) `
-        -WindowStart $started.AddDays(-1 * [Math]::Max($DaysBack, 90)) -WindowEnd $started -ObservedRecords $crash.Count -Origin 'live')) | Out-Null
+        -Status $(if ($SkipTextLogs) { 'not-observed' } elseif ($crashBudgetStop) { $crashBudgetStop } elseif ($crash.Count -eq 0) { 'empty' } else { 'readable' }) `
+        -Reason $(if ($SkipTextLogs) { 'Skipped by request.' } elseif ($crashBudgetStop) { ('The shared collection {0} budget stopped the crash inventory.' -f $crashBudgetStop) } elseif ($crash.Count -eq 0) { 'No readable crash artifact was observed in the inventory window.' } else { $null }) `
+        -WindowStart $started.AddDays(-1 * [Math]::Max($DaysBack, 90)) -WindowEnd $started -ObservedRecords $crash.Count -CollectionBudget $collectionBudget -Origin 'live')) | Out-Null
 
     $healthProfiles = @()
     try {
@@ -556,7 +574,11 @@ function Invoke-LogVerdictScan {
             explainUnknown = [bool]$ExplainUnknown
             promoteToRule = [bool]$PromoteToRule
             evidencePath = $false
+            maxCollectionBytes = $MaxCollectionBytes
+            maxCollectionRecords = $MaxCollectionRecords
+            maxCollectionSeconds = $MaxCollectionSeconds
         }
+        CollectionBudget = Get-LVCollectionBudgetSnapshot -Budget $collectionBudget
         CaseProfile    = $caseProfile
         ModelExplanationsEnabled = $modelRequested
         ModelExplanationCount = @($findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation }).Count

@@ -125,7 +125,8 @@ function Get-LVTextLogRecord {
         [int]$MaxMatchesPerFile = 4000,
         # Injection seam: lets the suite exercise the real parser against fixture files
         # instead of whatever happens to be in C:\Windows on the machine running tests.
-        [object[]]$Target = $script:LVTextLogTarget
+        [object[]]$Target = $script:LVTextLogTarget,
+        [AllowNull()]$CollectionBudget
     )
 
     $cutoff = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
@@ -135,23 +136,31 @@ function Get-LVTextLogRecord {
 
     foreach ($target in $Target) {
         $path = $target.Path
+        $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+        if ($budgetStop) {
+            $coverage.Add((New-LVCoverageRecord -Source 'textlog' -Kind 'file' -Name $target.Name -Status $budgetStop `
+                -Reason ('The shared collection {0} budget stopped this file before it was read.' -f $budgetStop) `
+                -Path $path -WindowStart $cutoff -WindowEnd (Get-Date) -Cap $MaxMatchesPerFile `
+                -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
+            continue
+        }
         if (-not (Test-Path -LiteralPath $path)) {
             Write-LVLog -Level info -Message ("{0}: not present on this machine" -f $target.Name)
             $coverage.Add((New-LVCoverageRecord -Source 'textlog' -Kind 'file' -Name $target.Name -Status 'not-observed' `
-                -Reason 'The file is not present on this machine.' -Path $path -WindowStart $cutoff -WindowEnd $windowEnd -Cap $MaxMatchesPerFile -Origin 'live')) | Out-Null
+                -Reason 'The file is not present on this machine.' -Path $path -WindowStart $cutoff -WindowEnd $windowEnd -Cap $MaxMatchesPerFile -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
             continue
         }
 
         $file = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
         if ($null -eq $file) {
             $coverage.Add((New-LVCoverageRecord -Source 'textlog' -Kind 'file' -Name $target.Name -Status 'unreadable' `
-                -Reason 'The file could not be opened for metadata.' -Path $path -WindowStart $cutoff -WindowEnd $windowEnd -Cap $MaxMatchesPerFile -Origin 'live')) | Out-Null
+                -Reason 'The file could not be opened for metadata.' -Path $path -WindowStart $cutoff -WindowEnd $windowEnd -Cap $MaxMatchesPerFile -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
             continue
         }
         if ($file.LastWriteTime -lt $cutoff) {
             Write-LVLog -Level info -Message ("{0}: last written {1:yyyy-MM-dd}, outside the {2}-day window" -f $target.Name, $file.LastWriteTime, $DaysBack)
             $coverage.Add((New-LVCoverageRecord -Source 'textlog' -Kind 'file' -Name $target.Name -Status 'not-observed' `
-                -Reason ('The file was last written {0:yyyy-MM-dd}, outside the requested window.' -f $file.LastWriteTime) -Path $path -WindowStart $cutoff -WindowEnd $windowEnd -Cap $MaxMatchesPerFile -SizeBytes $file.Length -Origin 'live')) | Out-Null
+                -Reason ('The file was last written {0:yyyy-MM-dd}, outside the requested window.' -f $file.LastWriteTime) -Path $path -WindowStart $cutoff -WindowEnd $windowEnd -Cap $MaxMatchesPerFile -SizeBytes $file.Length -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
             continue
         }
 
@@ -160,6 +169,7 @@ function Get-LVTextLogRecord {
         $undated = 0
         $sectionTime = $null
         $reader = $null
+        $stream = $null
         $parserError = $null
 
         try {
@@ -169,8 +179,20 @@ function Get-LVTextLogRecord {
             $sectionRegex = $null
             if ($target.SectionTimePattern) { $sectionRegex = [regex]$target.SectionTimePattern }
 
-            while ($null -ne ($line = $reader.ReadLine())) {
+            while ($true) {
                 if ($matched -ge $MaxMatchesPerFile) { break }
+                $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+                if ($budgetStop) { break }
+
+                $positionBefore = $stream.Position
+                $line = $reader.ReadLine()
+                if ($null -eq $line) { break }
+                $bytesRead = [Math]::Max(0, [int64]$stream.Position - [int64]$positionBefore)
+                if ($CollectionBudget) {
+                    Add-LVCollectionBudgetUsage -Budget $CollectionBudget -Bytes $bytesRead
+                    $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+                    if ($budgetStop) { break }
+                }
 
                 # Carry-forward timestamps: SetupAPI error lines are undated, and take
                 # their time from the most recent section header above them.
@@ -219,7 +241,7 @@ function Get-LVTextLogRecord {
             Write-LVLog -Level warn -Message ("{0}: unreadable ({1})" -f $target.Name, $_.Exception.Message)
             $coverage.Add((New-LVCoverageRecord -Source 'textlog' -Kind 'file' -Name $target.Name -Status 'unreadable' `
                 -Reason 'The text-log parser failed before the file was fully observed.' -Path $path -WindowStart $cutoff -WindowEnd $windowEnd `
-                -Cap $MaxMatchesPerFile -ParserError $parserError -SizeBytes $file.Length -Origin 'live')) | Out-Null
+                -Cap $MaxMatchesPerFile -ParserError $parserError -SizeBytes $file.Length -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
             continue
         } finally {
             if ($reader) { $reader.Dispose() }
@@ -234,8 +256,11 @@ function Get-LVTextLogRecord {
             if ($undated -gt 0)    { $detail += (' ({0} undated line(s))' -f $undated) }
             Write-LVLog -Level ok -Message ("{0}: {1} error line(s){2}" -f $target.Name, $matched, $detail)
         }
-        $status = if ($matched -ge $MaxMatchesPerFile) { 'truncated' } elseif ($matched -gt 0) { 'readable' } else { 'empty' }
-        $reason = if ($status -eq 'truncated') {
+        if (-not $budgetStop) { $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget }
+        $status = if ($budgetStop) { $budgetStop } elseif ($matched -ge $MaxMatchesPerFile) { 'truncated' } elseif ($matched -gt 0) { 'readable' } else { 'empty' }
+        $reason = if ($budgetStop) {
+            ('The shared collection {0} budget stopped this file; observed lines are a lower bound.' -f $budgetStop)
+        } elseif ($status -eq 'truncated') {
             ('The per-file match cap of {0} was reached; observed lines are a lower bound.' -f $MaxMatchesPerFile)
         } elseif ($matched -eq 0 -and $skippedOld -gt 0) {
             ('No matching error line was observed in the requested window; {0} older line(s) were skipped.' -f $skippedOld)
@@ -246,7 +271,8 @@ function Get-LVTextLogRecord {
         } else { $null }
         $coverage.Add((New-LVCoverageRecord -Source 'textlog' -Kind 'file' -Name $target.Name -Status $status `
             -Reason $reason -Path $path -WindowStart $cutoff -WindowEnd $windowEnd -Cap $MaxMatchesPerFile `
-            -ObservedRecords $matched -SkippedRecords $skippedOld -SizeBytes $file.Length -ParserError $parserError -Origin 'live')) | Out-Null
+            -ObservedRecords $matched -SkippedRecords $skippedOld -SizeBytes $file.Length -ParserError $parserError `
+            -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
     }
 
     $script:LVTextLogCoverage = @($coverage.ToArray())

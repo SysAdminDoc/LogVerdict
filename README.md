@@ -100,6 +100,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Large finding captures | Virtualized, recycling findings lists with indexed lazy detail resolution | GUI |
 | GUI accessibility and scaling smoke | STA UI Automation names, keyboard targets, normal/high-contrast resources, long/error text, and 125% layout checks | `Tools/Test-LogVerdictGui.ps1` |
 | Opt-in diagnostic performance telemetry | Content-free source status, bounded counts, caps, and elapsed timing in JSON, text, HTML, CSV, and standard exports | `-PerformanceTelemetry` |
+| Shared collection safety budgets | One byte, normalized-record, and elapsed-time allowance across live/offline collectors; incomplete sources remain `truncated` or `timeout` | `-MaxCollectionBytes`, `-MaxCollectionRecords`, `-MaxCollectionSeconds` |
 | Output format selection | The window always saves Text, JSON, CSV, and HTML together | `-Format` (`Text`, `Json`, `Csv`, `Html`, or `All`) |
 | Console lifecycle | Not applicable to a persistent window | `-NoReport`, `-Pause`, `-NoPause` |
 
@@ -148,7 +149,7 @@ remain in the text, JSON, and HTML reports. The row shape is deliberately suitab
 
 The module also has an explicit bounded live-tail path. `Watch-LogVerdict -Channel System -DurationSeconds 60 -BookmarkPath .\system-bookmark.json` reads only events newer than each channel's saved `RecordId`/timestamp,
 writes the bookmark atomically, and returns normalized records with per-channel reconnect counts, possible dropped
-record gaps, and event latency. `-MaxEvents`, `-IdleTimeoutSeconds`, and `-PollMilliseconds` keep the watch bounded;
+record gaps, and event latency. `-MaxEvents`, `-MaxBytes`, `-IdleTimeoutSeconds`, and `-PollMilliseconds` keep the watch bounded;
 it stops cleanly when a limit is reached or the caller interrupts it. `-IncludeWEFHealth` adds local `wecutil`
 subscription configuration and runtime state, including read-existing, heartbeat, bookmark, reconnect/error, and
 drop fields. These are collection-health facts, never malicious verdicts, and no fleet agent or remote connection is
@@ -244,7 +245,7 @@ powershell -ExecutionPolicy Bypass -File .\Invoke-LogVerdict.ps1
 
 Reports land in a timestamped folder on the Desktop by default (safe even for right-click-elevated runs that start in System32). Override with `-OutputDir`.
 
-Offline analysis never reads the reviewing PC. It inherits the source report's look-back window unless `-DaysBack` is supplied, reopens exported `.evtx` members when present, and uses the captured report summaries for text logs and Reliability Monitor, whose full stores are deliberately not copied into a small evidence bundle. A direct `.evtx` path or directory is accepted as the offline source too. The source is bounded to 64 files, 512 MiB per file, 2 GiB total, and 20,000 events per file; parser time is measured against a 120-second per-file limit. Every admitted or skipped file carries size, status, parse time, reason, and a streaming SHA-256 in the coverage output and evidence manifest. Redacted bundles contain no raw `.evtx`, so they are re-evaluated from report summaries and carry a coverage note saying so.
+Offline analysis never reads the reviewing PC. It inherits the source report's look-back window unless `-DaysBack` is supplied, reopens exported `.evtx` members when present, and uses the captured report summaries for text logs and Reliability Monitor, whose full stores are deliberately not copied into a small evidence bundle. A direct `.evtx` path or directory is accepted as the offline source too. The source is bounded to 64 files, 512 MiB per file, 2 GiB total, and 20,000 events per file; parser time is measured against a 120-second per-file limit. Every admitted or skipped file carries size, status, parse time, reason, and a streaming SHA-256 in the coverage output and evidence manifest. Live and offline runs also have a shared default budget of 512 MiB, 100,000 normalized records, and 600 seconds; override it with the `MaxCollection*` parameters when a larger bounded capture is intentional. Redacted bundles contain no raw `.evtx`, so they are re-evaluated from report summaries and carry a coverage note saying so.
 
 `-ExplainUnknown`, or the stronger `-PromoteToRule` switch that implies it, is the only path that contacts a model endpoint. LogVerdict accepts only plain HTTP on `localhost`, `127.0.0.1`, or `::1`, sends one reduced unknown signature at a time to Ollama's `/api/generate`, and requests structured output with no actions or fixes. Known signatures are never sent. The candidate appears in its own **MODEL-GENERATED CANDIDATE - NOT A CURATED RULING** block; a connection failure, malformed response, unexpected field, or remediation language leaves the deterministic scan intact and produces no candidate.
 

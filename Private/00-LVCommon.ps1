@@ -34,6 +34,7 @@ $script:LVCorrelationType = @('temporal', 'temporal_ordered', 'event_count')
 # reported as "clean".
 $script:LVReliabilityAvailable = $true
 $script:LVReliabilitySkipReason = $null
+$script:LVReliabilityBudgetStop = $null
 
 # Rule lifecycle, aligned with the Sigma specification's 'status' vocabulary.
 # Only these statuses are ever applied to a signature; deprecated and unsupported
@@ -65,6 +66,79 @@ $script:LVLogLines = New-Object System.Collections.Generic.List[string]
 # Declared here so the variable always exists and Write-LVLog never has to test for
 # its absence.
 $script:LVLogSink = $null
+
+function New-LVCollectionBudget {
+    <#
+        .SYNOPSIS
+        Create the shared safety budget for one collection run.
+
+        .DESCRIPTION
+        Collectors mutate this small state object as they read records. A source may
+        still have its own narrower cap, but no source can consume more than the
+        run-wide byte, record, or elapsed-time allowance. The limits are evidence
+        about collection quality, never a reason to call an incomplete source clean.
+    #>
+    [CmdletBinding()]
+    param(
+        [ValidateRange(1, 8589934592)][long]$MaxBytes = 536870912,
+        [ValidateRange(1, 10000000)][int]$MaxRecords = 100000,
+        [ValidateRange(1, 86400)][int]$MaxSeconds = 600
+    )
+
+    return [pscustomobject][ordered]@{
+        MaxBytes     = [int64]$MaxBytes
+        MaxRecords   = [int64]$MaxRecords
+        MaxSeconds   = [int]$MaxSeconds
+        StartedUtc   = [datetime]::UtcNow
+        BytesRead    = [int64]0
+        RecordsRead  = [int64]0
+    }
+}
+
+function Get-LVCollectionBudgetStopReason {
+    [CmdletBinding()]
+    param([AllowNull()]$Budget)
+
+    if ($null -eq $Budget) { return $null }
+    if (([datetime]::UtcNow - $Budget.StartedUtc).TotalSeconds -ge $Budget.MaxSeconds) { return 'timeout' }
+    if ($Budget.BytesRead -ge $Budget.MaxBytes -or $Budget.RecordsRead -ge $Budget.MaxRecords) { return 'truncated' }
+    return $null
+}
+
+function Test-LVCollectionBudget {
+    [CmdletBinding()]
+    param([AllowNull()]$Budget)
+
+    return ($null -ne (Get-LVCollectionBudgetStopReason -Budget $Budget))
+}
+
+function Add-LVCollectionBudgetUsage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Budget,
+        [int64]$Bytes = 0,
+        [int64]$Records = 0
+    )
+
+    if ($Bytes -gt 0) { $Budget.BytesRead = [int64]$Budget.BytesRead + $Bytes }
+    if ($Records -gt 0) { $Budget.RecordsRead = [int64]$Budget.RecordsRead + $Records }
+}
+
+function Get-LVCollectionBudgetSnapshot {
+    [CmdletBinding()]
+    param([AllowNull()]$Budget)
+
+    if ($null -eq $Budget) { return $null }
+    return [pscustomobject][ordered]@{
+        MaxBytes        = [int64]$Budget.MaxBytes
+        MaxRecords      = [int64]$Budget.MaxRecords
+        MaxSeconds      = [int]$Budget.MaxSeconds
+        BytesRead       = [int64]$Budget.BytesRead
+        RecordsRead     = [int64]$Budget.RecordsRead
+        ElapsedSeconds  = [math]::Round(([datetime]::UtcNow - $Budget.StartedUtc).TotalSeconds, 3)
+        StopReason      = Get-LVCollectionBudgetStopReason -Budget $Budget
+    }
+}
 
 function Write-LVLog {
     <#
@@ -208,8 +282,18 @@ function New-LVCoverageRecord {
         [AllowNull()][Nullable[int64]]$SizeBytes,
         [AllowNull()][Nullable[int64]]$ParseMilliseconds,
         [AllowNull()][string]$SHA256,
-        [AllowNull()][string]$Origin
+        [AllowNull()][string]$Origin,
+        [AllowNull()]$CollectionBudget
     )
+
+    $budgetSummary = $null
+    if ($CollectionBudget) {
+        $budgetSummary = [pscustomobject][ordered]@{
+            MaxBytes   = [int64]$CollectionBudget.MaxBytes
+            MaxRecords = [int64]$CollectionBudget.MaxRecords
+            MaxSeconds = [int]$CollectionBudget.MaxSeconds
+        }
+    }
 
     return [pscustomobject][ordered]@{
         Source            = $Source
@@ -229,6 +313,7 @@ function New-LVCoverageRecord {
         ParseMilliseconds = $ParseMilliseconds
         SHA256            = $SHA256
         Origin            = $Origin
+        CollectionBudget  = $budgetSummary
     }
 }
 

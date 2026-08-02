@@ -31,11 +31,13 @@ function Get-LVReliabilityRecord {
     [CmdletBinding()]
     param(
         [int]$DaysBack = 30,
-        [AllowEmptyCollection()][object[]]$ExistingRecord = @()
+        [AllowEmptyCollection()][object[]]$ExistingRecord = @(),
+        [AllowNull()]$CollectionBudget
     )
 
     $cutoff = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
     $records = New-Object System.Collections.Generic.List[object]
+    $script:LVReliabilityBudgetStop = $null
 
     $seen = @{}
     foreach ($r in $ExistingRecord) {
@@ -45,7 +47,15 @@ function Get-LVReliabilityRecord {
 
     $raw = $null
     try {
-        $raw = @(Get-CimInstance -ClassName Win32_ReliabilityRecords -ErrorAction Stop)
+        $readLimit = 100000
+        if ($CollectionBudget) {
+            $readLimit = [Math]::Min([int64]$readLimit, [int64]$CollectionBudget.MaxRecords - [int64]$CollectionBudget.RecordsRead)
+        }
+        if ($readLimit -lt 1) {
+            $script:LVReliabilityBudgetStop = 'truncated'
+            return ConvertTo-LVArrayOutput -Value @()
+        }
+        $raw = @(Get-CimInstance -ClassName Win32_ReliabilityRecords -ErrorAction Stop | Select-Object -First $readLimit)
     } catch {
         # Absence is a coverage gap, not a clean bill of health. Group Policy can
         # disable the provider outright and Server disables it by default.
@@ -62,6 +72,8 @@ function Get-LVReliabilityRecord {
     $tooOld = 0
 
     foreach ($r in $raw) {
+        $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+        if ($budgetStop) { $script:LVReliabilityBudgetStop = $budgetStop; break }
         $when = $r.TimeGenerated
         if ($null -ne $when -and $when -lt $cutoff) { $tooOld++; continue }
 
@@ -71,6 +83,13 @@ function Get-LVReliabilityRecord {
         if ($null -ne $r.EventIdentifier) { $id = [int]$r.EventIdentifier }
 
         if ($seen.ContainsKey(('{0}/{1}' -f $provider, $id))) { $duplicates++; continue }
+
+        $estimatedBytes = 256
+        if ($r.Message) { $estimatedBytes += [Text.Encoding]::UTF8.GetByteCount([string]$r.Message) }
+        if ($CollectionBudget -and (([int64]$CollectionBudget.BytesRead + $estimatedBytes) -gt [int64]$CollectionBudget.MaxBytes)) {
+            $script:LVReliabilityBudgetStop = 'truncated'
+            break
+        }
 
         $records.Add([pscustomobject]@{
             Source      = 'reliability'
@@ -90,6 +109,11 @@ function Get-LVReliabilityRecord {
             Hint        = "Microsoft's own record of what failed and what was installed."
             Message     = [string]$r.Message
         }) | Out-Null
+        if ($CollectionBudget) { Add-LVCollectionBudgetUsage -Budget $CollectionBudget -Bytes $estimatedBytes -Records 1 }
+    }
+
+    if (-not $script:LVReliabilityBudgetStop) {
+        $script:LVReliabilityBudgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
     }
 
     $detail = ''
