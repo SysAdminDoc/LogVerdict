@@ -12,12 +12,15 @@ The script never downloads or publishes anything.
 ##>
 [CmdletBinding()]
 param(
-    [string]$ManifestDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'Packaging'),
+    [string]$ManifestDirectory,
     [string]$AssetDirectory
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
+if ([string]::IsNullOrWhiteSpace($ManifestDirectory)) {
+    $ManifestDirectory = Join-Path $repoRoot 'Packaging'
+}
 $version = (& (Join-Path $PSScriptRoot 'Get-LogVerdictVersion.ps1')).Trim()
 
 if ($PSVersionTable.PSVersion -lt [version]'5.1') {

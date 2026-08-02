@@ -6,6 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## Unreleased
 
+- Restored Windows PowerShell 5.1 compatibility for manifest validation and test hashing by
+  using `Test-ModuleManifest` and a runtime-neutral SHA-256 helper.
+
 ## [0.8.1] - 2026-08-02
 
 - Bound all scan entry points to a 1-3650 day look-back window, and made named channels

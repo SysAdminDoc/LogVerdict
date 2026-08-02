@@ -82,10 +82,10 @@ if (-not (Get-Module -ListAvailable ps2exe)) {
     throw 'PS2EXE is not installed. Run: Install-Module ps2exe -Scope CurrentUser'
 }
 
-$manifest = Import-PowerShellDataFile -Path (Join-Path $repoRoot 'LogVerdict.psd1')
+$manifest = Test-ModuleManifest -Path (Join-Path $repoRoot 'LogVerdict.psd1')
 $version = (& (Join-Path $repoRoot 'Tools\Get-LogVerdictVersion.ps1')).Trim()
-if ($manifest.ModuleVersion -ne $version) {
-    throw ("LogVerdict.psd1 declares v{0}, but VERSION declares v{1}." -f $manifest.ModuleVersion, $version)
+if ($manifest.Version.ToString() -ne $version) {
+    throw ("LogVerdict.psd1 declares v{0}, but VERSION declares v{1}." -f $manifest.Version, $version)
 }
 Write-Ok ("Building LogVerdict v{0}" -f $version)
 

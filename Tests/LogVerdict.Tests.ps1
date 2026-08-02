@@ -3,6 +3,17 @@
 BeforeAll {
     $script:ModulePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'LogVerdict.psd1'
     Import-Module $script:ModulePath -Force
+
+    function Get-LVTestSha256 {
+        param([Parameter(Mandatory = $true)][string]$Path)
+
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($Path)))).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $sha.Dispose()
+        }
+    }
 }
 Describe 'Case profiles and responder handoffs' {
     BeforeAll {
@@ -135,16 +146,16 @@ Describe 'Module surface' {
         # installed module, which is the sort of gap that only shows up on someone
         # else's machine.
         $root = Split-Path $PSScriptRoot -Parent
-        $manifest = Import-PowerShellDataFile -Path (Join-Path $root 'LogVerdict.psd1')
+        $manifest = Test-ModuleManifest -Path (Join-Path $root 'LogVerdict.psd1')
         $exported = (Get-Module LogVerdict).ExportedFunctions.Keys | Sort-Object
-        ($manifest.FunctionsToExport | Sort-Object) | Should -Be $exported
+        ($manifest.ExportedFunctions.Keys | Sort-Object) | Should -Be $exported
     }
 
     It 'keeps the module, badge, and package metadata on the version source' {
         $root = Split-Path $PSScriptRoot -Parent
         $version = (& (Join-Path $root 'Tools\Get-LogVerdictVersion.ps1')).Trim()
-        $manifest = Import-PowerShellDataFile -Path (Join-Path $root 'LogVerdict.psd1')
-        $manifest.ModuleVersion | Should -BeExactly $version
+        $manifest = Test-ModuleManifest -Path (Join-Path $root 'LogVerdict.psd1')
+        $manifest.Version.ToString() | Should -BeExactly $version
         (Get-Content -LiteralPath (Join-Path $root 'README.md') -Raw) | Should -Match ("shields\.io/badge/version-{0}-blue" -f [regex]::Escape($version))
     }
 }
@@ -729,7 +740,7 @@ Describe 'Opt-in verdict database updates' {
         $db = Get-LogVerdictDatabase
         $db.updated = '2026-08-02'
         ($db | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $source -Encoding UTF8
-        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        $hash = Get-LVTestSha256 -Path $source
 
         $result = Update-LogVerdictDatabase -SourcePath $source -ExpectedSha256 $hash -TargetPath $target
         $result.Action | Should -BeExactly 'update'
@@ -745,12 +756,12 @@ Describe 'Opt-in verdict database updates' {
         $db = Get-LogVerdictDatabase
         $db.updated = '2026-08-03'
         ($db | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $source -Encoding UTF8
-        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        $hash = Get-LVTestSha256 -Path $source
         Update-LogVerdictDatabase -SourcePath $source -ExpectedSha256 $hash -TargetPath $target | Out-Null
 
         $db.updated = '2026-08-04'
         ($db | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $source -Encoding UTF8
-        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        $hash = Get-LVTestSha256 -Path $source
         Update-LogVerdictDatabase -SourcePath $source -ExpectedSha256 $hash -TargetPath $target | Out-Null
         (Get-Content -LiteralPath ($target + '.previous.json') -Raw | ConvertFrom-Json).updated | Should -BeExactly '2026-08-03'
 
