@@ -12,6 +12,7 @@ Describe 'Module surface' {
             'Compare-LogVerdictScan',
             'Export-LogVerdictReport',
             'Get-LogVerdictDatabase',
+            'Get-LogVerdictErrorCatalog',
             'Invoke-LogVerdictScan',
             'Show-LogVerdictGui',
             'Show-LogVerdictReport',
@@ -246,6 +247,66 @@ Describe 'Verdict database' {
     "title": "t", "plain": "p", "why": "w", "action": "a", "confidence": "high" } ] }
 '@ | Set-Content -LiteralPath $bad -Encoding UTF8
         Test-LogVerdictDatabase -Path $bad -Quiet | Should -BeFalse
+    }
+}
+
+Describe 'Bundled Microsoft error catalog' {
+    It 'ships the current catalog families with provenance' {
+        $catalog = Get-LogVerdictErrorCatalog
+        @($catalog).Count | Should -BeGreaterThan 3000
+        @($catalog | Where-Object kind -eq 'win32').Count | Should -BeGreaterOrEqual 2745
+        @($catalog | Where-Object kind -eq 'bugcheck').Count | Should -BeGreaterOrEqual 378
+        @($catalog | Where-Object kind -eq 'hresult').Count | Should -BeGreaterOrEqual 13
+        @($catalog.id | Select-Object -Unique).Count | Should -Be @($catalog).Count
+        foreach ($entry in @($catalog | Select-Object -First 20)) {
+            $entry.reference | Should -Match '^https://learn\.microsoft\.com/'
+            $entry.description | Should -Not -BeNullOrEmpty
+            $entry.explanation | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'resolves common Win32 and HRESULT lookups locally' {
+        $win32 = @(Get-LogVerdictErrorCatalog -Kind win32 -Hex '0x5')
+        $win32.Count | Should -Be 1
+        $win32[0].name | Should -BeExactly 'ERROR_ACCESS_DENIED'
+        $hresult = @(Get-LogVerdictErrorCatalog -Kind hresult -Hex '0x80070005')
+        $hresult.Count | Should -Be 1
+        $hresult[0].name | Should -BeExactly 'E_ACCESSDENIED'
+        $bugcheck = @(Get-LogVerdictErrorCatalog -Kind bugcheck -Hex '0x124')
+        $bugcheck.Count | Should -Be 1
+        $bugcheck[0].name | Should -BeExactly 'WHEA_UNCORRECTABLE_ERROR'
+    }
+
+    It 'enriches unknown signatures without changing their unknown verdict' {
+        InModuleScope LogVerdict {
+            $hresultSignature = [pscustomobject]@{
+                Key='CBS/unknown'; Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0
+                SampleMessage='Error code: 0x80070005'; Count=1; PerDay=0.03
+            }
+            $resolved = @(Resolve-LVVerdict -Signature @($hresultSignature) -Database ([pscustomobject]@{ rules=@() }))
+            $resolved[0].Verdict | Should -BeExactly 'unknown'
+            $resolved[0].ErrorName | Should -BeExactly 'E_ACCESSDENIED'
+            $resolved[0].ErrorCode | Should -BeExactly '0X80070005'
+            $resolved[0].Plain | Should -Match 'General access denied error'
+            $resolved[0].Action | Should -Match 'provider and operation'
+
+            $bugcheckSignature = [pscustomobject]@{
+                Key='Minidump/0x00000124'; Source='textlog'; Channel='Minidump'; Provider='Crash artifact'; Id=0
+                SampleMessage='Kernel minidump bug check 0x00000124; parameters 0x0'; Count=1; PerDay=0.03
+            }
+            $bugcheck = @(Resolve-LVVerdict -Signature @($bugcheckSignature) -Database ([pscustomobject]@{ rules=@() }))
+            $bugcheck[0].ErrorName | Should -BeExactly 'WHEA_UNCORRECTABLE_ERROR'
+            $bugcheck[0].Action | Should -Match 'WinDbg'
+        }
+    }
+
+    It 'keeps the default scan path free of network calls' {
+        $module = Get-Module LogVerdict
+        $loader = (& $module { (Get-Command Get-LVErrorCatalog).ScriptBlock.ToString() })
+        $resolver = (& $module { (Get-Command Resolve-LVVerdict).ScriptBlock.ToString() })
+        $loader + $resolver | Should -Not -Match 'Invoke-(WebRequest|RestMethod)'
+        $catalogPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data/error-codes.json'
+        ([IO.File]::ReadAllBytes($catalogPath) | Where-Object { $_ -gt 127 }).Count | Should -Be 0
     }
 }
 

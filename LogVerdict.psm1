@@ -23,6 +23,7 @@ Export-ModuleMember -Function @(
     'Compare-LogVerdictScan',
     'Invoke-LogVerdictScan',
     'Get-LogVerdictDatabase',
+    'Get-LogVerdictErrorCatalog',
     'Test-LogVerdictDatabase',
     'Export-LogVerdictReport',
     'Show-LogVerdictReport',

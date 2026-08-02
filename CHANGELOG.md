@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **Bundled Microsoft error knowledge.** The application now carries 2,745 WinError.h statuses, 378 kernel bug-check codes, and 13 common HRESULTs with official names, descriptions, explanations, and links. Unknown signatures are enriched locally while remaining unknown until provider-specific evidence supports a reviewed rule; `Tools\Import-MicrosoftErrorCatalog.ps1` refreshes the catalog from current Microsoft Learn tables.
 - **Existing SetupDiag installations now deepen Panther analysis.** LogVerdict discovers an already-present Microsoft SetupDiag, runs it offline with `/NoTel` against the newest Panther log set, and merges its structured profile, failure details, and remediation as an attributed finding. Execution is bounded and temporary; no tool is downloaded, `/AddReg` is never used, and absence, stale logs, success, required elevation, launch failure, timeout, or invalid output all fall back explicitly to the built-in Panther collector.
 - Reproducible Scoop and winget manifests for the immutable v0.7.0 release. `Tools\New-PackageManifests.ps1` downloads an existing release, hashes both unsigned executables, emits a Scoop package with the console shim and GUI shortcut, and emits an x64 winget portable package for the console tool. Offline asset mode keeps generation directly testable without network access.
 

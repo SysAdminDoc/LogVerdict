@@ -185,6 +185,21 @@ function Resolve-LVVerdict {
             $sig | Add-Member -NotePropertyName 'Status'     -NotePropertyValue $null -Force
             $sig | Add-Member -NotePropertyName 'Verified'   -NotePropertyValue $null -Force
             $sig | Add-Member -NotePropertyName 'FalsePositives' -NotePropertyValue @() -Force
+            $catalogMatch = Get-LVErrorCatalogMatch -Signature $sig
+            Add-LVErrorCatalogContext -Signature $sig -Match $catalogMatch
+            if ($catalogMatch -and $catalogMatch.Entry) {
+                $entry = $catalogMatch.Entry
+                $sig.Title = ('Microsoft catalog: {0} ({1})' -f $entry.name, $catalogMatch.RawCode)
+                $sig.Plain = '{0} {1}' -f $entry.description, $entry.explanation
+                $sig.Why = 'The code has an official Microsoft reference, but a code-level description is not the same as a root-cause diagnosis. Provider and operation context still decide what happened.'
+                if ($entry.kind -eq 'bugcheck') {
+                    $sig.Action = 'Preserve the dump and inspect its parameters with WinDbg; do not assign a responsible driver from the stop code alone.'
+                } else {
+                    $sig.Action = 'Read the provider and operation around this code, then follow the Microsoft reference before choosing a remediation.'
+                }
+                $sig.Reference = $entry.reference
+                $sig.References = @($entry.reference)
+            }
             $results.Add($sig) | Out-Null
             continue
         }
@@ -223,6 +238,7 @@ function Resolve-LVVerdict {
         $sig | Add-Member -NotePropertyName 'Status'     -NotePropertyValue $hit.status -Force
         $sig | Add-Member -NotePropertyName 'Verified'   -NotePropertyValue $hit.verified -Force
         $sig | Add-Member -NotePropertyName 'FalsePositives' -NotePropertyValue @($hit.falsepositives) -Force
+        Add-LVErrorCatalogContext -Signature $sig -Match (Get-LVErrorCatalogMatch -Signature $sig)
         $results.Add($sig) | Out-Null
     }
 
