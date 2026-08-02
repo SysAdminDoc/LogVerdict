@@ -93,12 +93,32 @@ function Get-LVChannelStatus {
                 -PercentComplete ([Math]::Min(100, [int](100 * $done / $total)))
         }
         $entry = [pscustomobject]@{
-            Channel = $ch
-            Access  = 'readable'
-            Oldest  = $null
-            Reason  = $null
+            Channel            = $ch
+            Access             = 'readable'
+            Oldest             = $null
+            RecordCount        = $null
+            MaximumSizeInBytes = $null
+            LogMode            = $null
+            IsEnabled          = $null
+            LogFilePath        = $null
+            Reason             = $null
         }
         try {
+            try {
+                $configuration = @(Get-WinEvent -ListLog $ch -ErrorAction Stop | Select-Object -First 1)
+                if ($configuration.Count -gt 0) {
+                    foreach ($property in @('RecordCount', 'MaximumSizeInBytes', 'LogMode', 'IsEnabled', 'LogFilePath')) {
+                        if ($configuration[0].PSObject.Properties[$property]) {
+                            $entry.$property = $configuration[0].$property
+                        }
+                    }
+                }
+            } catch {
+                # A caller may be allowed to read event records while the metadata
+                # object itself is unavailable. Preserve the event access result and
+                # let the health profile explain the missing retention metadata.
+                $entry.Reason = $_.Exception.Message
+            }
             $oldest = Get-WinEvent -LogName $ch -Oldest -MaxEvents 1 -ErrorAction Stop
             if ($oldest) { $entry.Oldest = $oldest.TimeCreated }
         } catch {
@@ -269,7 +289,11 @@ function Get-LVEventRecord {
                 Source       = 'event'
                 Channel      = $ch
                 Provider     = $e.ProviderName
+                ProviderId   = if ($e.PSObject.Properties['ProviderId']) { [string]$e.ProviderId } else { $null }
                 Id           = [int]$e.Id
+                Version      = if ($e.PSObject.Properties['Version'] -and $null -ne $e.Version) { [int]$e.Version } else { $null }
+                Task         = if ($e.PSObject.Properties['Task']) { $e.Task } else { $null }
+                Opcode       = if ($e.PSObject.Properties['Opcode']) { $e.Opcode } else { $null }
                 Level        = [int]$e.Level
                 LevelName    = $e.LevelDisplayName
                 TimeCreated  = $e.TimeCreated

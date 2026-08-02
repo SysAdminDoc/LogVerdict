@@ -177,6 +177,16 @@ function Format-LVEvidenceManifest {
         }
         Add-LVLine $sb
     }
+    if ($Result.PSObject.Properties['HealthProfiles'] -and @($Result.HealthProfiles).Count -gt 0) {
+        Add-LVLine $sb 'CONFIGURATION HEALTH PROFILES'
+        foreach ($health in @($Result.HealthProfiles | Where-Object { $_ })) {
+            $detail = '{0}/{1} {2}: {3}' -f $health.Source, $health.Profile, $health.Name, $health.Status
+            if ($health.ObservedConfiguration) { $detail += ('; observed: ' + $health.ObservedConfiguration) }
+            if ($health.Reason) { $detail += ('; reason: ' + $health.Reason) }
+            Add-LVLine $sb ('  - ' + $detail)
+        }
+        Add-LVLine $sb
+    }
 
     Add-LVLine $sb 'WHAT IS DELIBERATELY NOT HERE'
     if ($Redact) {

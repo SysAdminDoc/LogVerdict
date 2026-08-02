@@ -331,6 +331,18 @@ function Invoke-LogVerdictScan {
         -Reason $(if ($SkipTextLogs) { 'Skipped by request.' } elseif ($crash.Count -eq 0) { 'No readable crash artifact was observed in the inventory window.' } else { $null }) `
         -WindowStart $started.AddDays(-1 * [Math]::Max($DaysBack, 90)) -WindowEnd $started -ObservedRecords $crash.Count -Origin 'live')) | Out-Null
 
+    $healthProfiles = @()
+    try {
+        $healthProfiles = @(Get-LVHealthProfile -EventRecord @($records.ToArray()) -ChannelStatus $channelStatus `
+            -WindowStart $cutoff -WindowEnd $started)
+    } catch {
+        Write-LVLog -Level warn -Message ("Configuration-health profiles could not be collected: {0}" -f $_.Exception.Message)
+        $healthProfiles = @((New-LVHealthProfile -Profile 'configuration-health' -Source 'health' -Name 'configuration profiles' `
+            -Status 'unreadable' -RequiredConfiguration 'Provider, policy, retention, and forwarding state should be reviewed when diagnostic coverage matters.' `
+            -ObservedConfiguration 'The health-profile collector failed before all profiles were available.' `
+            -Reason $_.Exception.Message -Advice 'Review configuration health separately; this is not a maliciousness verdict.' -Origin 'live'))
+    }
+
     # Precomputed here so callers (including the entry script) never need a private helper.
     # Correlations count toward the worst verdict: a pairing that is graver than either
     # of its parts is the whole reason it exists, and an exit code that ignored it would
@@ -362,6 +374,7 @@ function Invoke-LogVerdictScan {
         MetadataUnreadableCount = [int]$script:LVChannelMetadataErrorCount
         CoverageNotes  = @($coverageNotes)
         Coverage       = @($coverageSources.ToArray())
+        HealthProfiles = @($healthProfiles)
         Reduction      = $stat
         Findings       = @($findings)
         Correlations   = @($correlations)

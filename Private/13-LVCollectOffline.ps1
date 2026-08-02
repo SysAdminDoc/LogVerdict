@@ -674,6 +674,17 @@ function Invoke-LVOfflineScan {
             foreach ($source in @($sourceReport.Coverage | Where-Object { $_ })) { $coverageSources.Add($source) | Out-Null }
         }
 
+        $healthProfiles = @()
+        if ($sourceReport -and $sourceReport.PSObject.Properties['HealthProfiles']) {
+            $healthProfiles = @($sourceReport.HealthProfiles)
+        } else {
+            $healthProfiles = @((New-LVHealthProfile -Profile 'configuration-health' -Source 'health' -Name 'reviewing machine configuration' `
+                -Status 'not-observed' -RequiredConfiguration 'Provider, policy, retention, and forwarding state should be captured on the source machine when diagnostic coverage matters.' `
+                -ObservedConfiguration 'Offline analysis does not query the reviewing machine for provider or policy state.' `
+                -Reason 'The reviewing machine is intentionally not used as a proxy for the captured machine configuration.' `
+                -Advice 'Capture health profiles with the live scan if provider and policy context is needed.' -Origin 'offline'))
+        }
+
         return [pscustomobject]@{
             Tool           = 'LogVerdict'
             Version        = $script:LVVersion
@@ -694,6 +705,7 @@ function Invoke-LVOfflineScan {
             CrashArtifacts = @($crash)
             EvidenceManifest = @($evtxPlan.Manifest)
             Coverage       = @($coverageSources.ToArray())
+            HealthProfiles = @($healthProfiles)
             Horizon        = $horizon
             HorizonWarning = $horizonWarning
             Stability      = $stability

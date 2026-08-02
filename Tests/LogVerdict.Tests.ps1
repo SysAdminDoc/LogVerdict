@@ -1389,6 +1389,45 @@ Describe 'Event collection failure handling' {
     }
 }
 
+Describe 'Provider and configuration health profiles' {
+    It 'retains provider GUID, channel, EventID, and version metadata' {
+        InModuleScope LogVerdict {
+            Mock Get-WinEvent {
+                param($ListProvider)
+                if ($ListProvider) {
+                    return [pscustomobject]@{
+                        Name = $ListProvider
+                        Events = @([pscustomobject]@{ Id = 7; Version = 3 })
+                    }
+                }
+            }
+            $status = @{ Fake = [pscustomobject]@{ Access='readable'; Oldest=(Get-Date).AddDays(-2) } }
+            $records = @([pscustomobject]@{
+                Source='event'; Channel='Fake'; Provider='FakeProvider'; ProviderId='11111111-1111-1111-1111-111111111111'
+                Id=7; Version=3; TimeCreated=(Get-Date); Message='event'
+            })
+            $profiles = @(Get-LVProviderHealthProfile -EventRecord $records -ChannelStatus $status)
+            $profiles.Count | Should -Be 1
+            $profiles[0].Provider | Should -BeExactly 'FakeProvider'
+            $profiles[0].ProviderId | Should -BeExactly '11111111-1111-1111-1111-111111111111'
+            @($profiles[0].EventIds) | Should -Contain '7'
+            @($profiles[0].EventVersions) | Should -Contain '7=3'
+            $profiles[0].MetadataStatus | Should -BeExactly 'readable'
+        }
+    }
+
+    It 'keeps missing policy and WEF state advisory rather than verdicts' {
+        InModuleScope LogVerdict {
+            $status = @{ Fake = [pscustomobject]@{ Access='readable'; Oldest=(Get-Date).AddDays(-2); RecordCount=3; LogMode='Circular'; MaximumSizeInBytes=4096 } }
+            $profiles = @(Get-LVHealthProfile -EventRecord @() -ChannelStatus $status -WindowStart (Get-Date).AddDays(-1) -WindowEnd (Get-Date))
+            @($profiles | Where-Object Profile -eq 'retention-and-clock').Count | Should -Be 1
+            ($profiles | Where-Object Profile -eq 'retention-and-clock').Advice | Should -Match 'tamper verdict'
+            ($profiles | Where-Object Profile -eq 'wef-subscriptions').Status | Should -BeIn @('not-observed', 'empty', 'unreadable')
+            ($profiles | Where-Object Profile -eq 'defender-configuration').Advice | Should -Match 'not a malicious verdict'
+        }
+    }
+}
+
 Describe 'Event sequence coverage' {
     It 'reports missing record IDs with the channel and observed range' {
         InModuleScope LogVerdict {
@@ -1990,6 +2029,15 @@ Describe 'Report rendering' {
                 ObservedRecords=0; SkippedRecords=0; RecordGap=$null; ParserError=$null
                 SizeBytes=$null; ParseMilliseconds=12; SHA256=$null; Origin='live'
             })
+            $result | Add-Member -NotePropertyName HealthProfiles -NotePropertyValue @([pscustomobject]@{
+                Profile='provider-metadata'; Source='event'; Name='FakeProvider'; Status='readable'
+                RequiredConfiguration='Provider manifest required'; ObservedConfiguration='Observed EventID(s): 7; versions: 7=3'
+                EnabledEventIds=@(); FilteredEventIds=@(); Provider='FakeProvider'; ProviderId='11111111-1111-1111-1111-111111111111'
+                Channel='System'; EventIds=@('7'); EventVersions=@('7=3'); MetadataStatus='readable'
+                ReadExistingEvents=$null; HeartbeatIntervalSeconds=$null; BookmarkState=$null
+                RetentionMode=$null; RecordCount=$null; OldestRecord=$null; MaximumSizeBytes=$null; ClockOffsetMinutes=$null
+                Reason=$null; Advice='Advisory only'; Path=$null; Origin='live'
+            })
             $text = ConvertTo-LVTextReport -Result $result
             $html = ConvertTo-LVHtmlReport -Result $result
             $csv = ConvertTo-LVCsvReport -Result $result
@@ -1997,9 +2045,14 @@ Describe 'Report rendering' {
             $text | Should -Match 'COVERAGE DETAIL.*per-source status'
             $html | Should -Match 'Coverage detail'
             @($csv | ConvertFrom-Csv | Where-Object RowType -eq 'coverage').Count | Should -Be 1
+            @($csv | ConvertFrom-Csv | Where-Object RowType -eq 'health').Count | Should -Be 1
             $csv | Should -Match 'CoverageStatus'
+            $csv | Should -Match 'HealthEventVersions'
             $manifest | Should -Match 'COVERAGE SOURCES'
             $manifest | Should -Match 'System: empty'
+            $text | Should -Match 'CONFIGURATION HEALTH.*advisory profiles'
+            $html | Should -Match 'Configuration health'
+            $manifest | Should -Match 'CONFIGURATION HEALTH PROFILES'
         }
     }
 
@@ -3574,6 +3627,11 @@ Describe 'Report redaction' {
                     Reason='captured from HOST-9 workstation'; RecordGap=$null; ParserError=$null
                     SHA256='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
                 })
+                HealthProfiles = @([pscustomobject]@{
+                    Profile='provider-metadata'; Source='event'; Name='HOST-9 provider'; Status='readable'
+                    ObservedConfiguration='captured from HOST-9 at C:\Users\bob\captures'; Reason='HOST-9 metadata'
+                    Advice='advisory'; Path='C:\Users\bob\captures\provider.xml'; EventIds=@('7'); EventVersions=@('7=3')
+                })
                 Findings = @(); CrashArtifacts = @(); CoverageNotes = @()
             }
             $redacted = ConvertTo-LVRedactedResult -Result $result
@@ -3584,6 +3642,10 @@ Describe 'Report redaction' {
             $redacted.Coverage[0].Reason | Should -Not -Match 'bob|HOST-9'
             $redacted.Coverage[0].Status | Should -BeExactly 'readable'
             $redacted.Coverage[0].SHA256 | Should -BeExactly $result.Coverage[0].SHA256
+            $redacted.HealthProfiles[0].Name | Should -Not -Match 'HOST-9'
+            $redacted.HealthProfiles[0].ObservedConfiguration | Should -Not -Match 'bob|HOST-9'
+            $redacted.HealthProfiles[0].Path | Should -Not -Match 'bob|HOST-9'
+            @($redacted.HealthProfiles[0].EventVersions) | Should -Contain '7=3'
         }
     }
 

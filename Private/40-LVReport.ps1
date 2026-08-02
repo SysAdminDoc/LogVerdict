@@ -204,6 +204,13 @@ function ConvertTo-LVFlatFindingRow {
             CoverageCap       = $null; CoverageObservedRecords = $null; CoverageSkippedRecords = $null
             CoverageRecordGap = $null; CoverageParserError = $null; CoverageSizeBytes = $null
             CoverageParseMilliseconds = $null; CoverageSHA256 = $null; CoverageOrigin = $null
+            HealthProfile = $null; HealthSource = $null; HealthName = $null; HealthStatus = $null
+            HealthRequiredConfiguration = $null; HealthObservedConfiguration = $null
+            HealthEnabledEventIds = $null; HealthFilteredEventIds = $null; HealthProvider = $null; HealthProviderId = $null; HealthChannel = $null
+            HealthEventIds = $null; HealthEventVersions = $null; HealthMetadataStatus = $null
+            HealthReadExistingEvents = $null; HealthHeartbeatIntervalSeconds = $null; HealthBookmarkState = $null
+            HealthRetentionMode = $null; HealthRecordCount = $null; HealthOldestRecord = $null; HealthMaximumSizeBytes = $null
+            HealthClockOffsetMinutes = $null; HealthReason = $null; HealthAdvice = $null; HealthPath = $null
         }
     }
 }
@@ -232,6 +239,45 @@ function ConvertTo-LVCoverageCsvRow {
         CoverageParserError = $Coverage.ParserError; CoverageSizeBytes = $Coverage.SizeBytes
         CoverageParseMilliseconds = $Coverage.ParseMilliseconds; CoverageSHA256 = $Coverage.SHA256
         CoverageOrigin    = $Coverage.Origin
+        HealthProfile = $null; HealthSource = $null; HealthName = $null; HealthStatus = $null
+        HealthRequiredConfiguration = $null; HealthObservedConfiguration = $null
+        HealthEnabledEventIds = $null; HealthFilteredEventIds = $null; HealthProvider = $null; HealthProviderId = $null; HealthChannel = $null
+        HealthEventIds = $null; HealthEventVersions = $null; HealthMetadataStatus = $null
+        HealthReadExistingEvents = $null; HealthHeartbeatIntervalSeconds = $null; HealthBookmarkState = $null
+        HealthRetentionMode = $null; HealthRecordCount = $null; HealthOldestRecord = $null; HealthMaximumSizeBytes = $null
+        HealthClockOffsetMinutes = $null; HealthReason = $null; HealthAdvice = $null; HealthPath = $null
+    }
+}
+
+function ConvertTo-LVHealthCsvRow {
+    param([Parameter(Mandatory)]$Result, [Parameter(Mandatory)]$Health)
+
+    return [pscustomobject][ordered]@{
+        RowType = 'health'
+        ScanTime = if ($Result.ScanTime) { ([datetime]$Result.ScanTime).ToString('o') } else { $null }
+        MachineName = $Result.MachineName; DaysBack = $Result.DaysBack; Elevated = $Result.Elevated
+        Channel = $null; Source = $null; Provider = $null; Id = $null; Key = $null
+        Count = $null; PerDay = $null; FirstSeen = $null; LastSeen = $null
+        Verdict = $null; Title = $null; RuleId = $null; Confidence = $null
+        Plain = $null; Why = $null; Action = $null; SampleMessage = $null
+        ErrorCode = $null; ErrorCatalogKind = $null; ErrorName = $null; Reference = $null
+        Burst = $null; BurstOnset = $null; BurstCount = $null; BurstWindowMinutes = $null
+        CoverageSource = $null; CoverageKind = $null; CoverageName = $null; CoverageStatus = $null
+        CoverageReason = $null; CoveragePath = $null; CoverageWindowStart = $null; CoverageWindowEnd = $null
+        CoverageCap = $null; CoverageObservedRecords = $null; CoverageSkippedRecords = $null
+        CoverageRecordGap = $null; CoverageParserError = $null; CoverageSizeBytes = $null
+        CoverageParseMilliseconds = $null; CoverageSHA256 = $null; CoverageOrigin = $null
+        HealthProfile = $Health.Profile; HealthSource = $Health.Source; HealthName = $Health.Name; HealthStatus = $Health.Status
+        HealthRequiredConfiguration = $Health.RequiredConfiguration; HealthObservedConfiguration = $Health.ObservedConfiguration
+        HealthEnabledEventIds = @($Health.EnabledEventIds) -join ';'; HealthFilteredEventIds = @($Health.FilteredEventIds) -join ';'
+        HealthProvider = $Health.Provider; HealthProviderId = $Health.ProviderId; HealthChannel = $Health.Channel
+        HealthEventIds = @($Health.EventIds) -join ';'; HealthEventVersions = @($Health.EventVersions) -join ';'
+        HealthMetadataStatus = $Health.MetadataStatus; HealthReadExistingEvents = $Health.ReadExistingEvents
+        HealthHeartbeatIntervalSeconds = $Health.HeartbeatIntervalSeconds; HealthBookmarkState = $Health.BookmarkState
+        HealthRetentionMode = $Health.RetentionMode; HealthRecordCount = $Health.RecordCount
+        HealthOldestRecord = if ($Health.OldestRecord) { ([datetime]$Health.OldestRecord).ToString('o') } else { $null }
+        HealthMaximumSizeBytes = $Health.MaximumSizeBytes; HealthClockOffsetMinutes = $Health.ClockOffsetMinutes
+        HealthReason = $Health.Reason; HealthAdvice = $Health.Advice; HealthPath = $Health.Path
     }
 }
 
@@ -242,6 +288,9 @@ function ConvertTo-LVCsvReport {
     $rows = @(ConvertTo-LVFlatFindingRow -Result $Result)
     foreach ($coverage in @($Result.Coverage | Where-Object { $_ })) {
         $rows += ConvertTo-LVCoverageCsvRow -Result $Result -Coverage $coverage
+    }
+    foreach ($health in @($Result.HealthProfiles | Where-Object { $_ })) {
+        $rows += ConvertTo-LVHealthCsvRow -Result $Result -Health $health
     }
     if ($rows.Count -gt 0) {
         return (($rows | ConvertTo-Csv -NoTypeInformation) -join [Environment]::NewLine) + [Environment]::NewLine
@@ -263,6 +312,13 @@ function ConvertTo-LVCsvReport {
         CoverageCap = $null; CoverageObservedRecords = $null; CoverageSkippedRecords = $null
         CoverageRecordGap = $null; CoverageParserError = $null; CoverageSizeBytes = $null
         CoverageParseMilliseconds = $null; CoverageSHA256 = $null; CoverageOrigin = $null
+        HealthProfile = $null; HealthSource = $null; HealthName = $null; HealthStatus = $null
+        HealthRequiredConfiguration = $null; HealthObservedConfiguration = $null
+        HealthEnabledEventIds = $null; HealthFilteredEventIds = $null; HealthProvider = $null; HealthProviderId = $null; HealthChannel = $null
+        HealthEventIds = $null; HealthEventVersions = $null; HealthMetadataStatus = $null
+        HealthReadExistingEvents = $null; HealthHeartbeatIntervalSeconds = $null; HealthBookmarkState = $null
+        HealthRetentionMode = $null; HealthRecordCount = $null; HealthOldestRecord = $null; HealthMaximumSizeBytes = $null
+        HealthClockOffsetMinutes = $null; HealthReason = $null; HealthAdvice = $null; HealthPath = $null
     }
     $headerLine = @($header | ConvertTo-Csv -NoTypeInformation)[0]
     return ([string]$headerLine) + [Environment]::NewLine
@@ -321,6 +377,17 @@ function ConvertTo-LVTextReport {
             if ($null -ne $source.Cap) { $detail += ('; cap {0}' -f $source.Cap) }
             if ($source.RecordGap) { $detail += ('; gap: ' + $source.RecordGap) }
             if ($source.ParserError) { $detail += ('; parser: ' + $source.ParserError) }
+            Add-LVLine $sb ('  - ' + $detail)
+        }
+        Add-LVLine $sb
+    }
+    if (@($Result.HealthProfiles).Count -gt 0) {
+        Add-LVLine $sb 'CONFIGURATION HEALTH - advisory profiles:'
+        foreach ($health in @($Result.HealthProfiles | Where-Object { $_ })) {
+            $detail = '{0}/{1} {2} - {3}' -f $health.Source, $health.Profile, $health.Name, $health.Status
+            if ($health.ObservedConfiguration) { $detail += '; observed: ' + $health.ObservedConfiguration }
+            if ($health.Reason) { $detail += '; reason: ' + $health.Reason }
+            if ($health.Advice) { $detail += '; advice: ' + $health.Advice }
             Add-LVLine $sb ('  - ' + $detail)
         }
         Add-LVLine $sb
@@ -573,6 +640,19 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             if ($null -ne $source.ObservedRecords) { $detail.Add(('{0} observed' -f $source.ObservedRecords)) | Out-Null }
             if ($source.RecordGap) { $detail.Add(('gap: ' + [string]$source.RecordGap)) | Out-Null }
             if ($source.ParserError) { $detail.Add(('parser: ' + [string]$source.ParserError)) | Out-Null }
+            Add-LVLine $sb ('<div class="row"><div class="lbl">{0}</div><div>{1}</div></div>' -f (ConvertTo-LVHtmlEncoded $label), (ConvertTo-LVHtmlEncoded ($detail -join '; ')))
+        }
+    }
+    if (@($Result.HealthProfiles).Count -gt 0) {
+        Add-LVLine $sb '<h2>Configuration health</h2><div class="sub">These profiles describe collection prerequisites and retention context. They are advisory coverage facts, never malicious verdicts.</div>'
+        foreach ($health in @($Result.HealthProfiles | Where-Object { $_ })) {
+            $label = '{0}/{1} - {2}' -f $health.Source, $health.Profile, $health.Name
+            $detail = New-Object 'System.Collections.Generic.List[string]'
+            $detail.Add([string]$health.Status) | Out-Null
+            if ($health.ObservedConfiguration) { $detail.Add('observed: ' + [string]$health.ObservedConfiguration) | Out-Null }
+            if ($health.RequiredConfiguration) { $detail.Add('required: ' + [string]$health.RequiredConfiguration) | Out-Null }
+            if ($health.Reason) { $detail.Add('reason: ' + [string]$health.Reason) | Out-Null }
+            if ($health.Advice) { $detail.Add('advice: ' + [string]$health.Advice) | Out-Null }
             Add-LVLine $sb ('<div class="row"><div class="lbl">{0}</div><div>{1}</div></div>' -f (ConvertTo-LVHtmlEncoded $label), (ConvertTo-LVHtmlEncoded ($detail -join '; ')))
         }
     }

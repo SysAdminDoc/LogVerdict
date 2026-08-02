@@ -398,6 +398,10 @@ function Show-LogVerdictGui {
         if ($Result.PSObject.Properties['SetupDiag'] -and $Result.SetupDiag) {
             $channelLines.Add(('SetupDiag                            {0,-11} {1}' -f ([string]$Result.SetupDiag.Status).ToUpperInvariant(), $Result.SetupDiag.Message)) | Out-Null
         }
+        foreach ($health in @($Result.HealthProfiles | Where-Object { $_ })) {
+            $healthDetail = if ($health.ObservedConfiguration) { [string]$health.ObservedConfiguration } elseif ($health.Reason) { [string]$health.Reason } else { '' }
+            $channelLines.Add(('{0,-36} {1,-11} {2}' -f ([string]$health.Name).Substring(0, [Math]::Min(36, ([string]$health.Name).Length)), ([string]$health.Status).ToUpperInvariant(), $healthDetail)) | Out-Null
+        }
         if ($channelLines.Count -eq 0) { $channelLines.Add('No event-channel status was returned.') | Out-Null }
         $ui.LstChannelCoverage.ItemsSource = [string[]]$channelLines.ToArray()
 

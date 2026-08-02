@@ -24,6 +24,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   and evidence-manifest output, distinguishing empty sources from missing, denied, unreadable,
   and truncated sources while retaining caps, windows, parser errors, record gaps, timing, and
   source metadata through redaction.
+- Added advisory configuration-health profiles for provider manifests and EventID versions,
+  channel retention and clock context, PowerShell logging, advanced audit policy, Defender,
+  Sysmon filtering, and WEF subscription state. Health context is available in JSON, text,
+  HTML, CSV, GUI coverage, and bundle manifests and is never promoted to a malicious verdict.
 
 ## [0.8.0] - 2026-08-01
 

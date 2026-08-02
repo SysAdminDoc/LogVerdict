@@ -39,6 +39,8 @@ SetupDiag is never downloaded or trusted by filename alone. Normal discovery acc
 
 Every scan also emits normalized per-source coverage in JSON, HTML, CSV, and evidence manifests. Each event channel, text log, and offline EVTX source records whether it was readable, empty, not observed, unreadable, or truncated, along with its reason, cap, time window, parser error, record gap, timing, and source metadata. `empty` means the source was observed but had no matching event; a missing, denied, or failed source remains explicitly distinct.
 
+Live scans additionally include advisory configuration-health profiles for provider manifests and EventID versions, channel retention and clock context, PowerShell logging, advanced audit policy, Defender state, Sysmon enabled/filtered IDs when a readable XML configuration is available, and WEF read-existing/heartbeat/bookmark state. These profiles explain visibility limits only; they never become malicious verdicts.
+
 ## How it works
 
 ```

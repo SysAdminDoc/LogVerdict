@@ -553,6 +553,21 @@ function ConvertTo-LVRedactedResult {
         }
         $copy.Coverage = @($coverage)
     }
+    if ($Result.PSObject.Properties['HealthProfiles']) {
+        $healthProfiles = foreach ($health in @($Result.HealthProfiles)) {
+            $entry = [pscustomobject]@{}
+            foreach ($prop in $health.PSObject.Properties) {
+                $entry | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+            }
+            foreach ($name in @('Name', 'ObservedConfiguration', 'Reason', 'Advice', 'Path')) {
+                if ($entry.PSObject.Properties[$name] -and $entry.$name) {
+                    $entry.$name = ConvertTo-LVRedactedText -Text ([string]$entry.$name) -MachineName $machine
+                }
+            }
+            $entry
+        }
+        $copy.HealthProfiles = @($healthProfiles)
+    }
     if ($copy.PSObject.Properties['CoverageNotes']) {
         $copy.CoverageNotes = @(@($Result.CoverageNotes) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
     }
