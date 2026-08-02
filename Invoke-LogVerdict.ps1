@@ -46,6 +46,15 @@
     .PARAMETER HistoryWindowDays
     Number of days of prior local history eligible for comparison. Default 30.
 
+    .PARAMETER AdvisoryPath
+    Optional offline dependency/tool advisory cache JSON.
+
+    .PARAMETER AdvisoryPackage
+    Package name to match in the optional advisory cache.
+
+    .PARAMETER AdvisoryVersion
+    Package version to test against the optional advisory cache's affected ranges.
+
     .PARAMETER NoReport
     Console only; write nothing to disk.
 
@@ -92,6 +101,9 @@ param(
     [string]$LocalRulePath,
     [string]$HistoryPath,
     [ValidateRange(1, 3650)][int]$HistoryWindowDays = 30,
+    [string]$AdvisoryPath,
+    [string]$AdvisoryPackage,
+    [string]$AdvisoryVersion,
     [switch]$Pause,
     [switch]$NoPause
 )
@@ -147,6 +159,9 @@ try {
         LocalRulePath   = $LocalRulePath
         HistoryPath     = $HistoryPath
         HistoryWindowDays = $HistoryWindowDays
+        AdvisoryPath    = $AdvisoryPath
+        AdvisoryPackage = $AdvisoryPackage
+        AdvisoryVersion = $AdvisoryVersion
     }
     if (-not $EvidencePath -or $PSBoundParameters.ContainsKey('DaysBack')) { $scanArgs['DaysBack'] = $DaysBack }
     if ($EvidencePath) { $scanArgs['EvidencePath'] = $EvidencePath }

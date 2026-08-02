@@ -31,6 +31,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added opt-in, bounded local scan history with median-rate trend signals. Reports state the
   baseline, comparison window, thresholds, missing-history state, and false-positive caveat;
   history is advisory only and can never escalate a curated verdict or exit code.
+- Added a hash-checked offline dependency/tool advisory cache with PowerShell range matching,
+  CVSS/KEV/date/source metadata, explicit local/URL update and rollback commands, and a
+  separate advisory report/export class that never changes event findings or exit codes.
 - Added the versioned `Export-LogVerdictStandard` command with ECS, OCSF, OpenTelemetry Logs,
   and STIX 2.1 JSON adapters. All projections preserve normalized findings, source/provider/
   event fields, confidence, references, timestamps, coverage, health context, and explicit

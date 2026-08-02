@@ -106,6 +106,29 @@ function Write-LVConsoleReport {
         Write-Host ''
     }
 
+    if ($Result.PSObject.Properties['AdvisoryStatus']) {
+        Write-Host '  DEPENDENCY ADVISORIES (SEPARATE FROM EVENT FINDINGS)' -ForegroundColor Cyan
+        Write-Host '    These are package/tool knowledge records, not Windows event verdicts.' -ForegroundColor DarkGray
+        Write-Host ('    Status        : {0}' -f $Result.AdvisoryStatus) -ForegroundColor DarkGray
+        if ($Result.AdvisoryCache) {
+            Write-Host ('    Cache         : {0}, {1} entry(s), updated {2}, source {3}' -f `
+                $Result.AdvisoryCache.Name, $Result.AdvisoryCache.EntryCount, $Result.AdvisoryCache.Updated, $Result.AdvisoryCache.Source) -ForegroundColor DarkGray
+            Write-Host ('    Cache hash    : {0}' -f $Result.AdvisoryCache.SourceHash) -ForegroundColor DarkGray
+        }
+        foreach ($advisory in @($Result.Advisories | Where-Object { $_ })) {
+            $state = if ($advisory.Matched) { 'AFFECTED' } else { 'CACHE ENTRY' }
+            Write-Host ('    [{0}] {1} - {2} {3}' -f $state, $advisory.Id, $advisory.Package, $(if ($advisory.Version) { $advisory.Version } else { '' })) -ForegroundColor Yellow
+            Write-Host ('      Range/fix   : {0} / {1}' -f $advisory.AffectedRange, $advisory.FixedVersion)
+            Write-Host ('      CVSS/KEV    : {0} / {1} (KEV date: {2})' -f $advisory.CVSS, $advisory.KEV, $(if ($advisory.KEVDate) { $advisory.KEVDate } else { 'n/a' }))
+            Write-Host ('      Published   : {0}; modified {1}' -f $advisory.PublishedDate, $advisory.ModifiedDate) -ForegroundColor DarkGray
+            Write-Host ('      Source      : {0} ({1}); hash {2}' -f $advisory.Source, $advisory.SourceUri, $advisory.SourceHash) -ForegroundColor DarkGray
+        }
+        if (@($Result.Advisories).Count -eq 0 -and $Result.AdvisoryStatus -eq 'no-match') {
+            Write-Host '    No advisory in the supplied cache matches the requested package/version.' -ForegroundColor DarkGray
+        }
+        Write-Host ''
+    }
+
     $tally = $Result.Findings | Group-Object -Property Verdict
     foreach ($name in @('critical', 'actionable', 'investigate', 'unknown', 'informational', 'benign')) {
         $g = $tally | Where-Object { $_.Name -eq $name }
@@ -402,6 +425,29 @@ function ConvertTo-LVTextReport {
         Add-LVLine $sb
     }
 
+    if ($Result.PSObject.Properties['AdvisoryStatus']) {
+        Add-LVLine $sb 'DEPENDENCY ADVISORIES (SEPARATE FROM EVENT FINDINGS)'
+        Add-LVLine $sb 'These are package/tool knowledge records, not Windows event verdicts.'
+        Add-LVLine $sb ('Status        : {0}' -f $Result.AdvisoryStatus)
+        if ($Result.AdvisoryCache) {
+            Add-LVLine $sb ('Cache         : {0}, {1} entry(s), updated {2}, source {3}' -f `
+                $Result.AdvisoryCache.Name, $Result.AdvisoryCache.EntryCount, $Result.AdvisoryCache.Updated, $Result.AdvisoryCache.Source)
+            Add-LVLine $sb ('Cache hash    : {0}' -f $Result.AdvisoryCache.SourceHash)
+        }
+        foreach ($advisory in @($Result.Advisories | Where-Object { $_ })) {
+            Add-LVLine $sb ('[{0}] {1} - {2} {3}' -f $(if ($advisory.Matched) { 'AFFECTED' } else { 'CACHE ENTRY' }), $advisory.Id, $advisory.Package, $advisory.Version)
+            Add-LVLine $sb ('  Range/fix   : {0} / {1}' -f $advisory.AffectedRange, $advisory.FixedVersion)
+            Add-LVLine $sb ('  CVSS/KEV    : {0} / {1} (KEV date: {2})' -f $advisory.CVSS, $advisory.KEV, $(if ($advisory.KEVDate) { $advisory.KEVDate } else { 'n/a' }))
+            Add-LVLine $sb ('  Published   : {0}; modified {1}' -f $advisory.PublishedDate, $advisory.ModifiedDate)
+            Add-LVLine $sb ('  Source      : {0} ({1}); hash {2}' -f $advisory.Source, $advisory.SourceUri, $advisory.SourceHash)
+            Add-LVLine $sb ('  Description : {0}' -f $advisory.Description)
+        }
+        if (@($Result.Advisories).Count -eq 0 -and $Result.AdvisoryStatus -eq 'no-match') {
+            Add-LVLine $sb 'No advisory in the supplied cache matches the requested package/version.'
+        }
+        Add-LVLine $sb
+    }
+
     if (@($Result.CoverageNotes).Count -gt 0) {
         Add-LVLine $sb 'COVERAGE - what this scan could NOT see:'
         foreach ($note in @($Result.CoverageNotes)) {
@@ -688,6 +734,32 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         }
         Add-LVLine $sb ('<div>{0}</div><div>Trend signals never change curated verdicts, WorstVerdict, or ExitCode.</div></div>' -f `
             (ConvertTo-LVHtmlEncoded $history.FalsePositiveCaveat))
+    }
+    if ($Result.PSObject.Properties['AdvisoryStatus']) {
+        Add-LVLine $sb '<div class="warn"><strong>DEPENDENCY ADVISORIES (SEPARATE FROM EVENT FINDINGS).</strong><div>These are package/tool knowledge records, not Windows event verdicts.</div>'
+        Add-LVLine $sb ('<div>Status: {0}</div>' -f (ConvertTo-LVHtmlEncoded $Result.AdvisoryStatus))
+        if ($Result.AdvisoryCache) {
+            Add-LVLine $sb ('<div>Cache: {0}; {1} entry(s); updated {2}; source {3}; hash {4}</div>' -f `
+                (ConvertTo-LVHtmlEncoded $Result.AdvisoryCache.Name), $Result.AdvisoryCache.EntryCount,
+                (ConvertTo-LVHtmlEncoded $Result.AdvisoryCache.Updated), (ConvertTo-LVHtmlEncoded $Result.AdvisoryCache.Source),
+                (ConvertTo-LVHtmlEncoded $Result.AdvisoryCache.SourceHash))
+        }
+        foreach ($advisory in @($Result.Advisories | Where-Object { $_ })) {
+            $advisoryState = if ($advisory.Matched) { 'AFFECTED' } else { 'CACHE ENTRY' }
+            Add-LVLine $sb ('<div><strong>[{0}] {1}</strong> - {2} {3}; range {4}; fixed {5}; CVSS {6}; KEV {7}; published {8}; modified {9}</div>' -f `
+                (ConvertTo-LVHtmlEncoded $advisoryState), (ConvertTo-LVHtmlEncoded $advisory.Id),
+                (ConvertTo-LVHtmlEncoded $advisory.Package), (ConvertTo-LVHtmlEncoded $advisory.Version),
+                (ConvertTo-LVHtmlEncoded $advisory.AffectedRange), (ConvertTo-LVHtmlEncoded $advisory.FixedVersion),
+                $advisory.CVSS, $advisory.KEV, (ConvertTo-LVHtmlEncoded $advisory.PublishedDate), (ConvertTo-LVHtmlEncoded $advisory.ModifiedDate))
+            Add-LVLine $sb ('<div>{0}: <a href="{1}">{1}</a>; hash {2}</div>' -f `
+                (ConvertTo-LVHtmlEncoded $advisory.Source), (ConvertTo-LVHtmlEncoded $advisory.SourceUri),
+                (ConvertTo-LVHtmlEncoded $advisory.SourceHash))
+            Add-LVLine $sb ('<div>{0}</div>' -f (ConvertTo-LVHtmlEncoded $advisory.Description))
+        }
+        if (@($Result.Advisories).Count -eq 0 -and $Result.AdvisoryStatus -eq 'no-match') {
+            Add-LVLine $sb '<div>No advisory in the supplied cache matches the requested package/version.</div>'
+        }
+        Add-LVLine $sb '</div>'
     }
     if (@($Result.Coverage).Count -gt 0) {
         Add-LVLine $sb '<h2>Coverage detail</h2><div class="sub">Every source is classified separately: empty means observed with no matching event; other statuses describe evidence that was not observed or could not be read.</div>'

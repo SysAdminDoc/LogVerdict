@@ -16,6 +16,15 @@
     .PARAMETER AutoScan
     Start scanning as soon as the window appears.
 
+    .PARAMETER AdvisoryPath
+    Optional offline dependency/tool advisory cache JSON.
+
+    .PARAMETER AdvisoryPackage
+    Package name to match in the optional advisory cache.
+
+    .PARAMETER AdvisoryVersion
+    Package version to test against the optional advisory cache's affected ranges.
+
     .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\LogVerdict-GUI.ps1
 
@@ -29,6 +38,9 @@
 [CmdletBinding()]
 param(
     [ValidateRange(1, 3650)][int]$DaysBack = 30,
+    [string]$AdvisoryPath,
+    [string]$AdvisoryPackage,
+    [string]$AdvisoryVersion,
     [switch]$AutoScan
 )
 
@@ -45,6 +57,9 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
         '-File', ('"{0}"' -f $PSCommandPath)
     )
     if ($PSBoundParameters.ContainsKey('DaysBack')) { $relaunch += @('-DaysBack', $DaysBack) }
+    if ($AdvisoryPath) { $relaunch += @('-AdvisoryPath', $AdvisoryPath) }
+    if ($AdvisoryPackage) { $relaunch += @('-AdvisoryPackage', $AdvisoryPackage) }
+    if ($AdvisoryVersion) { $relaunch += @('-AdvisoryVersion', $AdvisoryVersion) }
     if ($AutoScan) { $relaunch += '-AutoScan' }
     Start-Process -FilePath 'powershell.exe' -ArgumentList $relaunch
     exit 0
@@ -61,6 +76,9 @@ Import-Module $modulePath -Force -ErrorAction Stop
 try {
     $guiArgs = @{ AutoScan = $AutoScan }
     if ($PSBoundParameters.ContainsKey('DaysBack')) { $guiArgs['DaysBack'] = $DaysBack }
+    if ($AdvisoryPath) { $guiArgs['AdvisoryPath'] = $AdvisoryPath }
+    if ($AdvisoryPackage) { $guiArgs['AdvisoryPackage'] = $AdvisoryPackage }
+    if ($AdvisoryVersion) { $guiArgs['AdvisoryVersion'] = $AdvisoryVersion }
     Show-LogVerdictGui @guiArgs
     exit 0
 } catch {

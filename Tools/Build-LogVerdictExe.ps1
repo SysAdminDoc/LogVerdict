@@ -117,6 +117,9 @@ $ruleCount = @(($verdictsRaw | ConvertFrom-Json).rules).Count
 $errorCatalogPath = Join-Path $repoRoot 'Data\error-codes.json'
 $errorCatalogRaw = Get-Content -LiteralPath $errorCatalogPath -Raw -Encoding UTF8
 $errorCatalogCount = @(($errorCatalogRaw | ConvertFrom-Json).entries).Count
+$advisoryPath = Join-Path $repoRoot 'Data\advisories.json'
+$advisoryRaw = Get-Content -LiteralPath $advisoryPath -Raw -Encoding UTF8
+$advisoryCount = @(($advisoryRaw | ConvertFrom-Json).advisories).Count
 
 # Base64 rather than a here-string: the database is arbitrary text and must not be
 # able to terminate its own literal or pick up PowerShell escape semantics.
@@ -124,6 +127,8 @@ $verdictsB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($verdict
 Write-Ok ("Embedding verdict database: {0} rules, {1:N0} KB" -f $ruleCount, ($verdictsRaw.Length / 1KB))
 $errorCatalogB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($errorCatalogRaw))
 Write-Ok ("Embedding error catalog: {0} entries, {1:N0} KB" -f $errorCatalogCount, ($errorCatalogRaw.Length / 1KB))
+$advisoryB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($advisoryRaw))
+Write-Ok ("Embedding advisory cache: {0} entr{1}, {2:N0} KB" -f $advisoryCount, $(if ($advisoryCount -eq 1) { 'y' } else { 'ies' }), ($advisoryRaw.Length / 1KB))
 
 function ConvertTo-LVStandaloneScript {
     <#
@@ -197,6 +202,7 @@ if (-not $script:LVDataDir) { $script:LVDataDir = Join-Path (Get-Location).Path 
 
     $null = $sb.AppendLine('$script:LVEmbeddedVerdictsJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(''' + $verdictsB64 + '''))')
     $null = $sb.AppendLine('$script:LVEmbeddedErrorCatalogJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(''' + $errorCatalogB64 + '''))')
+    $null = $sb.AppendLine('$script:LVEmbeddedAdvisoriesJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(''' + $advisoryB64 + '''))')
 
     if ($EmbedSource) {
         # Deliberately the sources ONLY - not this generated wrapper. The verdict

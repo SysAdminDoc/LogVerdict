@@ -61,6 +61,16 @@ function Invoke-LogVerdictScan {
         .PARAMETER HistoryWindowDays
         Number of days of prior local history eligible for comparison. Default 30.
 
+        .PARAMETER AdvisoryPath
+        Optional offline advisory-cache JSON. Supplying only this path inventories the
+        cache; combine it with AdvisoryPackage and AdvisoryVersion to match a package.
+
+        .PARAMETER AdvisoryPackage
+        Package name to match in the optional advisory cache, such as PowerShell.
+
+        .PARAMETER AdvisoryVersion
+        Package version to test against the optional advisory cache's affected ranges.
+
         .EXAMPLE
         Invoke-LogVerdictScan -DaysBack 7
 
@@ -87,7 +97,10 @@ function Invoke-LogVerdictScan {
         [switch]$PromoteToRule,
         [string]$LocalRulePath,
         [string]$HistoryPath,
-        [ValidateRange(1, 3650)][int]$HistoryWindowDays = 30
+        [ValidateRange(1, 3650)][int]$HistoryWindowDays = 30,
+        [string]$AdvisoryPath,
+        [string]$AdvisoryPackage,
+        [string]$AdvisoryVersion
     )
 
     if ($EvidencePath) {
@@ -105,11 +118,14 @@ function Invoke-LogVerdictScan {
             LocalRulePath  = $LocalRulePath
         }
         if ($PSBoundParameters.ContainsKey('DaysBack')) { $offlineArgs['DaysBack'] = $DaysBack }
-        return Invoke-LVOfflineScan @offlineArgs
+        $offlineResult = Invoke-LVOfflineScan @offlineArgs
+        $offlineAdvisory = Get-LVAdvisoryScanContext -Path $AdvisoryPath -Package $AdvisoryPackage -Version $AdvisoryVersion
+        return (Add-LVAdvisoryContextToResult -Result $offlineResult -Context $offlineAdvisory)
     }
 
     $started = Get-Date
     $elevated = Test-LVElevated
+    $advisoryContext = Get-LVAdvisoryScanContext -Path $AdvisoryPath -Package $AdvisoryPackage -Version $AdvisoryVersion
     $script:LVReliabilityAvailable = $true
     $script:LVReliabilitySkipReason = $null
 
@@ -413,6 +429,9 @@ function Invoke-LogVerdictScan {
         ModelExplanationCount = @($findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation }).Count
         PromotedDraftRules = @($promotedDrafts)
         History        = $history
+        AdvisoryStatus = $advisoryContext.Status
+        AdvisoryCache  = $advisoryContext.Cache
+        Advisories     = @($advisoryContext.Records)
         WorstVerdict   = $worst
         ExitCode       = $exitCode
     }

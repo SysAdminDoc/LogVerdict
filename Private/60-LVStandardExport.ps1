@@ -143,6 +143,33 @@ function ConvertTo-LVStandardFinding {
     }
 }
 
+function ConvertTo-LVStandardAdvisory {
+    param([Parameter(Mandatory)]$Advisory)
+
+    return [pscustomobject][ordered]@{
+        recordType    = 'advisory'
+        findingType   = 'dependency-advisory'
+        matched       = [bool]$Advisory.Matched
+        id            = $Advisory.Id
+        ecosystem     = $Advisory.Ecosystem
+        package       = $Advisory.Package
+        version       = $Advisory.Version
+        affectedRange = $Advisory.AffectedRange
+        fixedVersion  = $Advisory.FixedVersion
+        cvss          = $Advisory.CVSS
+        cvssVector    = $Advisory.CVSSVector
+        kev           = $Advisory.KEV
+        kevDate       = $Advisory.KEVDate
+        publishedDate = $Advisory.PublishedDate
+        modifiedDate  = $Advisory.ModifiedDate
+        source        = $Advisory.Source
+        sourceUri     = $Advisory.SourceUri
+        sourceHash    = $Advisory.SourceHash
+        title         = $Advisory.Title
+        description   = $Advisory.Description
+    }
+}
+
 function ConvertTo-LVStandardHistory {
     param([AllowNull()]$History)
 
@@ -212,6 +239,10 @@ function Get-LVStandardContext {
         coverage = @(ConvertTo-LVStandardCoverage -Coverage @($Result.Coverage))
         healthProfiles = @(ConvertTo-LVStandardHealth -HealthProfiles @($Result.HealthProfiles))
         history = ConvertTo-LVStandardHistory -History $(if ($Result.PSObject.Properties['History']) { $Result.History } else { $null })
+        advisories = [pscustomobject][ordered]@{
+            status = if ($Result.PSObject.Properties['AdvisoryStatus']) { $Result.AdvisoryStatus } else { 'not-requested' }
+            cache = if ($Result.PSObject.Properties['AdvisoryCache']) { $Result.AdvisoryCache } else { $null }
+        }
     }
 }
 
@@ -221,6 +252,7 @@ function Get-LVStandardModel {
     return [pscustomobject][ordered]@{
         context = Get-LVStandardContext -Result $Result
         findings = @($Result.Findings | Where-Object { $_ } | ForEach-Object { ConvertTo-LVStandardFinding -Finding $_ })
+        advisories = @($Result.Advisories | Where-Object { $_ } | ForEach-Object { ConvertTo-LVStandardAdvisory -Advisory $_ })
         correlations = @($Result.Correlations | Where-Object { $_ } | ForEach-Object {
             [pscustomobject][ordered]@{
                 id = $_.Id; type = $_.Type; verdict = $_.Verdict; title = $_.Title
@@ -288,6 +320,7 @@ function ConvertTo-LVEcsExport {
         event = [pscustomobject][ordered]@{ kind = 'event'; dataset = 'logverdict.scan'; created = $Model.Context.scan.started }
         logverdict = $Model.Context
         findings = @($findings)
+        advisories = @($Model.Advisories)
         correlations = @($Model.Correlations)
     }
 }
@@ -332,6 +365,7 @@ function ConvertTo-LVOcsfExport {
         metadata = [pscustomobject][ordered]@{ product = [pscustomobject]@{ name = 'LogVerdict'; version = $Model.Context.scan.version }; profiles = @('logverdict.finding') }
         scan = $Model.Context
         findings = @($findings)
+        advisories = @($Model.Advisories)
         correlations = @($Model.Correlations)
     }
 }
@@ -384,6 +418,7 @@ function ConvertTo-LVOtelExport {
             scopeLogs = @([pscustomobject][ordered]@{ scope = [pscustomobject]@{ name = 'LogVerdict'; version = $Model.Context.scan.version }; logRecords = @($logRecords) })
         })
         logverdict = $Model.Context
+        advisories = @($Model.Advisories)
     }
 }
 
@@ -419,7 +454,7 @@ function ConvertTo-LVStixExport {
         name = 'LogVerdict scan'; description = 'Structured diagnostic findings and source coverage from LogVerdict.'
         object_refs = @($refs.ToArray()); x_logverdict = $Model.Context
     }) | Out-Null
-    return [pscustomobject][ordered]@{ type = 'bundle'; id = 'bundle--' + [guid]::NewGuid().ToString(); spec_version = '2.1'; adapter = 'stix-2.1'; schemaVersion = $Model.Context.schemaVersion; objects = @($objects.ToArray()) }
+    return [pscustomobject][ordered]@{ type = 'bundle'; id = 'bundle--' + [guid]::NewGuid().ToString(); spec_version = '2.1'; adapter = 'stix-2.1'; schemaVersion = $Model.Context.schemaVersion; advisories = @($Model.Advisories); objects = @($objects.ToArray()) }
 }
 
 function ConvertTo-LVStandardDocument {

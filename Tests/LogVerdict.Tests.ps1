@@ -12,12 +12,15 @@ Describe 'Module surface' {
             'Compare-LogVerdictScan',
             'Export-LogVerdictReport',
             'Export-LogVerdictStandard',
+            'Get-LogVerdictAdvisory',
             'Get-LogVerdictDatabase',
             'Get-LogVerdictErrorCatalog',
             'Invoke-LogVerdictScan',
             'Show-LogVerdictGui',
             'Show-LogVerdictReport',
+            'Test-LogVerdictAdvisoryDatabase',
             'Test-LogVerdictDatabase',
+            'Update-LogVerdictAdvisoryDatabase',
             'Update-LogVerdictDatabase',
             'Watch-LogVerdict'
         )
@@ -40,6 +43,51 @@ Describe 'Module surface' {
         $manifest = Import-PowerShellDataFile -Path (Join-Path $root 'LogVerdict.psd1')
         $manifest.ModuleVersion | Should -BeExactly $version
         (Get-Content -LiteralPath (Join-Path $root 'README.md') -Raw) | Should -Match ("shields\.io/badge/version-{0}-blue" -f [regex]::Escape($version))
+    }
+}
+
+Describe 'Dependency advisory knowledge' {
+    It 'ships a valid hash-checked offline cache with separate fields' {
+        Test-LogVerdictAdvisoryDatabase -Quiet | Should -BeTrue
+        $advisory = @(Get-LogVerdictAdvisory -Package PowerShell -Version '7.4.0')
+        $advisory.Count | Should -Be 1
+        $advisory[0].FindingType | Should -BeExactly 'dependency-advisory'
+        $advisory[0].RecordType | Should -BeExactly 'advisory'
+        $advisory[0].AffectedRange | Should -Match '7\.4\.14'
+        $advisory[0].FixedVersion | Should -Match '7\.4\.14'
+        $advisory[0].CVSS | Should -Be 7.8
+        $advisory[0].SourceHash | Should -Match '^[0-9a-f]{64}$'
+        $advisory[0].PSObject.Properties.Name | Should -Not -Contain 'Verdict'
+    }
+
+    It 'matches version ranges without treating fixed versions as affected' {
+        @((Get-LogVerdictAdvisory -Package PowerShell -Version '7.4.13')).Count | Should -Be 1
+        @((Get-LogVerdictAdvisory -Package PowerShell -Version '7.4.14')).Count | Should -Be 0
+        @((Get-LogVerdictAdvisory -Package PowerShell -Version '7.5.4')).Count | Should -Be 1
+        @((Get-LogVerdictAdvisory -Package PowerShell -Version '7.5.5')).Count | Should -Be 0
+    }
+
+    It 'refuses a cache whose normalized advisory hash was changed' {
+        $path = Join-Path $TestDrive 'bad-advisories.json'
+        $cache = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Data\advisories.json') -Raw | ConvertFrom-Json
+        $cache.advisories[0].fixedVersion = '7.4.99'
+        $cache | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path -Encoding UTF8
+        Test-LogVerdictAdvisoryDatabase -Path $path -Quiet | Should -BeFalse
+        { Get-LogVerdictAdvisory -Path $path } | Should -Throw '*sourceHash*'
+    }
+
+    It 'installs a hash-verified offline cache and can roll it back' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $source = Join-Path $root 'Data\advisories.json'
+        $target = Join-Path $TestDrive 'advisories.local.json'
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $digest = ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($source)))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+        $updated = Update-LogVerdictAdvisoryDatabase -SourcePath $source -TargetPath $target -ExpectedSha256 $digest
+        $updated.Action | Should -BeExactly 'update'
+        (Test-LogVerdictAdvisoryDatabase -Path $target -Quiet) | Should -BeTrue
+        Copy-Item -LiteralPath $target -Destination ($target + '.previous.json') -Force
+        $rolled = Update-LogVerdictAdvisoryDatabase -TargetPath $target -Rollback
+        $rolled.Action | Should -BeExactly 'rollback'
     }
 }
 
@@ -247,6 +295,18 @@ Describe 'Entry script launch behaviour' {
         $scan = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Invoke-LogVerdictScan.ps1') -Raw
         $scan | Should -Match 'HistoryWindowDays\s*=\s*30'
         $scan | Should -Match 'Update-LVScanHistory'
+    }
+
+    It 'exposes optional offline advisory settings without coupling them to verdicts' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $entry = Get-Content -LiteralPath (Join-Path $root 'Invoke-LogVerdict.ps1') -Raw
+        $scan = Get-Content -LiteralPath (Join-Path $root 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $entry | Should -Match '\[string\]\$AdvisoryPath'
+        $entry | Should -Match 'AdvisoryPackage\s*=\s*\$AdvisoryPackage'
+        $entry | Should -Match 'AdvisoryVersion\s*=\s*\$AdvisoryVersion'
+        $scan | Should -Match 'Get-LVAdvisoryScanContext'
+        $scan | Should -Match 'Advisories\s*=\s*@\(\$advisoryContext\.Records\)'
+        $scan.IndexOf('Advisories     =') | Should -BeLessThan $scan.IndexOf('WorstVerdict')
     }
 
     It 'bounds the public scan window consistently' {
@@ -2211,6 +2271,30 @@ Describe 'Report rendering' {
         }
     }
 
+    It 'keeps dependency advisories separate from event findings in reports' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $result | Add-Member -NotePropertyName AdvisoryStatus -NotePropertyValue 'affected'
+            $result | Add-Member -NotePropertyName AdvisoryCache -NotePropertyValue ([pscustomobject]@{
+                Name='offline cache'; EntryCount=1; Updated='2026-06-17'; Source='NVD'; SourceHash=('a' * 64)
+            })
+            $result | Add-Member -NotePropertyName Advisories -NotePropertyValue @([pscustomobject]@{
+                RecordType='advisory'; FindingType='dependency-advisory'; Matched=$true; Id='CVE-TEST-1'
+                Ecosystem='PowerShell'; Package='PowerShell'; Version='7.4.0'; AffectedRange='>=7.4.0 <7.4.14'
+                FixedVersion='7.4.14'; CVSS=7.8; CVSSVector='CVSS:3.1/test'; KEV=$false; KEVDate=$null
+                PublishedDate='2026-04-14'; ModifiedDate='2026-06-17'; Source='NVD'; SourceUri='https://example.test/CVE-TEST-1'
+                SourceHash=('b' * 64); Title='test advisory'; Description='Dependency context only.'
+            })
+            $text = ConvertTo-LVTextReport -Result $result
+            $html = ConvertTo-LVHtmlReport -Result $result
+            $text | Should -Match 'DEPENDENCY ADVISORIES \(SEPARATE FROM EVENT FINDINGS\)'
+            $text | Should -Match 'not Windows event verdicts'
+            $html | Should -Match 'DEPENDENCY ADVISORIES \(SEPARATE FROM EVENT FINDINGS\)'
+            $html | Should -Match 'CVE-TEST-1'
+        }
+    }
+
     It 'renders burst timing in text, HTML and CSV reports' {
         InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
             param($r)
@@ -2721,6 +2805,17 @@ Describe 'GUI pure presentation logic' {
         $text | Should -Match 'Get-LVGuiVerdictCount'
         $text | Should -Match 'ConvertTo-LVGuiDetail'
         $text | Should -Not -Match '\$state\.Chips\[\$Item\.Verdict\]'
+    }
+
+    It 'passes optional advisory settings through the GUI wiring' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $gui = Get-Content -LiteralPath (Join-Path $root 'Public/Show-LogVerdictGui.ps1') -Raw
+        $entry = Get-Content -LiteralPath (Join-Path $root 'LogVerdict-GUI.ps1') -Raw
+        $gui | Should -Match '\[string\]\$AdvisoryPath'
+        $gui | Should -Match "scanArgs\['AdvisoryPackage'\]"
+        $gui | Should -Match 'DEPENDENCY ADVISORIES \(SEPARATE FROM EVENT FINDINGS\)'
+        $entry | Should -Match '\[string\]\$AdvisoryVersion'
+        $entry | Should -Match "guiArgs\['AdvisoryVersion'\]"
     }
 }
 

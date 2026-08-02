@@ -58,6 +58,10 @@ foreach ($entry in $catalog) {
 }
 $catalogSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/error-codes.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$catalogSchema.properties.schemaVersion.const -ne 2) { throw 'Typed error catalog schema is not pinned at version 2.' }
+$advisoryCache = Join-Path $repoRoot 'Data/advisories.json'
+if (-not (Test-LogVerdictAdvisoryDatabase -Path $advisoryCache -Quiet)) { throw 'Offline advisory cache validation failed.' }
+$advisorySchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/advisories.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([int]$advisorySchema.properties.schemaVersion.const -ne 1) { throw 'Offline advisory schema is not pinned at version 1.' }
 
 $scoopPath = Join-Path $ManifestDirectory 'scoop/logverdict.json'
 $wingetPath = Join-Path $ManifestDirectory 'winget/SysAdminDoc.LogVerdict.yaml'

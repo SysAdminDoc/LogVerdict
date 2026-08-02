@@ -92,6 +92,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Offline evidence re-evaluation | Console-only batch/review workflow | `-EvidencePath` |
 | Local-model draft and rule-authoring workflow | Deliberately console-only so model endpoint and local-rule writes remain explicit | `-ExplainUnknown`, `-OllamaModel`, `-OllamaEndpoint`, `-PromoteToRule`, `-LocalRulePath` |
 | Local baseline/history and trend signals | Console/report and module opt-in; local state is bounded and advisory only | `-HistoryPath`, `-HistoryWindowDays` |
+| Dependency/tool advisory cache | Offline cache/query path; displayed separately and never used to change event verdicts | `-AdvisoryPath`, `-AdvisoryPackage`, `-AdvisoryVersion`, `Get-LogVerdictAdvisory` |
 | Bounded live event tail and bookmark resume | Module-only, opt-in workflow with reconnect/drop/latency coverage and optional WEF health intake | `Watch-LogVerdict` |
 | Output format selection | The window always saves Text, JSON, CSV, and HTML together | `-Format` (`Text`, `Json`, `Csv`, `Html`, or `All`) |
 | Console lifecycle | Not applicable to a persistent window | `-NoReport`, `-Pause`, `-NoPause` |
@@ -119,6 +120,7 @@ LogVerdict.exe -Format Csv                      write one flat row per finding f
 LogVerdict.exe -ExplainUnknown                  draft explanations for unknowns with local Ollama
 LogVerdict.exe -PromoteToRule                   save safe candidates as inactive local rule drafts
 LogVerdict.exe -HistoryPath C:\Temp\lv-history.json  save bounded local trend history
+LogVerdict.exe -AdvisoryPackage PowerShell -AdvisoryVersion 7.4.0  match the shipped offline advisory cache
 ```
 
 `-IncludeEvidence` writes a zip beside the report holding the reports, the matching text-log lines and, only with the explicit `-AllowRawEvidence` override, the scanned event channels as `.evtx`. Raw bundles are forensic artifacts and are never described as sanitized. `-Redact` runs a deterministic audit over the staged text, records hashed findings and substitution counts in `PRIVACY-AUDIT.json`, and refuses to create the zip if a known secret, SID, account/path identifier, or script-block marker remains. Combined with `-Redact` the channel exports are deliberately left out - `.evtx` is binary and carries the identifiers redaction removes from the text, and the manifest says so, so a withheld channel is never mistaken for a clean one.
@@ -126,6 +128,8 @@ LogVerdict.exe -HistoryPath C:\Temp\lv-history.json  save bounded local trend hi
 `-Redact` masks the account name, machine name, profile paths, SIDs and mail addresses out of the captured log messages before they are written. Use it when the report is going to a ticket or a vendor - the default report keeps everything, because locally that is the evidence. The reports say when they were redacted, and say that an identifier Windows wrote in a form this tool does not recognize may still be in there: read before sending.
 
 `-HistoryPath` opts into a local JSON history containing at most 30 recent scan summaries. It stores stable signature keys, counts, rates, verdict labels, and rule ids, not messages, paths, machine names, or account identifiers. `-HistoryWindowDays` bounds which prior scans are compared (default 30). Reports state the baseline method, comparison window, thresholds, missing-history state, and false-positive caveat. A trend signal is advisory only: it cannot raise a finding's verdict, `WorstVerdict`, or exit code.
+
+The dependency/tool advisory cache is a separate, offline knowledge class. `-AdvisoryPackage` and `-AdvisoryVersion` match a package against `affectedRange`; the report carries fixed version, CVSS/vector, KEV state/date, publication and modification dates, source URL, and source hash under a distinct **DEPENDENCY ADVISORIES** section. These records never enter `Findings`, correlations, `WorstVerdict`, or the event exit code. `Get-LogVerdictAdvisory -Path .\Data\advisories.json -Package PowerShell -Version 7.4.0` queries the same cache without scanning logs. `Update-LogVerdictAdvisoryDatabase` is explicit and requires a SHA-256 digest, so an air-gapped cache can be staged with `-SourcePath` and used without a network.
 
 `-Format Csv` writes `LogVerdict-Report.csv` with one scalar row per ordinary finding. Its stable columns include
 the scan identity, source (`event`, `text`, or `reliability`), provider and event id, occurrence count and rate,
@@ -224,6 +228,9 @@ powershell -ExecutionPolicy Bypass -File .\Invoke-LogVerdict.ps1
 
 # Opt in to bounded local trend history; change the comparison window if needed
 .\Invoke-LogVerdict.ps1 -HistoryPath "$env:LOCALAPPDATA\LogVerdict\history.json" -HistoryWindowDays 30
+
+# Match the shipped offline dependency advisory cache; this stays separate from event findings
+.\Invoke-LogVerdict.ps1 -AdvisoryPackage PowerShell -AdvisoryVersion 7.4.0
 ```
 
 Reports land in a timestamped folder on the Desktop by default (safe even for right-click-elevated runs that start in System32). Override with `-OutputDir`.
@@ -248,6 +255,7 @@ $r = Invoke-LogVerdictScan -DaysBack 30
 $focused = Invoke-LogVerdictScan -DaysBack 30 -DiagnosticChannels
 $drafted = Invoke-LogVerdictScan -DaysBack 30 -ExplainUnknown -OllamaModel llama3.2
 $historical = Invoke-LogVerdictScan -DaysBack 30 -HistoryPath "$env:LOCALAPPDATA\LogVerdict\history.json"
+$advisories = Get-LogVerdictAdvisory -Package PowerShell -Version 7.4.0
 $r.Findings | Where-Object Verdict -eq 'actionable'
 $r | Export-LogVerdictReport -OutputDir C:\Temp\lv
 

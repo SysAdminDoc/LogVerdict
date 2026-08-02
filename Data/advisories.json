@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "name": "LogVerdict reviewed dependency and tool advisory cache",
+  "updated": "2026-06-17",
+  "source": {
+    "name": "National Vulnerability Database",
+    "uri": "https://nvd.nist.gov/vuln/detail/CVE-2026-26143",
+    "retrieved": "2026-08-02"
+  },
+  "sourceHash": "8825e502419a9d3a7543c28be003f5da74696657a568f9b84a6a32d3b8ac59b8",
+  "advisories": [
+    {
+      "id": "CVE-2026-26143",
+      "ecosystem": "PowerShell",
+      "package": "PowerShell",
+      "affectedRange": ">=7.4.0 <7.4.14; >=7.5.0 <7.5.5",
+      "fixedVersion": "7.4.14 (7.4); 7.5.5 (7.5)",
+      "cvss": 7.8,
+      "cvssVector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+      "kev": false,
+      "kevDate": null,
+      "publishedDate": "2026-04-14",
+      "modifiedDate": "2026-06-17",
+      "source": "NVD/Microsoft",
+      "sourceUri": "https://nvd.nist.gov/vuln/detail/CVE-2026-26143",
+      "sourceHash": "9573ae4bd7384cd11553ca18c213686259a275c95807192b8073cdebda8605e9",
+      "title": "PowerShell improper input validation",
+      "description": "Improper input validation can allow a local unauthorized attacker to bypass a security feature. This advisory is dependency context, not a Windows event verdict."
+    }
+  ]
+}

@@ -22,6 +22,15 @@ function Show-LogVerdictGui {
         .PARAMETER PassThru
         After the window closes, return the last scan result object.
 
+        .PARAMETER AdvisoryPath
+        Optional offline dependency/tool advisory cache JSON.
+
+        .PARAMETER AdvisoryPackage
+        Package name to match in the optional advisory cache.
+
+        .PARAMETER AdvisoryVersion
+        Package version to test against the optional advisory cache's affected ranges.
+
         .EXAMPLE
         Show-LogVerdictGui
 
@@ -37,6 +46,9 @@ function Show-LogVerdictGui {
     [CmdletBinding()]
     param(
         [ValidateRange(1, 3650)][int]$DaysBack = 30,
+        [string]$AdvisoryPath,
+        [string]$AdvisoryPackage,
+        [string]$AdvisoryVersion,
         [switch]$AutoScan,
         [switch]$PassThru
     )
@@ -402,6 +414,16 @@ function Show-LogVerdictGui {
             $healthDetail = if ($health.ObservedConfiguration) { [string]$health.ObservedConfiguration } elseif ($health.Reason) { [string]$health.Reason } else { '' }
             $channelLines.Add(('{0,-36} {1,-11} {2}' -f ([string]$health.Name).Substring(0, [Math]::Min(36, ([string]$health.Name).Length)), ([string]$health.Status).ToUpperInvariant(), $healthDetail)) | Out-Null
         }
+        if ($Result.PSObject.Properties['AdvisoryStatus'] -and $Result.AdvisoryStatus -ne 'not-requested') {
+            $channelLines.Add('') | Out-Null
+            $channelLines.Add('DEPENDENCY ADVISORIES (SEPARATE FROM EVENT FINDINGS)') | Out-Null
+            $channelLines.Add(('Status: {0}; knowledge records are not Windows event verdicts.' -f $Result.AdvisoryStatus)) | Out-Null
+            foreach ($advisory in @($Result.Advisories | Where-Object { $_ })) {
+                $state = if ($advisory.Matched) { 'AFFECTED' } else { 'CACHE ENTRY' }
+                $channelLines.Add(('[{0}] {1} - {2} {3}; CVSS {4}; fixed {5}' -f `
+                    $state, $advisory.Id, $advisory.Package, $advisory.Version, $advisory.CVSS, $advisory.FixedVersion)) | Out-Null
+            }
+        }
         if ($channelLines.Count -eq 0) { $channelLines.Add('No event-channel status was returned.') | Out-Null }
         $ui.LstChannelCoverage.ItemsSource = [string[]]$channelLines.ToArray()
 
@@ -421,6 +443,9 @@ function Show-LogVerdictGui {
             $ui.TxtCoverageState.Text = 'Requested sources readable'
             $ui.TxtCoverageSummary.Text = 'No access, truncation, or history gaps were reported for the requested sources.'
             $ui.TxtOverviewCoverage.Text = 'All {0} requested event channels were readable and no coverage gaps were reported.' -f $totalChannels
+        }
+        if ($Result.PSObject.Properties['AdvisoryStatus'] -and $Result.AdvisoryStatus -ne 'not-requested') {
+            $ui.TxtCoverageSummary.Text += ' Dependency advisories are shown separately below and never change event verdicts.'
         }
         $ui.TxtHorizonPage.Text = $(if ($Result.HorizonWarning) { [string]$Result.HorizonWarning } else { 'The requested event history window was available for the channels that reported an oldest record.' })
 
@@ -781,6 +806,9 @@ function Show-LogVerdictGui {
             SkipReliability = [bool]$ui.ChkOverviewSkipReliability.IsChecked
             IncludeBenign = [bool]$ui.ChkOverviewIncludeBenign.IsChecked
         }
+        if ($AdvisoryPath) { $scanArgs['AdvisoryPath'] = $AdvisoryPath }
+        if ($AdvisoryPackage) { $scanArgs['AdvisoryPackage'] = $AdvisoryPackage }
+        if ($AdvisoryVersion) { $scanArgs['AdvisoryVersion'] = $AdvisoryVersion }
 
         $namedChannels = @(Get-LVGuiNamedChannel -Text $ui.TxtOverviewChannels.Text)
         if ($namedChannels.Count -gt 0) {
