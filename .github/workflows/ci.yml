@@ -1,0 +1,85 @@
+name: LogVerdict CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: PowerShell ${{ matrix.shell }} quality
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install pinned test tools
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Install-Module Pester -RequiredVersion 5.9.0 -Scope CurrentUser -Force -AllowClobber
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -AllowClobber
+
+      - name: Parse all PowerShell with this runtime
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $paths = @(Get-ChildItem -LiteralPath . -File -Filter '*.ps1' -Recurse) + @(Get-Item .\LogVerdict.psm1)
+          foreach ($path in $paths) {
+            [void][scriptblock]::Create((Get-Content -LiteralPath $path.FullName -Raw))
+          }
+          Test-ModuleManifest -Path .\LogVerdict.psd1 | Out-Null
+
+      - name: Run tests
+        shell: ${{ matrix.shell }}
+        run: Invoke-Pester -Path .\Tests -CI -Output Normal
+
+      - name: Run analyzer
+        if: matrix.shell == 'pwsh'
+        shell: ${{ matrix.shell }}
+        run: Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1 -EnableExit
+
+      - name: Run offline release gates
+        if: matrix.shell == 'pwsh'
+        shell: ${{ matrix.shell }}
+        run: .\Tools\Test-LogVerdictRelease.ps1
+
+  package:
+    name: Build and verify release assets
+    needs: quality
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install pinned build tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Install-Module Pester -RequiredVersion 5.9.0 -Scope CurrentUser -Force -AllowClobber
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -AllowClobber
+          Install-Module ps2exe -RequiredVersion 1.0.18 -Scope CurrentUser -Force -AllowClobber
+
+      - name: Build unsigned executables
+        shell: pwsh
+        run: .\Tools\Build-LogVerdictExe.ps1
+
+      - name: Regenerate package metadata from local assets
+        shell: pwsh
+        run: |
+          $root = (Get-Location).Path
+          $version = (& .\Tools\Get-LogVerdictVersion.ps1).Trim()
+          $date = (Get-Date).ToString('yyyy-MM-dd')
+          .\Tools\New-PackageManifests.ps1 -Version $version -AssetDirectory (Join-Path $root 'dist') -ReleaseDate $date -OutputDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging')
+
+      - name: Validate package hashes and version provenance
+        shell: pwsh
+        run: .\Tools\Test-LogVerdictRelease.ps1 -ManifestDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging') -AssetDirectory (Join-Path (Get-Location).Path 'dist')

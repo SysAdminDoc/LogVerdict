@@ -83,7 +83,10 @@ if (-not (Get-Module -ListAvailable ps2exe)) {
 }
 
 $manifest = Import-PowerShellDataFile -Path (Join-Path $repoRoot 'LogVerdict.psd1')
-$version = $manifest.ModuleVersion
+$version = (& (Join-Path $repoRoot 'Tools\Get-LogVerdictVersion.ps1')).Trim()
+if ($manifest.ModuleVersion -ne $version) {
+    throw ("LogVerdict.psd1 declares v{0}, but VERSION declares v{1}." -f $manifest.ModuleVersion, $version)
+}
 Write-Ok ("Building LogVerdict v{0}" -f $version)
 
 # --- Flatten the module ------------------------------------------------------

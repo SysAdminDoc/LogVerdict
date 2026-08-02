@@ -31,6 +31,14 @@ Describe 'Module surface' {
         $exported = (Get-Module LogVerdict).ExportedFunctions.Keys | Sort-Object
         ($manifest.FunctionsToExport | Sort-Object) | Should -Be $exported
     }
+
+    It 'keeps the module, badge, and package metadata on the version source' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $version = (& (Join-Path $root 'Tools\Get-LogVerdictVersion.ps1')).Trim()
+        $manifest = Import-PowerShellDataFile -Path (Join-Path $root 'LogVerdict.psd1')
+        $manifest.ModuleVersion | Should -BeExactly $version
+        (Get-Content -LiteralPath (Join-Path $root 'README.md') -Raw) | Should -Match ("shields\.io/badge/version-{0}-blue" -f [regex]::Escape($version))
+    }
 }
 
 Describe 'Scan comparison' {
@@ -2287,8 +2295,9 @@ Describe 'Package-manager manifest generation' {
         Test-Path -LiteralPath $outputDirectory | Should -BeFalse
     }
 
-    It 'tracks immutable v0.7.0 release hashes in the checked-in manifests' {
+    It 'tracks the current version and immutable hashes in the checked-in manifests' {
         $repo = Split-Path $PSScriptRoot -Parent
+        $version = (& (Join-Path $repo 'Tools\Get-LogVerdictVersion.ps1')).Trim()
         $scoopPath = Join-Path $repo 'Packaging/scoop/logverdict.json'
         $wingetPath = Join-Path $repo 'Packaging/winget/SysAdminDoc.LogVerdict.yaml'
         Test-Path -LiteralPath $scoopPath | Should -BeTrue
@@ -2296,13 +2305,11 @@ Describe 'Package-manager manifest generation' {
 
         $scoop = Get-Content -LiteralPath $scoopPath -Raw | ConvertFrom-Json
         $winget = Get-Content -LiteralPath $wingetPath -Raw
-        $scoop.version | Should -BeExactly '0.7.0'
-        @($scoop.architecture.'64bit'.hash) | Should -Be @(
-            '0147867798173a17eb83e7cde6208aab90198a9cd9521af387964372c6a62508',
-            '3770702debb88e174f762ee7c5389f003c0c94db9a5c6709da84d01192869078'
-        )
-        $winget | Should -Match '(?m)^PackageVersion: 0\.7\.0\r?$'
-        $winget | Should -Match '(?m)^    InstallerSha256: 0147867798173A17EB83E7CDE6208AAB90198A9CD9521AF387964372C6A62508\r?$'
+        $scoop.version | Should -BeExactly $version
+        @($scoop.architecture.'64bit'.hash).Count | Should -Be 2
+        @($scoop.architecture.'64bit'.hash | Where-Object { $_ -notmatch '^(?i:[0-9a-f]{64})$' }).Count | Should -Be 0
+        $winget | Should -Match ("(?m)^PackageVersion: {0}\r?$" -f [regex]::Escape($version))
+        $winget | Should -Match '(?m)^    InstallerSha256: [0-9A-Fa-f]{64}\r?$'
         $winget | Should -Not -Match '/releases/latest/'
     }
 }

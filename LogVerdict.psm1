@@ -4,7 +4,14 @@
 $ErrorActionPreference = 'Stop'
 
 $script:LVModuleRoot = $PSScriptRoot
-$script:LVVersion    = '0.8.0'
+$versionPath = Join-Path $PSScriptRoot 'VERSION'
+if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf)) {
+    throw ("LogVerdict version source not found at '{0}'." -f $versionPath)
+}
+$script:LVVersion = (Get-Content -LiteralPath $versionPath -Raw -Encoding UTF8).Trim()
+if ($script:LVVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+    throw ("LogVerdict version source contains invalid SemVer '{0}'." -f $script:LVVersion)
+}
 $script:LVDataDir    = Join-Path $PSScriptRoot 'Data'
 
 foreach ($scope in @('Private', 'Public')) {

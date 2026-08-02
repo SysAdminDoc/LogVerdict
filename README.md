@@ -144,10 +144,20 @@ Update-LogVerdictDatabase -Rollback       # restore the previous local copy
 Build them yourself:
 
 ```powershell
-Install-Module ps2exe -Scope CurrentUser
+Install-Module ps2exe -RequiredVersion 1.0.18 -Scope CurrentUser
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Build-LogVerdictExe.ps1
 # -> dist\LogVerdict.exe  and  dist\LogVerdict-GUI.exe
 # -Target Console or -Target Gui builds just one
+```
+
+`VERSION` is the release source of truth. The build refuses a manifest-version mismatch, and
+`Tools\Test-LogVerdictRelease.ps1` checks the module, README badge, typed catalog, verdict
+provenance, package manifests, and (when supplied) executable hashes. Generate package metadata
+from local assets without contacting GitHub with:
+
+```powershell
+.\Tools\New-PackageManifests.ps1 -AssetDirectory .\dist -ReleaseDate 2026-08-02
+.\Tools\Test-LogVerdictRelease.ps1 -AssetDirectory .\dist
 ```
 
 Release maintainers generate Scoop and winget manifests only after the matching GitHub release exists:
@@ -302,7 +312,8 @@ Unknown signatures also inspect the timestamps retained inside each signature. A
 burst with its onset and window in the console, text, HTML, JSON, and CSV outputs; the verdict remains `unknown`
 because timing is evidence to triage, not proof of a cause. A regular trickle is left unlabelled.
 
-Tests need [Pester](https://pester.dev/) 5+:
+Tests need the pinned [Pester](https://pester.dev/) 5.9.0 contract. Pester 6 is reported as an
+advisory until the suite is migrated:
 
 ```powershell
 Invoke-Pester -Path .\Tests

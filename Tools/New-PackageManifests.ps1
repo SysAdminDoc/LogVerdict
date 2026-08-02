@@ -23,9 +23,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\New-PackageManifests
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
-    [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string]$Version,
+[ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
+[string]$Version,
 
     [ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')]
     [string]$Repository = 'SysAdminDoc/LogVerdict',
@@ -41,8 +40,13 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+$repoRoot = Split-Path -Parent $PSScriptRoot
+if (-not $Version) {
+    $Version = (& (Join-Path $repoRoot 'Tools\Get-LogVerdictVersion.ps1')).Trim()
+}
+
 if (-not $OutputDirectory) {
-    $OutputDirectory = Join-Path (Split-Path $PSScriptRoot -Parent) 'Packaging'
+    $OutputDirectory = Join-Path $repoRoot 'Packaging'
 }
 
 function Write-LVPackageFile {
