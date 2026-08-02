@@ -73,7 +73,15 @@ Describe 'Case profiles and responder handoffs' {
         $first = Export-LogVerdictHandoff -Result $script:CaseResult -Profile $profile -OutputDir $firstDir
         $second = Export-LogVerdictHandoff -Result $script:CaseResult -Profile $profile -OutputDir $secondDir
 
-        @($first.Files).Count | Should -Be 6
+        @($first.Files).Count | Should -Be 7
+        $timelinePath = Join-Path $firstDir 'LogVerdict-Timeline.jsonl'
+        $timeline = @(Get-Content -LiteralPath $timelinePath | ForEach-Object { $_ | ConvertFrom-Json })
+        $timeline.Count | Should -BeGreaterThan 0
+        $timeline[0].recordType | Should -BeExactly 'metadata'
+        $timeline[0].schemaVersion | Should -BeExactly '1.0.0'
+        @($timeline | Where-Object recordType -eq 'finding').Count | Should -Be 1
+        ($timeline | Where-Object recordType -eq 'finding' | Select-Object -First 1).privacy.state | Should -BeExactly 'raw'
+        ($timeline | Where-Object recordType -eq 'finding' | Select-Object -First 1).provider | Should -BeExactly 'Test'
         $timesketch = @(Import-Csv -LiteralPath (Join-Path $firstDir 'LogVerdict-Timesketch.csv'))
         $timesketch.Count | Should -Be 1
         $timesketch[0].message | Should -Match 'HOST-9'
@@ -2944,6 +2952,47 @@ Describe 'Report rendering' {
             $written = Export-LogVerdictStandard -Result $result -Format Ecs -Path $path
             $written.Path | Should -BeExactly $path
             (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).adapter | Should -BeExactly 'ecs'
+        }
+    }
+
+    It 'streams a redacted JSONL timeline with stable records and no BOM' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $finding = $r.Findings[0] | Select-Object *
+            $finding | Add-Member -NotePropertyName Samples -NotePropertyValue @('raw HOST-9 C:\Users\bob\secret.txt')
+            $finding | Add-Member -NotePropertyName RecordId -NotePropertyValue 'evt-99'
+            $finding | Add-Member -NotePropertyName RecordIds -NotePropertyValue @('evt-99', 'evt-100')
+            $result.Findings = @($finding)
+            $result.MachineName = 'HOST-9'
+            $result | Add-Member -NotePropertyName Redacted -NotePropertyValue $false
+            $result | Add-Member -NotePropertyName Coverage -NotePropertyValue @([pscustomobject]@{
+                Source='event'; Kind='channel'; Name='C:\Users\bob\System.evtx'; Status='readable'
+                Reason=$null; Path='C:\Users\bob\System.evtx'; WindowStart=(Get-Date '2026-07-01')
+                WindowEnd=(Get-Date '2026-07-30'); Cap=20000; ObservedRecords=12; SkippedRecords=0
+                RecordGap=$null; ParserError=$null; SizeBytes=512; ParseMilliseconds=4; SHA256=('a' * 64); Origin='live'
+            })
+
+            $path = Join-Path $TestDrive 'timeline\LogVerdict-Timeline.jsonl'
+            $written = Export-LogVerdictStandard -Result $result -Format Jsonl -Path $path -Redact
+            $bytes = [System.IO.File]::ReadAllBytes($path)
+            ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) | Should -BeFalse
+            $lines = @(Get-Content -LiteralPath $path)
+            $written.LineCount | Should -Be $lines.Count
+            $records = @($lines | ForEach-Object { $_ | ConvertFrom-Json })
+            $records[0].recordType | Should -BeExactly 'metadata'
+            $records[0].format | Should -BeExactly 'LogVerdict.Timeline'
+            $event = $records | Where-Object recordType -eq 'event' | Select-Object -First 1
+            $findingRecord = $records | Where-Object recordType -eq 'finding' | Select-Object -First 1
+            $event.recordId | Should -BeExactly 'evt-99'
+            @($event.recordIds) | Should -Contain 'evt-100'
+            $findingRecord.provenance.ruleId | Should -BeExactly 'T-1'
+            $findingRecord.privacy.state | Should -BeExactly 'redacted'
+            ($records | ConvertTo-Json -Depth 30) | Should -Not -Match 'HOST-9|C:\\\\Users\\\\bob'
+
+            $pipeline = @(Export-LogVerdictStandard -Result $result -Format Jsonl -Redact)
+            $pipeline.Count | Should -Be $records.Count
+            $pipeline | ForEach-Object { $_ | ConvertFrom-Json | Should -Not -BeNullOrEmpty }
         }
     }
 

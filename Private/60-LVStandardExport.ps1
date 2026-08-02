@@ -139,6 +139,8 @@ function ConvertTo-LVStandardFinding {
         task = if ($Finding.PSObject.Properties['Task']) { $Finding.Task } else { $null }
         opcode = if ($Finding.PSObject.Properties['Opcode']) { $Finding.Opcode } else { $null }
         count = $Finding.Count
+        recordId = if ($Finding.PSObject.Properties['RecordId']) { $Finding.RecordId } else { $null }
+        recordIds = if ($Finding.PSObject.Properties['RecordIds']) { @($Finding.RecordIds) } else { @() }
         firstObserved = $first
         lastObserved = $last
         messageSamples = @($Finding.Samples)
@@ -301,6 +303,248 @@ function Get-LVStandardModel {
             }
         })
     }
+}
+
+function ConvertTo-LVTimelineLine {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Result,
+        [Parameter(Mandatory)][string]$RecordType,
+        [AllowNull()]$Payload,
+        [switch]$Redact
+    )
+
+    $redacted = [bool]($Redact -or ($Result.PSObject.Properties['Redacted'] -and $Result.Redacted))
+    $scanStart = ConvertTo-LVStandardTimestamp $Result.ScanTime
+    $scanEnd = if ($Result.ScanTime -and $Result.Duration) {
+        ConvertTo-LVStandardTimestamp ([datetime]$Result.ScanTime + $Result.Duration)
+    } else { $scanStart }
+    $machine = if ($redacted) { '<MACHINE>' } else { [string]$Result.MachineName }
+    $scan = [pscustomobject][ordered]@{
+        tool = 'LogVerdict'
+        version = [string]$Result.Version
+        machine = $machine
+        started = $scanStart
+        completed = $scanEnd
+        windowStart = if ($Result.ScanTime -and $Result.DaysBack) {
+            ConvertTo-LVStandardTimestamp ([datetime]$Result.ScanTime).AddDays(-1 * [Math]::Abs([int]$Result.DaysBack))
+        } else { $null }
+        windowEnd = $scanStart
+        daysBack = $Result.DaysBack
+        elevated = $Result.Elevated
+        worstVerdict = $Result.WorstVerdict
+        exitCode = $Result.ExitCode
+        caseProfileId = if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) { [string]$Result.CaseProfile.profileId } else { $null }
+    }
+    $line = [ordered]@{
+        schemaVersion = $script:LVStandardExportVersion
+        recordType = $RecordType
+        privacy = [pscustomobject][ordered]@{
+            state = if ($redacted) { 'redacted' } else { 'raw' }
+            redacted = $redacted
+            rawEvidenceIncluded = (-not $redacted)
+        }
+        scan = $scan
+    }
+    if ($Payload) {
+        $properties = if ($Payload -is [System.Collections.IDictionary]) {
+            @($Payload.GetEnumerator())
+        } else {
+            @($Payload.PSObject.Properties | ForEach-Object {
+                [pscustomobject]@{ Key = $_.Name; Value = $_.Value }
+            })
+        }
+        foreach ($property in $properties) { $line[[string]$property.Key] = $property.Value }
+    }
+    return [pscustomobject]$line
+}
+
+function Get-LVTimelineLine {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Result,
+        [switch]$Redact
+    )
+
+    $started = ConvertTo-LVStandardTimestamp $Result.ScanTime
+    $metadata = [ordered]@{
+        format = 'LogVerdict.Timeline'
+        recordKinds = @('metadata', 'event', 'finding', 'correlation', 'coverage', 'provider')
+        timestampUtc = $started
+    }
+    ConvertTo-LVTimelineLine -Result $Result -RecordType 'metadata' -Payload $metadata -Redact:$Redact
+
+    foreach ($finding in @($Result.Findings | Where-Object { $_ } | Sort-Object FirstSeen, Source, Channel, Provider, Id, Key)) {
+        $first = ConvertTo-LVStandardTimestamp $finding.FirstSeen
+        $last = ConvertTo-LVStandardTimestamp $finding.LastSeen
+        $samples = @($finding.Samples | Where-Object { $null -ne $_ })
+        $message = if ($samples.Count -gt 0) { [string]$samples[0] } else { [string]$finding.SampleMessage }
+        $eventPayload = [ordered]@{
+            timestamp = ConvertTo-LVStandardUnixMillisecond $finding.FirstSeen
+            timestampUtc = $first
+            source = [string]$finding.Source
+            channel = [string]$finding.Channel
+            provider = [string]$finding.Provider
+            providerId = if ($finding.PSObject.Properties['ProviderId']) { [string]$finding.ProviderId } else { $null }
+            eventId = $finding.Id
+            recordId = if ($finding.PSObject.Properties['RecordId']) { $finding.RecordId } else { $null }
+            recordIds = if ($finding.PSObject.Properties['RecordIds']) { @($finding.RecordIds) } else { @() }
+            firstObserved = $first
+            lastObserved = $last
+            message = $message
+            messageSamples = $samples
+            structuredData = if ($finding.PSObject.Properties['StructuredData']) { $finding.StructuredData } else { $null }
+            findingKey = [string]$finding.Key
+        }
+        ConvertTo-LVTimelineLine -Result $Result -RecordType 'event' -Payload $eventPayload -Redact:$Redact
+
+        $findingPayload = [ordered]@{
+            timestamp = ConvertTo-LVStandardUnixMillisecond $finding.FirstSeen
+            timestampUtc = $first
+            source = [string]$finding.Source
+            channel = [string]$finding.Channel
+            provider = [string]$finding.Provider
+            providerId = if ($finding.PSObject.Properties['ProviderId']) { [string]$finding.ProviderId } else { $null }
+            eventId = $finding.Id
+            recordId = if ($finding.PSObject.Properties['RecordId']) { $finding.RecordId } else { $null }
+            recordIds = if ($finding.PSObject.Properties['RecordIds']) { @($finding.RecordIds) } else { @() }
+            firstObserved = $first
+            lastObserved = $last
+            findingKey = [string]$finding.Key
+            title = [string]$finding.Title
+            verdict = [string]$finding.Verdict
+            confidence = [string]$finding.Confidence
+            count = $finding.Count
+            perDay = $finding.PerDay
+            ruleId = if ($finding.PSObject.Properties['RuleId']) { $finding.RuleId } else { $null }
+            plain = [string]$finding.Plain
+            why = [string]$finding.Why
+            action = [string]$finding.Action
+            references = @(Get-LVStandardReference -Finding $finding)
+            provenance = [pscustomobject][ordered]@{
+                ruleId = if ($finding.PSObject.Properties['RuleId']) { $finding.RuleId } else { $null }
+                confidence = [string]$finding.Confidence
+                status = if ($finding.PSObject.Properties['Status']) { $finding.Status } else { $null }
+                references = @(Get-LVStandardReference -Finding $finding)
+                sources = if ($finding.PSObject.Properties['Sources']) { @($finding.Sources) } else { @() }
+                providerExtension = if ($finding.PSObject.Properties['ProviderExtension']) { $finding.ProviderExtension } else { $null }
+            }
+        }
+        ConvertTo-LVTimelineLine -Result $Result -RecordType 'finding' -Payload $findingPayload -Redact:$Redact
+    }
+
+    foreach ($correlation in @($Result.Correlations | Where-Object { $_ } | Sort-Object Id)) {
+        $windows = @($correlation.Windows | Where-Object { $_ })
+        $firstWindow = $windows | Select-Object -First 1
+        $lastWindow = $windows | Select-Object -Last 1
+        $correlationPayload = [ordered]@{
+            timestamp = ConvertTo-LVStandardUnixMillisecond $firstWindow.Start
+            timestampUtc = ConvertTo-LVStandardTimestamp $firstWindow.Start
+            endTimestampUtc = ConvertTo-LVStandardTimestamp $lastWindow.End
+            correlationId = [string]$correlation.Id
+            type = [string]$correlation.Type
+            timespan = [string]$correlation.Timespan
+            verdict = [string]$correlation.Verdict
+            title = [string]$correlation.Title
+            plain = [string]$correlation.Plain
+            why = [string]$correlation.Why
+            action = [string]$correlation.Action
+            confidence = [string]$correlation.Confidence
+            ruleIds = @($correlation.RuleIds)
+            involvedKeys = @($correlation.InvolvedKeys)
+            occurrenceCount = $correlation.OccurrenceCount
+            references = @($correlation.References)
+            windows = @($windows | ForEach-Object {
+                [pscustomobject][ordered]@{
+                    start = ConvertTo-LVStandardTimestamp $_.Start
+                    end = ConvertTo-LVStandardTimestamp $_.End
+                    occurrenceCount = @($_.Occurrences).Count
+                }
+            })
+            provenance = [pscustomobject][ordered]@{
+                ruleIds = @($correlation.RuleIds)
+                references = @($correlation.References)
+                sources = @($correlation.Sources)
+            }
+        }
+        ConvertTo-LVTimelineLine -Result $Result -RecordType 'correlation' -Payload $correlationPayload -Redact:$Redact
+    }
+
+    foreach ($source in @($Result.Coverage | Where-Object { $_ } | Sort-Object Source, Kind, Name)) {
+        $coveragePayload = [ordered]@{
+            source = [string]$source.Source
+            kind = [string]$source.Kind
+            name = [string]$source.Name
+            status = [string]$source.Status
+            reason = $source.Reason
+            path = $source.Path
+            sha256 = $source.SHA256
+            windowStart = ConvertTo-LVStandardTimestamp $source.WindowStart
+            windowEnd = ConvertTo-LVStandardTimestamp $source.WindowEnd
+            cap = $source.Cap
+            observedRecords = $source.ObservedRecords
+            skippedRecords = $source.SkippedRecords
+            recordGap = $source.RecordGap
+            parserError = $source.ParserError
+            origin = $source.Origin
+        }
+        ConvertTo-LVTimelineLine -Result $Result -RecordType 'coverage' -Payload $coveragePayload -Redact:$Redact
+    }
+
+    foreach ($provider in @($Result.ProviderExtensions | Where-Object { $_ } | Sort-Object Id)) {
+        $providerPayload = [ordered]@{
+            providerId = [string]$provider.Id
+            name = [string]$provider.Name
+            version = [string]$provider.Version
+            trust = [string]$provider.Trust
+            capabilities = @($provider.Capabilities)
+            recordCount = $provider.RecordCount
+            rejectedRecords = $provider.RejectedRecords
+            budgetStop = $provider.BudgetStop
+        }
+        ConvertTo-LVTimelineLine -Result $Result -RecordType 'provider' -Payload $providerPayload -Redact:$Redact
+    }
+}
+
+function Write-LVJsonlTimeline {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Result,
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$Redact
+    )
+
+    $parent = Split-Path -Parent $Path
+    if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    $temporary = '{0}.{1}.tmp' -f $Path, ([guid]::NewGuid().ToString('N'))
+    $writer = $null
+    $lineCount = 0
+    try {
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        $writer = New-Object System.IO.StreamWriter($temporary, $false, $utf8NoBom)
+        foreach ($line in Get-LVTimelineLine -Result $Result -Redact:$Redact) {
+            $writer.WriteLine(($line | ConvertTo-Json -Depth 30 -Compress))
+            $lineCount++
+        }
+        $writer.Flush()
+    } catch {
+        if (Test-Path -LiteralPath $temporary -PathType Leaf) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+        throw
+    } finally {
+        if ($writer) { $writer.Dispose() }
+    }
+    try {
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            try { [IO.File]::Replace($temporary, $Path, $null, $true) }
+            catch { Move-Item -LiteralPath $temporary -Destination $Path -Force }
+        } else {
+            Move-Item -LiteralPath $temporary -Destination $Path -Force
+        }
+    } catch {
+        if (Test-Path -LiteralPath $temporary -PathType Leaf) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+        throw
+    }
+    return [pscustomobject][ordered]@{ Path = $Path; LineCount = $lineCount; Redacted = [bool]$Redact; Format = 'LogVerdict.Timeline' }
 }
 
 function ConvertTo-LVEcsExport {

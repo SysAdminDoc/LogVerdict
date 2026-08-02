@@ -153,6 +153,7 @@ function Get-LVSignatureReduction {
                 # entirely a question about the inside: two signatures whose spans overlap
                 # may still never have occurred within minutes of each other.
                 Times         = (New-Object System.Collections.Generic.List[datetime])
+                RecordIds     = (New-Object System.Collections.Generic.List[object])
                 StructuredData = $null
                 ProviderExtension = if ($r.PSObject.Properties['ProviderExtension']) { $r.ProviderExtension } else { $null }
                 Area          = $r.PSObject.Properties['Area'] | ForEach-Object { $_.Value }
@@ -161,6 +162,10 @@ function Get-LVSignatureReduction {
 
         $b = $buckets[$key]
         $b.Count++
+        if ($r.PSObject.Properties['RecordId'] -and $null -ne $r.RecordId -and $b.RecordIds.Count -lt $script:LVMaxSignatureRecordIds) {
+            $recordId = [string]$r.RecordId
+            if ($recordId -and -not $b.RecordIds.Contains($recordId)) { $b.RecordIds.Add($recordId) | Out-Null }
+        }
         if ($r.PSObject.Properties['StructuredData'] -and $r.StructuredData) {
             $b.StructuredData = Merge-LVEventStructuredData -Existing $b.StructuredData -Incoming $r.StructuredData
         }
@@ -257,6 +262,9 @@ function Get-LVSignatureReduction {
         # is only correct over an ordered sequence, and records do not arrive in time
         # order - channels are read one after another, each already sorted within itself.
         $b | Add-Member -NotePropertyName 'Times'    -NotePropertyValue (@($b.Times.ToArray() | Sort-Object)) -Force
+        $recordIds = @($b.RecordIds.ToArray())
+        $b | Add-Member -NotePropertyName 'RecordIds' -NotePropertyValue $recordIds -Force
+        $b | Add-Member -NotePropertyName 'RecordId' -NotePropertyValue ($recordIds | Select-Object -First 1) -Force
         $b
     }
 

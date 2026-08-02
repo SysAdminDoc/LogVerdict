@@ -7,6 +7,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## Unreleased
 
 - Added an explicit, versioned provider extension contract with hash-pinned entrypoints and fixtures, mandatory redaction, shared collection budgets, provider coverage, report projections, and an `-AllowUntrustedProvider` execution gate.
+- Added bounded JSONL timeline exports for standard and case handoffs, with UTC timestamps, event/finding/correlation/coverage/provider records, source record IDs, rule provenance, and explicit raw/redacted state.
 
 - Added a user-visible GUI settings reset that atomically restores safe scan defaults,
   resets the window size and transient source/report fields, and reports persistence failures;

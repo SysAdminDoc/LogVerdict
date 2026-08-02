@@ -111,7 +111,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Local-model draft and rule-authoring workflow | Deliberately console-only so model endpoint and local-rule writes remain explicit | `-ExplainUnknown`, `-OllamaModel`, `-OllamaEndpoint`, `-PromoteToRule`, `-LocalRulePath` |
 | Local baseline/history and trend signals | Console/report and module opt-in; local state is bounded and advisory only | `-HistoryPath`, `-HistoryWindowDays` |
 | Dependency/tool advisory cache | Offline cache/query path; displayed separately and never used to change event verdicts | `-AdvisoryPath`, `-AdvisoryPackage`, `-AdvisoryVersion`, `Get-LogVerdictAdvisory` |
-| Case profile and responder handoff | Bounded collection metadata, redaction policy, source hashes, recipes, and attributed timelines | `New-LogVerdictCaseProfile`, `Export-LogVerdictHandoff` |
+| Case profile and responder handoff | Bounded collection metadata, redaction policy, source hashes, recipes, and attributed CSV/JSONL timelines | `New-LogVerdictCaseProfile`, `Export-LogVerdictHandoff` |
 | Bounded live event tail and bookmark resume | Module-only, opt-in workflow with reconnect/drop/latency coverage and optional WEF health intake | `Watch-LogVerdict` |
 | Large finding captures | Virtualized, recycling findings lists with indexed lazy detail resolution | GUI |
 | Structured finding filters and sorting | UI Automation-labelled source/channel/provider/event ID/correlation/rule-state filters plus count/rate/latest sorting over lightweight row projections | GUI |
@@ -156,7 +156,7 @@ LogVerdict.exe -AdvisoryPackage PowerShell -AdvisoryVersion 7.4.0  match the shi
 
 The dependency/tool advisory cache is a separate, offline knowledge class. `-AdvisoryPackage` and `-AdvisoryVersion` match a package against `affectedRange`; the report carries fixed version, CVSS/vector, KEV state/date, publication and modification dates, source URL, and source hash under a distinct **DEPENDENCY ADVISORIES** section. These records never enter `Findings`, correlations, `WorstVerdict`, or the event exit code. `Get-LogVerdictAdvisory -Path .\Data\advisories.json -Package PowerShell -Version 7.4.0` queries the same cache without scanning logs. `Update-LogVerdictAdvisoryDatabase` is explicit and requires a SHA-256 digest, so an air-gapped cache can be staged with `-SourcePath` and used without a network.
 
-Case profiles make a scan repeatable without copying raw event messages. `New-LogVerdictCaseProfile` records the selected sources, time bounds, redaction policy, operator choices, notes, and per-source SHA-256 values under a canonical profile id. `Invoke-LogVerdictScan -CaseProfilePath` attaches a validated profile for attribution; it does not override explicit scan parameters. `Export-LogVerdictHandoff` writes the profile, reviewable KAPE and Velociraptor collection recipes, and deterministic attributed Timesketch and Hayabusa CSV timelines. Timesketch rows include `message`, `datetime`, and `timestamp_desc`; source hashes and the profile id remain on every handoff row. The handoff contains normalized findings, not raw EVTX.
+Case profiles make a scan repeatable without copying raw event messages. `New-LogVerdictCaseProfile` records the selected sources, time bounds, redaction policy, operator choices, notes, and per-source SHA-256 values under a canonical profile id. `Invoke-LogVerdictScan -CaseProfilePath` attaches a validated profile for attribution; it does not override explicit scan parameters. `Export-LogVerdictHandoff` writes the profile, reviewable KAPE and Velociraptor collection recipes, deterministic attributed Timesketch and Hayabusa CSV timelines, and `LogVerdict-Timeline.jsonl`. The JSONL file is UTF-8 without a BOM, emits one versioned metadata/event/finding/correlation/coverage/provider object per line, normalizes timestamps to UTC, carries provider/channel/event/record IDs and rule provenance, and states whether the line is raw or redacted. It is written incrementally and atomically, so large handoffs do not create a second complete output graph. Timesketch rows include `message`, `datetime`, and `timestamp_desc`; source hashes and the profile id remain on every handoff row. The handoff contains normalized findings, not raw EVTX.
 The cache declares a 60-day UTC freshness threshold and reports fresh, stale, or unavailable state in advisory scan context. A stale or unavailable cache never changes event findings, WorstVerdict, or the event exit code; the release gate rejects stale metadata until the cache is refreshed.
 The shipped coverage manifest records Windows PowerShell 5.1 and PowerShell 7.x verification, plus the pinned Pester 5.9.0, PSScriptAnalyzer 1.25.0, and ps2exe 1.0.18 roles and runtimes.
 
@@ -310,6 +310,9 @@ $r | Export-LogVerdictReport -OutputDir C:\Temp\lv
 # Versioned machine-interchange JSON for ECS, OCSF, OpenTelemetry Logs, or STIX 2.1
 Export-LogVerdictStandard -Result $r -Format Ocsf -Path C:\Temp\lv\finding.ocsf.json -Redact
 
+# Bounded JSONL timeline: one compact record per line, streamed to an atomic file
+Export-LogVerdictStandard -Result $r -Format Jsonl -Path C:\Temp\lv\timeline.jsonl -Redact
+
 # Or open the window from the module
 Show-LogVerdictGui -DaysBack 7 -AutoScan
 ```
@@ -321,6 +324,13 @@ timestamps, normalized coverage, configuration-health profiles, and explicit
 `privacy.redacted`/`privacy.rawEvidenceIncluded` state. `-Redact` applies the same
 identifier masking as the ordinary reports before projection; the adapters never copy
 the internal result object wholesale or add raw EVTX bytes.
+
+`-Format Jsonl` uses the same versioned privacy and provenance envelope but writes a
+streaming timeline instead of an adapter document. It includes metadata, normalized event
+and finding lines, curated correlations, per-source coverage, and provider provenance;
+undated records keep `timestampUtc: null` rather than receiving an invented time. Omit
+`-Path` to stream compact JSON objects to the PowerShell pipeline, or supply a path for
+an atomic UTF-8 file.
 
 To check whether a fix worked, save a JSON report before the change, scan again afterwards, and compare them. The output contains only signatures that are new, resolved, or worsening, as flat PowerShell objects that can be filtered or exported directly:
 

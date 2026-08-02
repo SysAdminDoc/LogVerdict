@@ -23,6 +23,10 @@ $script:LVSchemaVersionMax = 6
 # "did it coincide with something" is no longer a meaningful question about it.
 $script:LVMaxSignatureTimes = 2000
 
+# Record IDs make a JSONL handoff traceable back to the source without retaining
+# every raw event. Keep only a small distinct sample per reduced signature.
+$script:LVMaxSignatureRecordIds = 20
+
 # Correlation types, from the Sigma Correlation Rules Specification v2.1.0. Named
 # after Sigma's vocabulary on purpose: anyone who can read a Sigma correlation can
 # read one of these. The window is NOT Sigma's, though - see 25-LVCorrelate.ps1.

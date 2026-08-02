@@ -1,12 +1,13 @@
 function Export-LogVerdictHandoff {
     <#
         .SYNOPSIS
-        Write deterministic collection recipes and attributed Timesketch/Hayabusa CSVs.
+        Write deterministic collection recipes and attributed Timesketch/Hayabusa CSV and JSONL timelines.
 
         .DESCRIPTION
         The handoff contains no raw EVTX. It projects normalized findings into the
-        mandatory Timesketch fields and a Hayabusa-style CSV timeline, retaining the
-        LogVerdict profile id and source hashes on every row. KAPE and Velociraptor
+        mandatory Timesketch fields, a Hayabusa-style CSV timeline, and a versioned
+        JSONL timeline, retaining the LogVerdict profile id and source hashes on every row.
+        KAPE and Velociraptor
         recipes describe the bounded collection scope and are emitted alongside a
         JSON manifest. No network or external tool is required.
     #>
@@ -76,6 +77,7 @@ function Export-LogVerdictHandoff {
             velociraptor = 'LogVerdict-Collection.yaml'
             timesketch = 'LogVerdict-Timesketch.csv'
             hayabusa = 'LogVerdict-Hayabusa.csv'
+            timeline = 'LogVerdict-Timeline.jsonl'
             manifest = 'LogVerdict-Handoff.json'
         }
         $profilePathOut = Join-Path $OutputDir $files.profile
@@ -86,6 +88,9 @@ function Export-LogVerdictHandoff {
         $hayabusaContent = if (@($hayabusa).Count -gt 0) { (($hayabusa | ConvertTo-Csv -NoTypeInformation) -join [Environment]::NewLine) + [Environment]::NewLine } else { '' }
         Write-LVTextFile -Path (Join-Path $OutputDir $files.timesketch) -Content $timesketchContent
         Write-LVTextFile -Path (Join-Path $OutputDir $files.hayabusa) -Content $hayabusaContent
+        $timelineResult = if ($Redact -or $Profile.redaction.requested) { ConvertTo-LVRedactedResult -Result $Result } else { $Result }
+        $timeline = Write-LVJsonlTimeline -Result $timelineResult -Path (Join-Path $OutputDir $files.timeline) `
+            -Redact:([bool]($Redact -or $Profile.redaction.requested))
 
         $manifest = [pscustomobject][ordered]@{
             schemaVersion = $script:LVCaseHandoffSchemaVersion
@@ -97,8 +102,10 @@ function Export-LogVerdictHandoff {
             formats = [pscustomobject][ordered]@{
                 timesketch = 'CSV with message, datetime, and timestamp_desc mandatory fields'
                 hayabusa = 'CSV timeline projection with RuleTitle, Level, Computer, Channel, EventID, and Details'
+                timeline = 'UTF-8 JSONL with one versioned metadata, event, finding, correlation, coverage, or provider record per line'
                 recipes = @('KAPE .tkape target', 'Velociraptor CLIENT artifact YAML')
             }
+            timelineLineCount = $timeline.LineCount
         }
         Write-LVTextFile -Path (Join-Path $OutputDir $files.manifest) -Content ($manifest | ConvertTo-Json -Depth 30)
         return [pscustomobject][ordered]@{
