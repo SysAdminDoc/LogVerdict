@@ -408,6 +408,19 @@ Windows 10/11. Windows PowerShell 5.1 (stock) or PowerShell 7.x. **No dependenci
 
 Runs without admin; elevation unlocks the Security channel and some text logs.
 
+### Support matrix
+
+| Area | Supported behavior | Recovery or verification |
+|---|---|---|
+| Windows | Windows 10 and Windows 11; event channels and diagnostic text logs are read locally | Start with `LogVerdict-GUI.exe` or `Invoke-LogVerdict.ps1 -DaysBack 30` |
+| PowerShell | Windows PowerShell 5.1 (stock) and PowerShell 7.x; the GUI uses an STA thread for WPF | Run `Tools\Test-LogVerdictGui.ps1 -Theme Normal -ScalePercent 125` |
+| Elevation | Optional; standard access reports unreadable Security/setup sources instead of calling the result clean | Use the GUI's **Restart as administrator** action, or rerun the console from an elevated PowerShell |
+| SetupDiag | Optional; only an existing Microsoft-signed executable is used, otherwise built-in Panther rules remain active | Treat a rejected or missing candidate as a coverage gap, not an install failure |
+| WEF | Optional, module-only health context; no fleet agent or remote connection is required | Use `Watch-LogVerdict -IncludeWEFHealth` when the Windows Event Collector service is in scope |
+| Accessibility | Normal and Windows High Contrast themes are covered at 125% display scaling; navigation and reset controls expose UI Automation names | Run `Tools\Test-LogVerdictGui.ps1 -Theme HighContrast -ScalePercent 125` |
+| GUI preferences | The Overview page's **Reset settings** button restores 30 days, focused defaults, a 1440x800 window, and clears transient source/report fields | If the GUI cannot open, remove `%LOCALAPPDATA%\LogVerdict\settings.json` and relaunch |
+| Distribution | The module and unsigned packaged executables use the same engine and embedded data; no runtime package dependency is required | Run `Tools\Test-LogVerdictRelease.ps1` for offline version, catalog, manifest, and documentation checks |
+
 Every scan probes each channel for readability before reading it, and reports what it could **not** see under "what this scan could not see": channels denied by ACL, channels whose metadata would not enumerate, channels truncated at the per-channel record cap, and requested channels that do not exist. This matters because `Get-WinEvent -FilterHashtable` reports a denied channel identically to an empty one - a scan that trusts that path would tell you a channel is clean when it was never allowed to open it.
 
 Readable event channels also carry sequence coverage notes. A discontinuity in observed `RecordId` values or a

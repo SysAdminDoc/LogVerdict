@@ -261,6 +261,10 @@ try {
     Wait-SmokeElement -Description 'rendered overview for documentation screenshot' -Getter {
         Find-SmokeText -Root $rootElement -Text 'Look back this many days'
     } | Out-Null
+    Wait-SmokeElement -Description 'visible settings reset control' -Getter {
+        Find-SmokeElement -Root $rootElement -Name 'Reset saved settings' -ControlType ([System.Windows.Automation.ControlType]::Button)
+    } | Out-Null
+    Add-SmokeCheck -Id 'settings-reset' -Passed $true -Details 'The GUI exposes a keyboard-accessible saved-settings reset'
     if ($ScreenshotPath) {
         Save-SmokeScreenshot -Path $ScreenshotPath -MetadataPath $ScreenshotMetadataPath
         Add-SmokeCheck -Id 'documentation-screenshot' -Passed $true `

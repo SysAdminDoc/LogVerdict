@@ -2992,6 +2992,26 @@ Describe 'GUI settings persistence' {
         }
     }
 
+    It 'resets persisted options to safe first-launch defaults atomically' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $path = Join-Path $Root 'prefs/settings.json'
+            Save-LVGuiSetting -Settings ([pscustomobject]@{
+                DaysBack=365; AllChannels=$true; SkipTextLogs=$true; IncludeBenign=$true
+                WindowWidth=2200; WindowHeight=1200
+            }) -Path $path | Should -BeTrue
+
+            Reset-LVGuiSetting -Path $path | Should -BeTrue
+            $read = Get-LVGuiSetting -Path $path
+            $read.DaysBack | Should -Be 30
+            $read.AllChannels | Should -BeFalse
+            $read.SkipTextLogs | Should -BeFalse
+            $read.IncludeBenign | Should -BeFalse
+            $read.WindowWidth | Should -Be 1440
+            $read.WindowHeight | Should -Be 800
+        }
+    }
+
     It 'ignores malformed, future, and invalid settings instead of failing launch' {
         InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
             param($Root)
@@ -3025,6 +3045,8 @@ Describe 'GUI settings persistence' {
         $text | Should -Match "PSBoundParameters\.ContainsKey\('DaysBack'\)"
         $text | Should -Match 'Get-LVGuiSetting'
         $text | Should -Match 'Save-LVGuiSetting'
+        $text | Should -Match 'Reset-LVGuiSetting'
+        $text | Should -Match 'BtnResetSettings'
         $text | Should -Match '\$window\.RestoreBounds'
 
         $entry = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'LogVerdict-GUI.ps1') -Raw

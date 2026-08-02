@@ -139,6 +139,31 @@ function Save-LVGuiSetting {
     }
 }
 
+function Reset-LVGuiSetting {
+    <#
+        .SYNOPSIS
+        Persist the safe first-launch GUI preferences.
+
+        .DESCRIPTION
+        Reset is intentionally implemented as an atomic write of validated defaults,
+        rather than deleting the settings file. A failed write therefore leaves the
+        previous preferences recoverable while the caller can report that only the
+        current session was reset.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param([AllowEmptyString()][string]$Path = (Get-LVGuiSettingsPath))
+
+    if (-not $PSCmdlet.ShouldProcess($Path, 'Reset LogVerdict GUI settings')) { return $false }
+    return Save-LVGuiSetting -Settings ([pscustomobject]@{
+        DaysBack      = 30
+        AllChannels   = $false
+        SkipTextLogs  = $false
+        IncludeBenign = $false
+        WindowWidth   = 1440
+        WindowHeight  = 800
+    }) -Path $Path
+}
+
 function Get-LVGuiNamedChannel {
     <#
         .SYNOPSIS
@@ -333,7 +358,8 @@ $script:LVGuiElement = @(
     'ChkOverviewIncludeText', 'ChkOverviewIncludeBenign', 'TxtOverviewChannels',
     'TxtOverviewDatabase', 'BtnOverviewBrowseDatabase', 'ChkOverviewSkipReliability',
     'TxtOverviewOutputDir', 'BtnOverviewBrowseOutput', 'ChkOverviewRedact',
-    'ChkOverviewEvidence', 'BtnOverviewScan', 'BtnOverviewCancel',
+    'ChkOverviewEvidence', 'BtnResetSettings', 'TxtSettingsStatus',
+    'BtnOverviewScan', 'BtnOverviewCancel',
     'TxtOverviewLastVerdict', 'TxtOverviewFindingCount', 'TxtOverviewScanTime',
     'PnlOverviewSummary', 'TxtOverviewRecords', 'TxtOverviewSignatures',
     'TxtOverviewReduction', 'TxtOverviewRules',

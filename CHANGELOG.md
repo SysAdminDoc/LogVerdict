@@ -6,6 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## Unreleased
 
+- Added a user-visible GUI settings reset that atomically restores safe scan defaults,
+  resets the window size and transient source/report fields, and reports persistence failures;
+  documented the Windows/runtime/elevation/optional-tool support matrix and recovery command.
 - Replaced volatile README scan totals with stable product language and regenerated the GUI
   screenshot from the packaged WPF visual tree; release validation now checks the screenshot
   hash, version metadata, current rule/catalog examples, and runtime GUI version binding.

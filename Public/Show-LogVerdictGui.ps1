@@ -329,7 +329,7 @@ function Show-LogVerdictGui {
                 'ChkOverviewDiagnosticChannels', 'ChkOverviewIncludeBenign', 'TxtOverviewChannels',
                 'TxtOverviewDatabase', 'BtnOverviewBrowseDatabase', 'ChkOverviewSkipReliability',
                 'TxtOverviewOutputDir', 'BtnOverviewBrowseOutput', 'ChkOverviewRedact',
-                'ChkOverviewEvidence', 'BtnCoverageElevate', 'BtnSideElevate')) {
+                'ChkOverviewEvidence', 'BtnResetSettings', 'BtnCoverageElevate', 'BtnSideElevate')) {
             $ui[$n].IsEnabled = -not $On
         }
         if ($On) { $ui.BtnScan.Content = 'Scanning...' } else { $ui.BtnScan.Content = 'Run scan' }
@@ -655,6 +655,23 @@ function Show-LogVerdictGui {
         $ui.ChkIncludeBenign.IsChecked = [bool]$ui.ChkOverviewIncludeBenign.IsChecked
     }
 
+    $resetOverviewOptions = {
+        $ui.TxtOverviewDays.Text = '30'
+        $ui.ChkOverviewAllChannels.IsChecked = $false
+        $ui.ChkOverviewIncludeText.IsChecked = $true
+        $ui.ChkOverviewDiagnosticChannels.IsChecked = $false
+        $ui.ChkOverviewIncludeBenign.IsChecked = $false
+        $ui.TxtOverviewChannels.Text = ''
+        $ui.TxtOverviewDatabase.Text = ''
+        $ui.ChkOverviewSkipReliability.IsChecked = $false
+        $ui.TxtOverviewOutputDir.Text = ''
+        $ui.ChkOverviewRedact.IsChecked = $false
+        $ui.ChkOverviewEvidence.IsChecked = $false
+        $window.WindowState = 'Normal'
+        $window.Width = 1440
+        $window.Height = 800
+    }
+
     $ui.BtnOverviewScan.Add_Click({
         & $syncOverviewOptions
         & $showPage 'Activity'
@@ -695,6 +712,16 @@ function Show-LogVerdictGui {
     $ui.BtnOverviewBrowseOutput.Add_Click({
         $folder = Select-LVGuiFolder -Window $window -InitialDirectory $ui.TxtOverviewOutputDir.Text.Trim()
         if ($folder) { $ui.TxtOverviewOutputDir.Text = $folder }
+    })
+    $ui.BtnResetSettings.Add_Click({
+        & $resetOverviewOptions
+        if (Reset-LVGuiSetting) {
+            $ui.TxtSettingsStatus.Text = 'Saved settings reset; safe defaults are active.'
+            $ui.TxtSettingsStatus.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'Green')
+        } else {
+            $ui.TxtSettingsStatus.Text = 'Defaults are active for this session; the saved file could not be updated.'
+            $ui.TxtSettingsStatus.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'Yellow')
+        }
     })
     $ui.BtnOverviewCancel.Add_Click({
         $ui.BtnCancel.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))

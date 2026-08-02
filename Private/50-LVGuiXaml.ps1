@@ -761,6 +761,13 @@ function Get-LVGuiXaml {
                   <CheckBox x:Name="ChkOverviewRedact" Content="Redact written reports" Margin="0,0,20,6"/>
                   <CheckBox x:Name="ChkOverviewEvidence" Content="Include evidence zip" Margin="0,0,0,6"/>
                 </WrapPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                  <Button x:Name="BtnResetSettings" Style="{StaticResource BaseButton}" Content="Reset settings"
+                          AutomationProperties.Name="Reset saved settings"
+                          ToolTip="Restore safe first-launch scan options and window size." Padding="11,6"/>
+                  <TextBlock x:Name="TxtSettingsStatus" Margin="10,0,0,0" VerticalAlignment="Center"
+                             Foreground="{DynamicResource TextMuted}" FontSize="10.5" TextWrapping="Wrap"/>
+                </StackPanel>
 
                 <StackPanel Orientation="Horizontal" Margin="0,13,0,0">
                   <Button x:Name="BtnOverviewScan" Style="{StaticResource AccentButton}" Content="Run scan"
