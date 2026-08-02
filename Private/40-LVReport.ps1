@@ -41,7 +41,7 @@ function Add-LVLine {
         [Parameter(Mandatory)][System.Text.StringBuilder]$Builder,
         [Parameter()][AllowEmptyString()][AllowNull()][string]$Text = ''
     )
-    [void]$Builder.AppendLine($Text)
+    [void]$Builder.AppendLine((ConvertTo-LVLocalizedReportLine -Text $Text))
 }
 
 function Format-LVWhen {
@@ -413,7 +413,9 @@ function ConvertTo-LVCsvReport {
         $rows += ConvertTo-LVPerformanceCsvRow -Result $Result -Performance $performance
     }
     if ($rows.Count -gt 0) {
-        return (($rows | ConvertTo-Csv -NoTypeInformation) -join [Environment]::NewLine) + [Environment]::NewLine
+        $csvLines = @($rows | ConvertTo-Csv -NoTypeInformation)
+        if ($csvLines.Count -gt 0) { $csvLines[0] = ConvertTo-LVLocalizedCsvHeader -Header $csvLines[0] }
+        return ($csvLines -join [Environment]::NewLine) + [Environment]::NewLine
     }
 
     # Preserve the header even when a clean scan has no findings, so a downstream
@@ -444,7 +446,7 @@ function ConvertTo-LVCsvReport {
         PerformanceObservedRecords = $null; PerformanceSkippedRecords = $null; PerformanceCap = $null
         PerformanceElapsedMilliseconds = $null; PerformanceSlow = $null; PerformanceSlowThresholdMilliseconds = $null; PerformanceOrigin = $null
     }
-    $headerLine = @($header | ConvertTo-Csv -NoTypeInformation)[0]
+    $headerLine = ConvertTo-LVLocalizedCsvHeader -Header (@($header | ConvertTo-Csv -NoTypeInformation)[0])
     return ([string]$headerLine) + [Environment]::NewLine
 }
 
@@ -713,7 +715,8 @@ function ConvertTo-LVHtmlReport {
 
     $sb = New-Object System.Text.StringBuilder
 
-    Add-LVLine $sb '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+    $reportLocale = Get-LVLocalizationLocale
+    Add-LVLine $sb ('<!DOCTYPE html><html lang="{0}"><head><meta charset="utf-8">' -f (ConvertTo-LVHtmlEncoded $reportLocale))
     Add-LVLine $sb '<meta name="viewport" content="width=device-width,initial-scale=1">'
     Add-LVLine $sb ('<title>LogVerdict - {0}</title>' -f (ConvertTo-LVHtmlEncoded $Result.MachineName))
     Add-LVLine $sb '<style>'
@@ -1113,5 +1116,5 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
 '@
     Add-LVLine $sb '</div></body></html>'
 
-    return $sb.ToString()
+    return ConvertTo-LVLocalizedMarkup -Markup $sb.ToString()
 }

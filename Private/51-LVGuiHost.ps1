@@ -419,15 +419,18 @@ function Get-LVVerdictStyle {
 
     $key = $Verdict
     if (-not $key -or -not $script:LVVerdictPalette.ContainsKey($key)) { $key = 'unknown' }
+    $label = Get-LVText -Key ('gui.verdict.{0}' -f $key) -Default $script:LVVerdictPalette[$key].Label
     if (Test-LVGuiHighContrast) {
         return @{
-            Label  = $script:LVVerdictPalette[$key].Label
+            Label  = $label
             Fill   = [System.Windows.SystemColors]::HighlightBrush
             Ink    = [System.Windows.SystemColors]::HighlightTextBrush
             Accent = [System.Windows.SystemColors]::HighlightBrush
         }
     }
-    return $script:LVVerdictPalette[$key]
+    $style = $script:LVVerdictPalette[$key].Clone()
+    $style.Label = $label
+    return $style
 }
 
 function Format-LVGuiWhen {
@@ -443,14 +446,14 @@ function Format-LVGuiWhen {
     #>
     param([AllowNull()]$When)
 
-    if ($null -eq $When) { return 'undated' }
+    if ($null -eq $When) { return Get-LVText -Key 'gui.time.undated' -Default 'undated' }
 
     $span = (Get-Date) - $When
     if ($span.TotalSeconds -lt 0)    { return ('{0:yyyy-MM-dd}' -f $When) }
-    if ($span.TotalMinutes -lt 2)    { return 'just now' }
-    if ($span.TotalMinutes -lt 60)   { return ('{0} min ago' -f [int]$span.TotalMinutes) }
-    if ($span.TotalHours -lt 24)     { return ('{0} hr ago' -f [int]$span.TotalHours) }
-    if ($span.TotalDays -lt 7)       { return ('{0} days ago' -f [int]$span.TotalDays) }
+    if ($span.TotalMinutes -lt 2)    { return Get-LVText -Key 'gui.time.justNow' -Default 'just now' }
+    if ($span.TotalMinutes -lt 60)   { return ((Get-LVText -Key 'gui.time.minAgo' -Default '{0} min ago') -f [int]$span.TotalMinutes) }
+    if ($span.TotalHours -lt 24)     { return ((Get-LVText -Key 'gui.time.hrAgo' -Default '{0} hr ago') -f [int]$span.TotalHours) }
+    if ($span.TotalDays -lt 7)       { return ((Get-LVText -Key 'gui.time.daysAgo' -Default '{0} days ago') -f [int]$span.TotalDays) }
     return ('{0:yyyy-MM-dd}' -f $When)
 }
 
@@ -559,16 +562,16 @@ function Get-LVGuiFilterOption {
 
     $options = New-Object System.Collections.Generic.List[object]
     switch ($Kind) {
-        'Source'      { $options.Add([pscustomobject]@{ Label='All sources'; Value='' }) | Out-Null }
-        'Channel'     { $options.Add([pscustomobject]@{ Label='All channels'; Value='' }) | Out-Null }
-        'Provider'    { $options.Add([pscustomobject]@{ Label='All providers'; Value='' }) | Out-Null }
-        'EventId'     { $options.Add([pscustomobject]@{ Label='All event IDs'; Value='' }) | Out-Null }
+        'Source'      { $options.Add([pscustomobject]@{ Label=(Get-LVText -Key 'gui.filter.allSources' -Default 'All sources'); Value='' }) | Out-Null }
+        'Channel'     { $options.Add([pscustomobject]@{ Label=(Get-LVText -Key 'gui.filter.allChannels' -Default 'All channels'); Value='' }) | Out-Null }
+        'Provider'    { $options.Add([pscustomobject]@{ Label=(Get-LVText -Key 'gui.filter.allProviders' -Default 'All providers'); Value='' }) | Out-Null }
+        'EventId'     { $options.Add([pscustomobject]@{ Label=(Get-LVText -Key 'gui.filter.allEventIds' -Default 'All event IDs'); Value='' }) | Out-Null }
         'Correlation' {
-            $options.Add([pscustomobject]@{ Label='All correlations'; Value='' }) | Out-Null
-            $options.Add([pscustomobject]@{ Label='Correlated'; Value='__correlated__' }) | Out-Null
-            $options.Add([pscustomobject]@{ Label='Not correlated'; Value='__uncorrelated__' }) | Out-Null
+            $options.Add([pscustomobject]@{ Label=(Get-LVText -Key 'gui.filter.allCorrelations' -Default 'All correlations'); Value='' }) | Out-Null
+            $options.Add([pscustomobject]@{ Label=(Get-LVText -Key 'gui.filter.correlated' -Default 'Correlated'); Value='__correlated__' }) | Out-Null
+            $options.Add([pscustomobject]@{ Label=(Get-LVText -Key 'gui.filter.notCorrelated' -Default 'Not correlated'); Value='__uncorrelated__' }) | Out-Null
         }
-        'RuleStatus' { $options.Add([pscustomobject]@{ Label='All rule states'; Value='' }) | Out-Null }
+        'RuleStatus' { $options.Add([pscustomobject]@{ Label=(Get-LVText -Key 'gui.filter.allRuleStates' -Default 'All rule states'); Value='' }) | Out-Null }
     }
 
     $values = New-Object System.Collections.Generic.List[string]
@@ -829,7 +832,7 @@ function Get-LVGuiScanScript {
         boundary without dragging the calling session state with it.
     #>
     return @'
-param($Mode, $Payload, $DataDir, $Version, $VerdictsJson, $Sink, $ScanArgs)
+param($Mode, $Payload, $DataDir, $Version, $VerdictsJson, $LocalizationJson, $Sink, $ScanArgs)
 
 if ($Mode -eq 'module') {
     $m = Import-Module -Name $Payload -Force -PassThru -ErrorAction Stop
@@ -843,6 +846,7 @@ if ($Mode -eq 'module') {
     $script:LVModuleRoot           = $null
     $script:LVDataDir              = $DataDir
     $script:LVEmbeddedVerdictsJson = $VerdictsJson
+    $script:LVEmbeddedLocalizationJson = $LocalizationJson
 
     . ([ScriptBlock]::Create($Payload))
 
@@ -913,6 +917,7 @@ function Start-LVScanJob {
         DataDir      = $script:LVDataDir
         Version      = $script:LVVersion
         VerdictsJson = $script:LVEmbeddedVerdictsJson
+        LocalizationJson = $script:LVEmbeddedLocalizationJson
         Sink         = $LogSink
         ScanArgs     = $ScanArgs
     })

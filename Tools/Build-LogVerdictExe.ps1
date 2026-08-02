@@ -120,6 +120,12 @@ $errorCatalogCount = @(($errorCatalogRaw | ConvertFrom-Json).entries).Count
 $advisoryPath = Join-Path $repoRoot 'Data\advisories.json'
 $advisoryRaw = Get-Content -LiteralPath $advisoryPath -Raw -Encoding UTF8
 $advisoryCount = @(($advisoryRaw | ConvertFrom-Json).advisories).Count
+$localizationPath = Join-Path $repoRoot 'Data\localization.json'
+$localizationRaw = Get-Content -LiteralPath $localizationPath -Raw -Encoding UTF8
+$localizationDocument = $localizationRaw | ConvertFrom-Json
+if ($localizationDocument.schemaVersion -ne 1 -or -not $localizationDocument.locales.PSObject.Properties['en-US']) {
+    throw 'Localization resource must expose schemaVersion 1 and an en-US fallback locale.'
+}
 
 # Base64 rather than a here-string: the database is arbitrary text and must not be
 # able to terminate its own literal or pick up PowerShell escape semantics.
@@ -129,6 +135,8 @@ $errorCatalogB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($err
 Write-Ok ("Embedding error catalog: {0} entries, {1:N0} KB" -f $errorCatalogCount, ($errorCatalogRaw.Length / 1KB))
 $advisoryB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($advisoryRaw))
 Write-Ok ("Embedding advisory cache: {0} entr{1}, {2:N0} KB" -f $advisoryCount, $(if ($advisoryCount -eq 1) { 'y' } else { 'ies' }), ($advisoryRaw.Length / 1KB))
+$localizationB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($localizationRaw))
+Write-Ok ("Embedding localization resources: {0} locale(s), {1:N0} KB" -f @($localizationDocument.locales.PSObject.Properties).Count, ($localizationRaw.Length / 1KB))
 
 function ConvertTo-LVStandaloneScript {
     <#
@@ -203,6 +211,7 @@ if (-not $script:LVDataDir) { $script:LVDataDir = Join-Path (Get-Location).Path 
     $null = $sb.AppendLine('$script:LVEmbeddedVerdictsJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(''' + $verdictsB64 + '''))')
     $null = $sb.AppendLine('$script:LVEmbeddedErrorCatalogJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(''' + $errorCatalogB64 + '''))')
     $null = $sb.AppendLine('$script:LVEmbeddedAdvisoriesJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(''' + $advisoryB64 + '''))')
+    $null = $sb.AppendLine('$script:LVEmbeddedLocalizationJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(''' + $localizationB64 + '''))')
 
     if ($EmbedSource) {
         # Deliberately the sources ONLY - not this generated wrapper. The verdict

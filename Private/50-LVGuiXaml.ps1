@@ -20,7 +20,7 @@ function Get-LVGuiXaml {
     [CmdletBinding()]
     param()
 
-    return @'
+    $xaml = @'
 <Window
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -1562,4 +1562,5 @@ function Get-LVGuiXaml {
   </Grid>
 </Window>
 '@
+    return ConvertTo-LVLocalizedXaml -Xaml $xaml
 }

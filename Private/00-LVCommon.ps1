@@ -71,6 +71,193 @@ $script:LVLogLines = New-Object System.Collections.Generic.List[string]
 # its absence.
 $script:LVLogSink = $null
 
+# Presentation strings live in a versioned data file rather than in the report and
+# GUI implementations. The compiled host embeds the same JSON, while a module
+# checkout reads Data/localization.json so an operator can inspect the contract.
+$script:LVLocalizationDocument = $null
+
+function Get-LVLocalizationDocument {
+    [CmdletBinding()]
+    param()
+
+    if ($script:LVLocalizationDocument) { return $script:LVLocalizationDocument }
+
+    $raw = $null
+    if ($script:LVDataDir) {
+        $path = Join-Path $script:LVDataDir 'localization.json'
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            try { $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 } catch { $raw = $null }
+        }
+    }
+    if (-not $raw -and $script:LVEmbeddedLocalizationJson) {
+        $raw = $script:LVEmbeddedLocalizationJson
+    }
+
+    $document = $null
+    if ($raw) {
+        try {
+            $candidate = $raw | ConvertFrom-Json
+            $hasLocales = $candidate.PSObject.Properties['locales'] -and $candidate.locales.PSObject.Properties['en-US']
+            if ($candidate.schemaVersion -eq 1 -and $candidate.defaultLocale -and $hasLocales) {
+                $document = $candidate
+            }
+        } catch {
+            Write-Verbose ("Ignoring invalid localization resource: {0}" -f $_.Exception.Message)
+        }
+    }
+
+    if ($null -eq $document) {
+        # Calls always supply an English default, so a missing or damaged optional
+        # resource can never remove a label from a report or make the GUI unparseable.
+        $document = [pscustomobject]@{
+            schemaVersion = 1
+            defaultLocale = 'en-US'
+            locales = [pscustomobject]@{ 'en-US' = [pscustomobject]@{} }
+        }
+    }
+    $script:LVLocalizationDocument = $document
+    return $document
+}
+
+function Get-LVLocalizationLocale {
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$Locale)
+
+    $requested = $Locale
+    if ([string]::IsNullOrWhiteSpace($requested)) { $requested = $script:LVLocaleOverride }
+    if ([string]::IsNullOrWhiteSpace($requested)) { $requested = $env:LOGVERDICT_LOCALE }
+    if ([string]::IsNullOrWhiteSpace($requested)) { $requested = [Globalization.CultureInfo]::CurrentUICulture.Name }
+    if ([string]::IsNullOrWhiteSpace($requested)) { $requested = 'en-US' }
+    return [string]$requested
+}
+
+function Get-LVText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [AllowEmptyString()][string]$Default = $Key,
+        [AllowEmptyString()][string]$Locale
+    )
+
+    $document = Get-LVLocalizationDocument
+    $available = @($document.locales.PSObject.Properties.Name)
+    $requested = Get-LVLocalizationLocale -Locale $Locale
+    $candidates = New-Object System.Collections.Generic.List[string]
+    foreach ($candidate in @($requested, ($requested -split '[-_]')[0], [string]$document.defaultLocale, 'en-US')) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        $match = @($available | Where-Object { $_ -ieq $candidate -or ($candidate.Length -le 2 -and $_ -like ($candidate + '-*')) } | Select-Object -First 1)
+        if ($match.Count -gt 0 -and -not $candidates.Contains([string]$match[0])) { $candidates.Add([string]$match[0]) | Out-Null }
+    }
+    foreach ($localeName in $candidates) {
+        $localeObject = $document.locales.PSObject.Properties[$localeName].Value
+        $value = $localeObject.PSObject.Properties[$Key]
+        if ($value -and $null -ne $value.Value -and [string]$value.Value -ne '') { return [string]$value.Value }
+    }
+    return $Default
+}
+
+function Get-LVTextForSource {
+    [CmdletBinding()]
+    param([AllowEmptyString()][AllowNull()][string]$Text)
+
+    if ($null -eq $Text -or $Text -eq '') { return $Text }
+    $document = Get-LVLocalizationDocument
+    $english = $document.locales.PSObject.Properties['en-US']
+    if ($english) {
+        foreach ($entry in $english.Value.PSObject.Properties) {
+            if ([string]$entry.Value -eq $Text) {
+                return Get-LVText -Key $entry.Name -Default $Text
+            }
+        }
+    }
+    return $Text
+}
+
+function ConvertTo-LVLocalizedXaml {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Xaml,
+        [AllowEmptyString()][string]$Locale
+    )
+
+    $document = Get-LVLocalizationDocument
+    $english = $document.locales.PSObject.Properties['en-US']
+    if (-not $english) { return $Xaml }
+    $localized = $Xaml
+    foreach ($entry in $english.Value.PSObject.Properties) {
+        $source = [string]$entry.Value
+        if (-not $source) { continue }
+        $target = Get-LVText -Key $entry.Name -Default $source -Locale $Locale
+        if ($target -eq $source) { continue }
+        $safeSource = [System.Security.SecurityElement]::Escape($source)
+        $safeTarget = [System.Security.SecurityElement]::Escape($target)
+        foreach ($attribute in @('Text', 'Content', 'Title', 'ToolTip', 'AutomationProperties.Name')) {
+            $localized = $localized.Replace(('{0}="{1}"' -f $attribute, $safeSource), ('{0}="{1}"' -f $attribute, $safeTarget))
+        }
+    }
+    return $localized
+}
+
+function ConvertTo-LVLocalizedReportLine {
+    [CmdletBinding()]
+    param([AllowEmptyString()][AllowNull()][string]$Text)
+
+    if ($null -eq $Text -or $Text -eq '') { return $Text }
+    $localized = Get-LVTextForSource -Text $Text
+    $document = Get-LVLocalizationDocument
+    $english = $document.locales.PSObject.Properties['en-US']
+    if ($english) {
+        foreach ($entry in @($english.Value.PSObject.Properties | Where-Object { $_.Name -like 'report.label.*' })) {
+            $source = [string]$entry.Value
+            if ($source -and $localized.StartsWith($source, [StringComparison]::Ordinal)) {
+                $suffix = $localized.Substring($source.Length)
+                if ($suffix -match '^\s*:') {
+                    $localized = (Get-LVText -Key $entry.Name -Default $source) + $suffix
+                    break
+                }
+            }
+        }
+    }
+    return $localized
+}
+
+function ConvertTo-LVLocalizedCsvHeader {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Header)
+
+    $localized = $Header
+    foreach ($entry in @('scanTime', 'machineName', 'rowType', 'verdict', 'title', 'ruleId', 'provider', 'channel', 'eventId')) {
+        $key = 'csv.header.{0}' -f $entry
+        $source = Get-LVText -Key $key -Default $key -Locale 'en-US'
+        if ($source -eq $key) { continue }
+        $target = Get-LVText -Key $key -Default $source
+        if ($target -ne $source) {
+            $localized = $localized.Replace(('"{0}"' -f $source), ('"{0}"' -f $target))
+        }
+    }
+    return $localized
+}
+
+function ConvertTo-LVLocalizedMarkup {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Markup)
+
+    $document = Get-LVLocalizationDocument
+    $english = $document.locales.PSObject.Properties['en-US']
+    if (-not $english) { return $Markup }
+    $localized = $Markup
+    foreach ($entry in @($english.Value.PSObject.Properties | Where-Object { $_.Name -like 'report.html.*' -or $_.Name -like 'report.heading.*' })) {
+        $source = [string]$entry.Value
+        if (-not $source) { continue }
+        $target = Get-LVText -Key $entry.Name -Default $source
+        if ($target -eq $source) { continue }
+        foreach ($closing in @('<', ':', '.', '</')) {
+            $localized = $localized.Replace(('>{0}{1}' -f $source, $closing), ('>{0}{1}' -f $target, $closing))
+        }
+    }
+    return $localized
+}
+
 function New-LVCollectionBudget {
     <#
         .SYNOPSIS

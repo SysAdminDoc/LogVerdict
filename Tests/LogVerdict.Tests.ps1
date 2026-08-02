@@ -2834,6 +2834,34 @@ Describe 'Report rendering' {
         $rows[0].PSObject.Properties.Name | Should -Contain 'Burst'
     }
 
+    It 'loads GUI, text, HTML, and CSV labels from locale resources with English fallback' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $previousLocale = $env:LOGVERDICT_LOCALE
+            try {
+                $env:LOGVERDICT_LOCALE = 'de-DE'
+                $germanOverview = ([char]0x00dc) + 'bersicht'
+                (Get-LVText -Key 'gui.nav.overview' -Default 'Overview') | Should -BeExactly $germanOverview
+                (Get-LVText -Key 'missing.presentation.key' -Default 'English fallback') | Should -BeExactly 'English fallback'
+                (Get-LVGuiXaml) | Should -Match ('Text="{0}"' -f $germanOverview)
+                (ConvertTo-LVTextReport -Result $r) | Should -Match 'Computer'
+                (ConvertTo-LVHtmlReport -Result $r) | Should -Match 'Befunde'
+                (ConvertTo-LVCsvReport -Result $r) | Should -Match 'Scanzeit.*Computername'
+
+                $env:LOGVERDICT_LOCALE = 'ja-JP'
+                $japaneseOverview = ([char]0x6982) + ([char]0x8981)
+                (Get-LVText -Key 'gui.nav.overview' -Default 'Overview') | Should -BeExactly $japaneseOverview
+                (Get-LVGuiXaml) | Should -Match ('Text="{0}"' -f $japaneseOverview)
+
+                $env:LOGVERDICT_LOCALE = 'fr-FR'
+                (Get-LVText -Key 'gui.nav.overview' -Default 'Overview') | Should -BeExactly 'Overview'
+            } finally {
+                if ($null -eq $previousLocale) { Remove-Item Env:LOGVERDICT_LOCALE -ErrorAction SilentlyContinue }
+                else { $env:LOGVERDICT_LOCALE = $previousLocale }
+            }
+        }
+    }
+
     It 'emits the CSV header even when no findings exist' {
         $out = Join-Path $TestDrive 'reports-csv-empty'
         $clean = $script:FakeResult | Select-Object *

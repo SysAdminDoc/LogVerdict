@@ -153,6 +153,17 @@ if ([int]$providerSchema.properties.schemaVersion.const -ne 1 -or
     @($providerSchema.properties.capabilities.items.enum) -notcontains 'redaction') {
     throw 'Provider extension manifest schema is not pinned at version 1 with the required redaction and entrypoint contract.'
 }
+$localization = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/localization.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$locales = @($localization.locales.PSObject.Properties.Name)
+if ([int]$localization.schemaVersion -ne 1 -or [string]$localization.defaultLocale -ne 'en-US' -or
+    $locales -notcontains 'en-US' -or $locales -notcontains 'de-DE' -or $locales -notcontains 'ja-JP') {
+    throw 'Localization resource must be schema version 1 with en-US, de-DE, and ja-JP locales.'
+}
+$englishKeys = @($localization.locales.'en-US'.PSObject.Properties.Name)
+foreach ($localeName in @('de-DE', 'ja-JP')) {
+    $missing = @($englishKeys | Where-Object { -not $localization.locales.$localeName.PSObject.Properties[$_] })
+    if ($missing.Count -gt 0) { throw ("Localization locale {0} is missing {1} resource key(s)." -f $localeName, $missing.Count) }
+}
 
 $scoopPath = Join-Path $ManifestDirectory 'scoop/logverdict.json'
 $wingetPath = Join-Path $ManifestDirectory 'winget/SysAdminDoc.LogVerdict.yaml'
