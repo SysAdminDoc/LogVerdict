@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "name": "content-free-parser-benchmarks",
+  "units": "milliseconds",
+  "notes": "Synthetic inputs are generated under the runner temp directory and deleted after each run. Reports retain counts, sizes, statuses, and timing only.",
+  "fixtures": [
+    {
+      "id": "text-small",
+      "sourceKind": "text",
+      "lineCount": 256,
+      "errorEvery": 4,
+      "malformedTimestamps": false,
+      "expectedStatus": "readable",
+      "minObservedRecords": 64,
+      "maxElapsedMilliseconds": 5000
+    },
+    {
+      "id": "text-large",
+      "sourceKind": "text",
+      "lineCount": 50000,
+      "errorEvery": 5,
+      "malformedTimestamps": false,
+      "expectedStatus": "readable",
+      "minObservedRecords": 10000,
+      "maxElapsedMilliseconds": 15000
+    },
+    {
+      "id": "text-malformed",
+      "sourceKind": "text",
+      "lineCount": 256,
+      "errorEvery": 2,
+      "malformedTimestamps": true,
+      "expectedStatus": "readable",
+      "minObservedRecords": 128,
+      "expectedUndatedRecords": 128,
+      "maxElapsedMilliseconds": 5000
+    },
+    {
+      "id": "evtx-malformed",
+      "sourceKind": "offline-evtx",
+      "byteCount": 3,
+      "expectedStatus": "unreadable",
+      "maxElapsedMilliseconds": 15000
+    }
+  ]
+}

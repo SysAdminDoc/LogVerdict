@@ -75,6 +75,23 @@ jobs:
           path: coverage-${{ matrix.shell }}.json
           if-no-files-found: warn
 
+      - name: Run content-free performance budgets
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runtime = '${{ matrix.shell }}'
+          $report = Join-Path $env:GITHUB_WORKSPACE ("performance-{0}.json" -f $runtime)
+          .\Tools\Test-LogVerdictPerformance.ps1 -OutputPath $report -BudgetPath .\Data\performance-budgets.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload content-free performance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logverdict-performance-${{ matrix.shell }}
+          path: performance-${{ matrix.shell }}.json
+          if-no-files-found: warn
+
       - name: Run analyzer
         if: matrix.shell == 'pwsh'
         shell: ${{ matrix.shell }}

@@ -32,6 +32,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   PowerShell 5.1/7.x plus pinned Pester, PSScriptAnalyzer, and ps2exe versions. Stale or
   unavailable advisory context is explicit and cannot change event findings or exit codes;
   release gates reject stale cache metadata.
+- Added content-free performance budgets for small, large, malformed-text, and malformed-EVTX
+  fixtures. CI runs the aggregate-only benchmark on Windows PowerShell 5.1 and PowerShell 7.x
+  and uploads timing reports without retaining fixture content.
 
 ## [0.8.1] - 2026-08-02
 

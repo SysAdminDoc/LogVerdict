@@ -4000,6 +4000,32 @@ Describe 'Evidence bundle' {
     }
 }
 
+Describe 'Content-free performance benchmark gate' {
+    BeforeAll {
+        $root = Split-Path $PSScriptRoot -Parent
+        $script:PerformanceTool = Join-Path $root 'Tools\Test-LogVerdictPerformance.ps1'
+        $script:PerformanceBudget = Join-Path $root 'Data\performance-budgets.json'
+    }
+
+    It 'runs every fixture and writes only aggregate timing and count fields' {
+        $report = Join-Path $TestDrive 'performance.json'
+        $output = @(& $script:PerformanceTool -OutputPath $report -BudgetPath $script:PerformanceBudget)
+        $? | Should -BeTrue
+
+        $json = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+        $json.SchemaVersion | Should -Be 1
+        $json.Passed | Should -BeTrue
+        @($json.Fixtures).Count | Should -Be 4
+        @($json.Fixtures | Where-Object { $_.Id -eq 'text-small' -and $_.Status -eq 'readable' }).Count | Should -Be 1
+        @($json.Fixtures | Where-Object { $_.Id -eq 'text-large' -and $_.ObservedRecords -ge 10000 }).Count | Should -Be 1
+        @($json.Fixtures | Where-Object { $_.Id -eq 'text-malformed' -and $_.UndatedRecords -eq 128 }).Count | Should -Be 1
+        @($json.Fixtures | Where-Object { $_.Id -eq 'evtx-malformed' -and $_.Status -eq 'unreadable' }).Count | Should -Be 1
+        $raw = Get-Content -LiteralPath $report -Raw
+        $raw | Should -Not -Match 'Message|SampleMessage|MachineName|Path|C:\\|secret'
+        $output -join "`n" | Should -Match 'Performance gate: passed'
+    }
+}
+
 Describe 'Offline evidence analysis' {
     BeforeAll {
         Add-Type -AssemblyName System.IO.Compression.FileSystem
