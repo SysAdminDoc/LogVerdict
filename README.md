@@ -233,9 +233,20 @@ $drafted = Invoke-LogVerdictScan -DaysBack 30 -ExplainUnknown -OllamaModel llama
 $r.Findings | Where-Object Verdict -eq 'actionable'
 $r | Export-LogVerdictReport -OutputDir C:\Temp\lv
 
+# Versioned machine-interchange JSON for ECS, OCSF, OpenTelemetry Logs, or STIX 2.1
+Export-LogVerdictStandard -Result $r -Format Ocsf -Path C:\Temp\lv\finding.ocsf.json -Redact
+
 # Or open the window from the module
 Show-LogVerdictGui -DaysBack 7 -AutoScan
 ```
+
+`Export-LogVerdictStandard` uses one adapter contract across `Ecs`, `Ocsf`,
+`OpenTelemetry`, and `Stix`. Each JSON document declares `schemaVersion: 1.0.0`,
+preserves finding confidence, rule references, source/channel/provider/EventID fields,
+timestamps, normalized coverage, configuration-health profiles, and explicit
+`privacy.redacted`/`privacy.rawEvidenceIncluded` state. `-Redact` applies the same
+identifier masking as the ordinary reports before projection; the adapters never copy
+the internal result object wholesale or add raw EVTX bytes.
 
 To check whether a fix worked, save a JSON report before the change, scan again afterwards, and compare them. The output contains only signatures that are new, resolved, or worsening, as flat PowerShell objects that can be filtered or exported directly:
 

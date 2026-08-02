@@ -34,6 +34,7 @@ Export-ModuleMember -Function @(
     'Update-LogVerdictDatabase',
     'Test-LogVerdictDatabase',
     'Export-LogVerdictReport',
+    'Export-LogVerdictStandard',
     'Show-LogVerdictReport',
     'Show-LogVerdictGui'
 )

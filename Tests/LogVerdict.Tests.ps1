@@ -11,6 +11,7 @@ Describe 'Module surface' {
         $exported | Should -Be @(
             'Compare-LogVerdictScan',
             'Export-LogVerdictReport',
+            'Export-LogVerdictStandard',
             'Get-LogVerdictDatabase',
             'Get-LogVerdictErrorCatalog',
             'Invoke-LogVerdictScan',
@@ -2053,6 +2054,66 @@ Describe 'Report rendering' {
             $text | Should -Match 'CONFIGURATION HEALTH.*advisory profiles'
             $html | Should -Match 'Configuration health'
             $manifest | Should -Match 'CONFIGURATION HEALTH PROFILES'
+        }
+    }
+
+    It 'round-trips ECS, OCSF, OpenTelemetry, and STIX adapter JSON' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $finding = $r.Findings[0] | Select-Object *
+            $finding | Add-Member -NotePropertyName Samples -NotePropertyValue @('raw HOST-9 C:\Users\bob\secret.txt')
+            $result.Findings = @($finding)
+            $result | Add-Member -NotePropertyName Coverage -NotePropertyValue @([pscustomobject]@{
+                Source='event'; Kind='channel'; Name='System'; Status='empty'; Reason='No matching event'
+                Path=$null; WindowStart=(Get-Date).AddDays(-1); WindowEnd=(Get-Date); Cap=20
+                ObservedRecords=0; SkippedRecords=0; RecordGap=$null; ParserError=$null; SizeBytes=$null
+                ParseMilliseconds=4; SHA256=$null; Origin='live'
+            })
+            $formats = @('Ecs', 'Ocsf', 'OpenTelemetry', 'Stix')
+            foreach ($format in $formats) {
+                $export = Export-LogVerdictStandard -Result $result -Format $format
+                $json = $export.Document | ConvertTo-Json -Depth 30
+                $roundTrip = $json | ConvertFrom-Json
+                $roundTrip.schemaVersion | Should -BeExactly '1.0.0'
+                $roundTrip.adapter | Should -Not -BeNullOrEmpty
+                $json | Should -Match 'Acme'
+                $json | Should -Match 'high'
+                $json | Should -Match 'coverage'
+            }
+            $ecs = (Export-LogVerdictStandard -Result $result -Format Ecs).Document
+            $ecs.findings[0].logverdict.event.provider | Should -BeExactly 'Acme'
+            $ecs.findings[0].rule.confidence | Should -BeExactly 'high'
+            $ecs.logverdict.coverage[0].status | Should -BeExactly 'empty'
+            $ocsf = (Export-LogVerdictStandard -Result $result -Format Ocsf).Document
+            $ocsf.findings[0].finding_info.uid | Should -BeExactly 'Acme/99'
+            $otel = (Export-LogVerdictStandard -Result $result -Format OpenTelemetry).Document
+            @($otel.resourceLogs[0].scopeLogs[0].logRecords[0].attributes.key) | Should -Contain 'logverdict.event.provider'
+            $stix = (Export-LogVerdictStandard -Result $result -Format Stix).Document
+            @($stix.objects | Where-Object type -eq 'observed-data').Count | Should -Be 1
+            ($stix.objects | Where-Object type -eq 'report').x_logverdict.schemaVersion | Should -BeExactly '1.0.0'
+            $path = Join-Path $TestDrive 'adapters\ecs.json'
+            $written = Export-LogVerdictStandard -Result $result -Format Ecs -Path $path
+            $written.Path | Should -BeExactly $path
+            (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).adapter | Should -BeExactly 'ecs'
+        }
+    }
+
+    It 'marks and enforces redaction in standard exports' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $finding = $r.Findings[0] | Select-Object *
+            $finding | Add-Member -NotePropertyName Samples -NotePropertyValue @('raw HOST-9 C:\Users\bob\secret.txt')
+            $result.Findings = @($finding)
+            $result.MachineName = 'HOST-9'
+            $result | Add-Member -NotePropertyName Redacted -NotePropertyValue $false
+            $export = Export-LogVerdictStandard -Result $result -Format Ecs -Redact
+            $json = $export.Document | ConvertTo-Json -Depth 30
+            $export.Document.logverdict.privacy.redacted | Should -BeTrue
+            $export.Document.logverdict.privacy.rawEvidenceIncluded | Should -BeFalse
+            $json | Should -Not -Match 'HOST-9|bob'
+            $json | Should -Match '<MACHINE>|identifiersMasked'
         }
     }
 
