@@ -19,7 +19,7 @@ function New-LVHealthProfile {
         [AllowNull()][string[]]$EventIds,
         [AllowNull()][string[]]$EventVersions,
         [AllowNull()][string]$MetadataStatus,
-        [AllowNull()][bool]$ReadExistingEvents,
+        [AllowNull()][Nullable[bool]]$ReadExistingEvents,
         [AllowNull()][int]$HeartbeatIntervalSeconds,
         [AllowNull()][string]$BookmarkState,
         [AllowNull()][string]$RetentionMode,
@@ -343,9 +343,19 @@ function Get-LVSysmonHealthProfile {
         -Advice 'Observed Sysmon events are evidence of collection only; filtered or missing IDs are visibility context, never a malicious verdict.' -Origin 'live'
 }
 
+function Invoke-LVWecutil {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string[]]$Argument
+    )
+
+    return @(& $Path @Argument 2>&1 | ForEach-Object { [string]$_ })
+}
+
 function Get-LVWEFHealthProfile {
     [CmdletBinding()]
-    param()
+    param([AllowNull()][string[]]$Subscription)
 
     $wecutil = Join-Path $env:SystemRoot 'System32\wecutil.exe'
     if (-not (Test-Path -LiteralPath $wecutil -PathType Leaf)) {
@@ -355,7 +365,17 @@ function Get-LVWEFHealthProfile {
             -Advice 'WEF health is outside a one-shot local scan unless subscriptions are configured on this machine.' -Origin 'live'
     }
     try {
-        $names = @(& $wecutil es 2>$null | ForEach-Object { [string]$_ } | Where-Object { $_ -and $_.Trim() })
+        $names = if ($Subscription -and $Subscription.Count -gt 0) {
+            @($Subscription | Where-Object { $_ -and $_.Trim() } | Select-Object -First 32)
+        } else {
+            @(Invoke-LVWecutil -Path $wecutil -Argument @('es') | Where-Object { $_ -and $_.Trim() -and $_ -notmatch '^\s*(ERROR|Error)\b' } | Select-Object -First 32)
+        }
+        if (-not ($Subscription -and $Subscription.Count -gt 0) -and @($names | Where-Object { $_ -match '(?i)failed to open subscription enumeration|RPC server is unavailable|NativeCommandError' }).Count -gt 0) {
+            return New-LVHealthProfile -Profile 'wef-subscriptions' -Source 'wef' -Name 'Windows Event Forwarding' -Status 'unreadable' `
+                -RequiredConfiguration 'WEF subscriptions should declare read-existing behavior, a heartbeat, and a bookmark/runtime state when forwarding is in scope.' `
+                -ObservedConfiguration 'wecutil could not open subscription enumeration.' -Reason (($names | Select-Object -First 1) -as [string]) `
+                -Advice 'Review the local Windows Event Collector service and subscription store; this is not a maliciousness signal.' -Origin 'live'
+        }
         if ($names.Count -eq 0) {
             return New-LVHealthProfile -Profile 'wef-subscriptions' -Source 'wef' -Name 'Windows Event Forwarding' -Status 'empty' `
                 -RequiredConfiguration 'WEF subscriptions should declare read-existing behavior, a heartbeat, and a bookmark/runtime state when forwarding is in scope.' `
@@ -364,35 +384,46 @@ function Get-LVWEFHealthProfile {
         }
         $profiles = New-Object System.Collections.Generic.List[object]
         foreach ($name in @($names | Select-Object -First 32)) {
-            $raw = @(& $wecutil gs $name /f:xml 2>$null | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+            $raw = (Invoke-LVWecutil -Path $wecutil -Argument @('gs', [string]$name, '/f:xml')) -join [Environment]::NewLine
+            $runtime = (Invoke-LVWecutil -Path $wecutil -Argument @('rs', [string]$name)) -join [Environment]::NewLine
             $readExisting = $null
             $heartbeat = $null
             $bookmark = $null
+            $runtimeStatus = $null
+            $dropped = $null
+            $runtimeError = $null
             try {
                 $xml = [xml]$raw
                 $readNode = $xml.SelectSingleNode("//*[local-name()='ReadExistingEvents']")
                 $heartbeatNode = $xml.SelectSingleNode("//*[contains(translate(local-name(), 'HEARTBEAT', 'heartbeat'), 'heartbeat')]")
-                $bookmarkNode = $xml.SelectSingleNode("//*[contains(translate(local-name(), 'BOOKMARKRUNTIME', 'bookmarkruntime'), 'bookmark') or contains(translate(local-name(), 'BOOKMARKRUNTIME', 'bookmarkruntime'), 'runtime')]")
+                $bookmarkNode = $xml.SelectSingleNode("//*[contains(translate(local-name(), 'BOOKMARKRUNTIME', 'bookmarkruntime'), 'bookmark')]")
                 if ($readNode) { $readExisting = [bool]::Parse([string]$readNode.InnerText) }
                 if ($heartbeatNode -and [int]::TryParse([string]$heartbeatNode.InnerText, [ref]$heartbeat)) { }
                 if ($bookmarkNode) { $bookmark = [string]$bookmarkNode.InnerText }
             } catch {
                 $bookmark = 'unreadable configuration XML'
             }
-            $status = if ($raw) { 'readable' } else { 'unreadable' }
-            $profiles.Add((New-LVHealthProfile -Profile 'wef-subscription' -Source 'wef' -Name $name -Status $status `
+            if ($runtime -match '(?im)^\s*(?:RuntimeStatus|Status)\s*[:=]\s*(?<value>.+?)\s*$') { $runtimeStatus = $Matches['value'].Trim() }
+            if ($runtime -match '(?im)^\s*(?:EventsDropped|DroppedEvents|EventsDroppedCount)\s*[:=]\s*(?<value>\d+)\s*$') { $dropped = [int64]$Matches['value'] }
+            if ($runtime -match '(?im)^\s*(?:LastError|Error)\s*[:=]\s*(?<value>.+?)\s*$') { $runtimeError = $Matches['value'].Trim() }
+            if (-not $bookmark -and $runtime -match '(?im)^\s*(?:Bookmark|BookmarkState)\s*[:=]\s*(?<value>.+?)\s*$') { $bookmark = $Matches['value'].Trim() }
+            $status = if ($raw) { 'readable' } elseif ($runtime) { 'partial' } else { 'unreadable' }
+            $observed = ('ReadExistingEvents={0}; HeartbeatIntervalSeconds={1}; BookmarkState={2}; RuntimeStatus={3}; DroppedEvents={4}' -f $readExisting, $heartbeat, $bookmark, $runtimeStatus, $dropped)
+            $healthEntry = New-LVHealthProfile -Profile 'wef-subscription' -Source 'wef' -Name ([string]$name) -Status $status `
                 -RequiredConfiguration 'WEF subscriptions should declare read-existing behavior, a heartbeat, and a bookmark/runtime state when forwarding is in scope.' `
-                -ObservedConfiguration ('ReadExistingEvents={0}; HeartbeatIntervalSeconds={1}; BookmarkState={2}' -f $readExisting, $heartbeat, $bookmark) `
-                -ReadExistingEvents $readExisting -HeartbeatIntervalSeconds $heartbeat -BookmarkState $bookmark `
-                -Reason $(if ($status -eq 'unreadable') { 'wecutil could not return subscription configuration.' } else { $null }) `
-                -Advice 'Read-existing, heartbeat, and bookmark values describe collection health only; they are not maliciousness signals.' -Origin 'live')) | Out-Null
+                -ObservedConfiguration $observed -ReadExistingEvents $readExisting -HeartbeatIntervalSeconds $heartbeat -BookmarkState $bookmark `
+                -Reason $(if ($status -eq 'unreadable') { 'wecutil could not return subscription configuration or runtime state.' } elseif ($runtimeError) { $runtimeError } else { $null }) `
+                -Advice 'Read-existing, heartbeat, bookmark, reconnect, and drop values describe collection health only; they are not maliciousness signals.' -Origin 'live'
+            $healthEntry | Add-Member -NotePropertyName RuntimeStatus -NotePropertyValue $runtimeStatus
+            $healthEntry | Add-Member -NotePropertyName DroppedEvents -NotePropertyValue $dropped
+            $profiles.Add($healthEntry) | Out-Null
         }
         return @($profiles.ToArray())
     } catch {
         return New-LVHealthProfile -Profile 'wef-subscriptions' -Source 'wef' -Name 'Windows Event Forwarding' -Status 'unreadable' `
             -RequiredConfiguration 'WEF subscriptions should declare read-existing behavior, a heartbeat, and a bookmark/runtime state when forwarding is in scope.' `
             -ObservedConfiguration 'wecutil could not enumerate subscriptions.' -Reason $_.Exception.Message `
-            -Advice 'Review WEF subscription health separately; this profile is not a maliciousness signal.' -Origin 'live'
+            -Advice 'Review WEF subscription health separately; this is not a maliciousness signal.' -Origin 'live'
     }
 }
 

@@ -203,7 +203,9 @@ function ConvertTo-LVFlatFindingRow {
             CoverageReason    = $null; CoveragePath = $null; CoverageWindowStart = $null; CoverageWindowEnd = $null
             CoverageCap       = $null; CoverageObservedRecords = $null; CoverageSkippedRecords = $null
             CoverageRecordGap = $null; CoverageParserError = $null; CoverageSizeBytes = $null
-            CoverageParseMilliseconds = $null; CoverageSHA256 = $null; CoverageOrigin = $null
+         CoverageParseMilliseconds = $null; CoverageSHA256 = $null; CoverageOrigin = $null
+         CoveragePollCount = $null; CoveragePollErrors = $null; CoverageReconnectCount = $null; CoverageDroppedRecords = $null
+         CoverageAverageLatencyMilliseconds = $null; CoverageMaxLatencyMilliseconds = $null
             HealthProfile = $null; HealthSource = $null; HealthName = $null; HealthStatus = $null
             HealthRequiredConfiguration = $null; HealthObservedConfiguration = $null
             HealthEnabledEventIds = $null; HealthFilteredEventIds = $null; HealthProvider = $null; HealthProviderId = $null; HealthChannel = $null
@@ -239,6 +241,12 @@ function ConvertTo-LVCoverageCsvRow {
         CoverageParserError = $Coverage.ParserError; CoverageSizeBytes = $Coverage.SizeBytes
         CoverageParseMilliseconds = $Coverage.ParseMilliseconds; CoverageSHA256 = $Coverage.SHA256
         CoverageOrigin    = $Coverage.Origin
+        CoveragePollCount = if ($Coverage.PSObject.Properties['PollCount']) { $Coverage.PollCount } else { $null }
+        CoveragePollErrors = if ($Coverage.PSObject.Properties['PollErrors']) { $Coverage.PollErrors } else { $null }
+        CoverageReconnectCount = if ($Coverage.PSObject.Properties['ReconnectCount']) { $Coverage.ReconnectCount } else { $null }
+        CoverageDroppedRecords = if ($Coverage.PSObject.Properties['DroppedRecords']) { $Coverage.DroppedRecords } else { $null }
+        CoverageAverageLatencyMilliseconds = if ($Coverage.PSObject.Properties['AverageLatencyMilliseconds']) { $Coverage.AverageLatencyMilliseconds } else { $null }
+        CoverageMaxLatencyMilliseconds = if ($Coverage.PSObject.Properties['MaxLatencyMilliseconds']) { $Coverage.MaxLatencyMilliseconds } else { $null }
         HealthProfile = $null; HealthSource = $null; HealthName = $null; HealthStatus = $null
         HealthRequiredConfiguration = $null; HealthObservedConfiguration = $null
         HealthEnabledEventIds = $null; HealthFilteredEventIds = $null; HealthProvider = $null; HealthProviderId = $null; HealthChannel = $null
@@ -276,8 +284,13 @@ function ConvertTo-LVHealthCsvRow {
         HealthHeartbeatIntervalSeconds = $Health.HeartbeatIntervalSeconds; HealthBookmarkState = $Health.BookmarkState
         HealthRetentionMode = $Health.RetentionMode; HealthRecordCount = $Health.RecordCount
         HealthOldestRecord = if ($Health.OldestRecord) { ([datetime]$Health.OldestRecord).ToString('o') } else { $null }
-        HealthMaximumSizeBytes = $Health.MaximumSizeBytes; HealthClockOffsetMinutes = $Health.ClockOffsetMinutes
-        HealthReason = $Health.Reason; HealthAdvice = $Health.Advice; HealthPath = $Health.Path
+         HealthMaximumSizeBytes = $Health.MaximumSizeBytes; HealthClockOffsetMinutes = $Health.ClockOffsetMinutes
+         HealthReason = $Health.Reason; HealthAdvice = $Health.Advice; HealthPath = $Health.Path
+         HealthPollErrors = if ($Health.PSObject.Properties['PollErrors']) { $Health.PollErrors } else { $null }
+         HealthReconnectCount = if ($Health.PSObject.Properties['ReconnectCount']) { $Health.ReconnectCount } else { $null }
+         HealthDroppedRecords = if ($Health.PSObject.Properties['DroppedRecords']) { $Health.DroppedRecords } else { $null }
+         HealthAverageLatencyMilliseconds = if ($Health.PSObject.Properties['AverageLatencyMilliseconds']) { $Health.AverageLatencyMilliseconds } else { $null }
+         HealthMaxLatencyMilliseconds = if ($Health.PSObject.Properties['MaxLatencyMilliseconds']) { $Health.MaxLatencyMilliseconds } else { $null }
     }
 }
 
@@ -377,6 +390,10 @@ function ConvertTo-LVTextReport {
             if ($null -ne $source.Cap) { $detail += ('; cap {0}' -f $source.Cap) }
             if ($source.RecordGap) { $detail += ('; gap: ' + $source.RecordGap) }
             if ($source.ParserError) { $detail += ('; parser: ' + $source.ParserError) }
+            if ($source.PSObject.Properties['ReconnectCount']) { $detail += ('; reconnects {0}' -f $source.ReconnectCount) }
+            if ($source.PSObject.Properties['DroppedRecords']) { $detail += ('; dropped {0}' -f $source.DroppedRecords) }
+            if ($source.PSObject.Properties['AverageLatencyMilliseconds']) { $detail += ('; average latency {0} ms' -f $source.AverageLatencyMilliseconds) }
+            if ($source.PSObject.Properties['MaxLatencyMilliseconds']) { $detail += ('; max latency {0} ms' -f $source.MaxLatencyMilliseconds) }
             Add-LVLine $sb ('  - ' + $detail)
         }
         Add-LVLine $sb
@@ -640,6 +657,10 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             if ($null -ne $source.ObservedRecords) { $detail.Add(('{0} observed' -f $source.ObservedRecords)) | Out-Null }
             if ($source.RecordGap) { $detail.Add(('gap: ' + [string]$source.RecordGap)) | Out-Null }
             if ($source.ParserError) { $detail.Add(('parser: ' + [string]$source.ParserError)) | Out-Null }
+            if ($source.PSObject.Properties['ReconnectCount']) { $detail.Add(('reconnects: ' + [string]$source.ReconnectCount)) | Out-Null }
+            if ($source.PSObject.Properties['DroppedRecords']) { $detail.Add(('dropped: ' + [string]$source.DroppedRecords)) | Out-Null }
+            if ($source.PSObject.Properties['AverageLatencyMilliseconds']) { $detail.Add(('average latency: ' + [string]$source.AverageLatencyMilliseconds + ' ms')) | Out-Null }
+            if ($source.PSObject.Properties['MaxLatencyMilliseconds']) { $detail.Add(('max latency: ' + [string]$source.MaxLatencyMilliseconds + ' ms')) | Out-Null }
             Add-LVLine $sb ('<div class="row"><div class="lbl">{0}</div><div>{1}</div></div>' -f (ConvertTo-LVHtmlEncoded $label), (ConvertTo-LVHtmlEncoded ($detail -join '; ')))
         }
     }

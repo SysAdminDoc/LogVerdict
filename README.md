@@ -91,6 +91,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Report destination, identifier masking, evidence bundle | Report controls | `-OutputDir`, `-Redact`, `-IncludeEvidence` |
 | Offline evidence re-evaluation | Console-only batch/review workflow | `-EvidencePath` |
 | Local-model draft and rule-authoring workflow | Deliberately console-only so model endpoint and local-rule writes remain explicit | `-ExplainUnknown`, `-OllamaModel`, `-OllamaEndpoint`, `-PromoteToRule`, `-LocalRulePath` |
+| Bounded live event tail and bookmark resume | Module-only, opt-in workflow with reconnect/drop/latency coverage and optional WEF health intake | `Watch-LogVerdict` |
 | Output format selection | The window always saves Text, JSON, CSV, and HTML together | `-Format` (`Text`, `Json`, `Csv`, `Html`, or `All`) |
 | Console lifecycle | Not applicable to a persistent window | `-NoReport`, `-Pause`, `-NoPause` |
 
@@ -126,6 +127,14 @@ the scan identity, source (`event`, `text`, or `reliability`), provider and even
 first and last timestamps, verdict, ruling prose, error-catalog fields, and the official reference. Correlations
 remain in the text, JSON, and HTML reports. The row shape is deliberately suitable for `Import-Csv`,
 `Export-Csv`, `Out-GridView`, or a ticketing-system import without knowing LogVerdict's nested JSON schema.
+
+The module also has an explicit bounded live-tail path. `Watch-LogVerdict -Channel System -DurationSeconds 60 -BookmarkPath .\system-bookmark.json` reads only events newer than each channel's saved `RecordId`/timestamp,
+writes the bookmark atomically, and returns normalized records with per-channel reconnect counts, possible dropped
+record gaps, and event latency. `-MaxEvents`, `-IdleTimeoutSeconds`, and `-PollMilliseconds` keep the watch bounded;
+it stops cleanly when a limit is reached or the caller interrupts it. `-IncludeWEFHealth` adds local `wecutil`
+subscription configuration and runtime state, including read-existing, heartbeat, bookmark, reconnect/error, and
+drop fields. These are collection-health facts, never malicious verdicts, and no fleet agent or remote connection is
+required.
 
 Double-clicked, it holds the console window open until you press Enter. Run from a script or a scheduled task and it never pauses, so automation cannot hang; `-Pause` and `-NoPause` force the behaviour either way.
 

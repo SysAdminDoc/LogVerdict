@@ -53,6 +53,12 @@ function ConvertTo-LVStandardCoverage {
             parseMilliseconds = $source.ParseMilliseconds
             sha256 = $source.SHA256
             origin = $source.Origin
+            pollCount = if ($source.PSObject.Properties['PollCount']) { $source.PollCount } else { $null }
+            pollErrors = if ($source.PSObject.Properties['PollErrors']) { $source.PollErrors } else { $null }
+            reconnectCount = if ($source.PSObject.Properties['ReconnectCount']) { $source.ReconnectCount } else { $null }
+            droppedRecords = if ($source.PSObject.Properties['DroppedRecords']) { $source.DroppedRecords } else { $null }
+            averageLatencyMilliseconds = if ($source.PSObject.Properties['AverageLatencyMilliseconds']) { $source.AverageLatencyMilliseconds } else { $null }
+            maxLatencyMilliseconds = if ($source.PSObject.Properties['MaxLatencyMilliseconds']) { $source.MaxLatencyMilliseconds } else { $null }
         }
     }
 }
@@ -88,6 +94,11 @@ function ConvertTo-LVStandardHealth {
             advice = $health.Advice
             path = $health.Path
             origin = $health.Origin
+            pollErrors = if ($health.PSObject.Properties['PollErrors']) { $health.PollErrors } else { $null }
+            reconnectCount = if ($health.PSObject.Properties['ReconnectCount']) { $health.ReconnectCount } else { $null }
+            droppedRecords = if ($health.PSObject.Properties['DroppedRecords']) { $health.DroppedRecords } else { $null }
+            averageLatencyMilliseconds = if ($health.PSObject.Properties['AverageLatencyMilliseconds']) { $health.AverageLatencyMilliseconds } else { $null }
+            maxLatencyMilliseconds = if ($health.PSObject.Properties['MaxLatencyMilliseconds']) { $health.MaxLatencyMilliseconds } else { $null }
         }
     }
 }

@@ -18,7 +18,8 @@ Describe 'Module surface' {
             'Show-LogVerdictGui',
             'Show-LogVerdictReport',
             'Test-LogVerdictDatabase',
-            'Update-LogVerdictDatabase'
+            'Update-LogVerdictDatabase',
+            'Watch-LogVerdict'
         )
     }
 
@@ -1425,6 +1426,72 @@ Describe 'Provider and configuration health profiles' {
             ($profiles | Where-Object Profile -eq 'retention-and-clock').Advice | Should -Match 'tamper verdict'
             ($profiles | Where-Object Profile -eq 'wef-subscriptions').Status | Should -BeIn @('not-observed', 'empty', 'unreadable')
             ($profiles | Where-Object Profile -eq 'defender-configuration').Advice | Should -Match 'not a malicious verdict'
+        }
+    }
+}
+
+Describe 'Live event watch and WEF intake' {
+    It 'resumes from a bookmark and reports drops, reconnects, and latency' {
+        InModuleScope LogVerdict {
+            $bookmark = Join-Path $TestDrive 'watch-bookmark.json'
+            @'
+{
+  "schemaVersion": 1,
+  "channels": {
+    "Fake": {
+      "recordId": 1,
+      "timeCreated": "2026-08-02T10:00:00.0000000Z"
+    }
+  }
+}
+'@ | Set-Content -LiteralPath $bookmark -Encoding UTF8
+            $script:watchCalls = 0
+            Mock Start-Sleep { }
+            Mock Get-WinEvent {
+                $script:watchCalls++
+                if ($script:watchCalls -eq 1) { throw 'temporary subscription drop' }
+                @(
+                    [pscustomobject]@{ ProviderName='FakeProvider'; Id=7; Level=2; LevelDisplayName='Error'; TimeCreated=(Get-Date).AddMilliseconds(-25); MachineName='M'; RecordId=4; Message='first' }
+                    [pscustomobject]@{ ProviderName='FakeProvider'; Id=7; Level=2; LevelDisplayName='Error'; TimeCreated=(Get-Date).AddMilliseconds(-15); MachineName='M'; RecordId=7; Message='second' }
+                )
+            }
+
+            $result = Watch-LogVerdict -Channel Fake -BookmarkPath $bookmark -DurationSeconds 3 -MaxEvents 2 -PollMilliseconds 100 -PageSize 4
+            $result.Mode | Should -BeExactly 'live-watch'
+            $result.StopReason | Should -BeExactly 'max-events'
+            $result.RecordCount | Should -Be 2
+            $result.Records[0].Source | Should -BeExactly 'event'
+            $result.Coverage[0].ReconnectCount | Should -Be 1
+            $result.Coverage[0].SkippedRecords | Should -Be 4
+            $result.Coverage[0].RecordGap | Should -Match 'RecordId gap'
+            $result.Coverage[0].AverageLatencyMilliseconds | Should -BeGreaterThan 0
+            $csvRow = ConvertTo-LVCoverageCsvRow -Result $result -Coverage $result.Coverage[0]
+            $csvRow.CoverageReconnectCount | Should -Be 1
+            $csvRow.CoverageAverageLatencyMilliseconds | Should -BeGreaterThan 0
+            $saved = Get-Content -LiteralPath $bookmark -Raw | ConvertFrom-Json
+            $saved.channels.Fake.recordId | Should -Be 7
+        }
+    }
+
+    It 'parses WEF configuration and runtime state as advisory health' {
+        InModuleScope LogVerdict {
+            Mock Test-Path { $true }
+            Mock Invoke-LVWecutil {
+                param($Argument)
+                if ($Argument[0] -eq 'gs') {
+                    return '<Subscription><ReadExistingEvents>true</ReadExistingEvents><HeartbeatInterval>900</HeartbeatInterval><Bookmark>configured</Bookmark></Subscription>'
+                }
+                return "RuntimeStatus: active`nEventsDropped: 3`nBookmarkState: runtime"
+            }
+            $profiles = @(Get-LVWEFHealthProfile -Subscription @('DemoSubscription'))
+            $profiles.Count | Should -Be 1
+            $profiles[0].Status | Should -BeExactly 'readable'
+            $profiles[0].ReadExistingEvents | Should -BeTrue
+            $profiles[0].HeartbeatIntervalSeconds | Should -Be 900
+            $profiles[0].BookmarkState | Should -BeExactly 'configured'
+            $profiles[0].RuntimeStatus | Should -BeExactly 'active'
+            $profiles[0].DroppedEvents | Should -Be 3
+            $profiles[0].Advice | Should -Match 'not maliciousness signals'
         }
     }
 }

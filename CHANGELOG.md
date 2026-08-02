@@ -35,6 +35,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added `Tools\Import-SigmaRule.ps1`, a local-only, licence-aware Sigma compatibility importer
   that emits attributed inactive review candidates, bounded field mappings, retained Sigma
   metadata, and stable-ID added/changed/removed diffs without modifying the curated database.
+- Added the opt-in `Watch-LogVerdict` module command for bounded local event tails with atomic
+  per-channel bookmark resume, reconnect/drop/latency coverage, clean stop limits, and optional
+  advisory WEF `wecutil` configuration/runtime intake.
 
 ## [0.8.0] - 2026-08-01
 

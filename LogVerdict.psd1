@@ -17,6 +17,7 @@
         'Test-LogVerdictDatabase',
         'Export-LogVerdictReport',
         'Export-LogVerdictStandard',
+        'Watch-LogVerdict',
         'Show-LogVerdictReport',
         'Show-LogVerdictGui'
     )

@@ -173,6 +173,10 @@ function Format-LVEvidenceManifest {
             if ($source.Reason) { $detail += ('; ' + $source.Reason) }
             if ($source.RecordGap) { $detail += ('; gap: ' + $source.RecordGap) }
             if ($source.ParserError) { $detail += ('; parser: ' + $source.ParserError) }
+            if ($source.PSObject.Properties['ReconnectCount']) { $detail += ('; reconnects: ' + [string]$source.ReconnectCount) }
+            if ($source.PSObject.Properties['DroppedRecords']) { $detail += ('; dropped: ' + [string]$source.DroppedRecords) }
+            if ($source.PSObject.Properties['AverageLatencyMilliseconds']) { $detail += ('; average latency: ' + [string]$source.AverageLatencyMilliseconds + ' ms') }
+            if ($source.PSObject.Properties['MaxLatencyMilliseconds']) { $detail += ('; max latency: ' + [string]$source.MaxLatencyMilliseconds + ' ms') }
             Add-LVLine $sb ('  - ' + $detail)
         }
         Add-LVLine $sb
