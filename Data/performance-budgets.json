@@ -40,6 +40,7 @@
       "sourceKind": "offline-evtx",
       "byteCount": 3,
       "expectedStatus": "unreadable",
+      "maxParserMilliseconds": 5000,
       "maxElapsedMilliseconds": 15000
     }
   ]

@@ -197,8 +197,8 @@ CI also runs `Tools\Test-LogVerdictPerformance.ps1` on both supported PowerShell
 runtimes. It creates small, large, malformed-text, and malformed-EVTX inputs only in
 the runner's temporary directory, deletes them after the run, and writes an aggregate
 report containing statuses, bounded record counts, sizes, and timing. The checked-in
-`Data\performance-budgets.json` makes a source-level timing regression fail the gate;
-the report never contains fixture text or paths.
+`Data\performance-budgets.json` makes end-to-end and parser-level timing regressions
+fail the gate; the report never contains fixture text or paths.
 Drop a `verdicts.local.json` beside either .exe to add your own rules; they are merged automatically and win ties against the compiled-in ones. A full `Data\verdicts.json` beside the .exe replaces the compiled-in database entirely.
 
 Rule updates are opt-in. `Update-LogVerdictDatabase` fetches `verdicts.json` from a

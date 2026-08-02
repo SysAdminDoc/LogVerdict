@@ -202,6 +202,10 @@ try {
             if ($entry.ElapsedMilliseconds -gt [int64]$definition.maxElapsedMilliseconds) {
                 Add-LVBenchmarkFailure -List $failures -FixtureId $id -Reason ("elapsed {0} ms exceeded budget {1} ms" -f $entry.ElapsedMilliseconds, $definition.maxElapsedMilliseconds)
             }
+            if ($definition.PSObject.Properties['maxParserMilliseconds'] -and $null -ne $entry.ParserMilliseconds -and
+                $entry.ParserMilliseconds -gt [int64]$definition.maxParserMilliseconds) {
+                Add-LVBenchmarkFailure -List $failures -FixtureId $id -Reason ("parser elapsed {0} ms exceeded budget {1} ms" -f $entry.ParserMilliseconds, $definition.maxParserMilliseconds)
+            }
             if ($definition.PSObject.Properties['minObservedRecords'] -and $entry.ObservedRecords -lt [int64]$definition.minObservedRecords) {
                 Add-LVBenchmarkFailure -List $failures -FixtureId $id -Reason ("observed {0} record(s), minimum is {1}" -f $entry.ObservedRecords, $definition.minObservedRecords)
             }

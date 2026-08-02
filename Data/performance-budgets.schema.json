@@ -27,6 +27,7 @@
           "expectedStatus": { "type": "string", "minLength": 1 },
           "minObservedRecords": { "type": "integer", "minimum": 0 },
           "expectedUndatedRecords": { "type": "integer", "minimum": 0 },
+          "maxParserMilliseconds": { "type": "integer", "minimum": 1 },
           "maxElapsedMilliseconds": { "type": "integer", "minimum": 1 }
         }
       }

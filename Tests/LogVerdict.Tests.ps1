@@ -4282,6 +4282,7 @@ Describe 'Content-free performance benchmark gate' {
         @($json.Fixtures | Where-Object { $_.Id -eq 'text-large' -and $_.ObservedRecords -ge 10000 }).Count | Should -Be 1
         @($json.Fixtures | Where-Object { $_.Id -eq 'text-malformed' -and $_.UndatedRecords -eq 128 }).Count | Should -Be 1
         @($json.Fixtures | Where-Object { $_.Id -eq 'evtx-malformed' -and $_.Status -eq 'unreadable' }).Count | Should -Be 1
+        @($json.Fixtures | Where-Object { $_.Id -eq 'evtx-malformed' -and $_.ParserMilliseconds -le 5000 }).Count | Should -Be 1
         $raw = Get-Content -LiteralPath $report -Raw
         $raw | Should -Not -Match 'Message|SampleMessage|MachineName|Path|C:\\|secret'
         $output -join "`n" | Should -Match 'Performance gate: passed'
