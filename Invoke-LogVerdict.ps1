@@ -55,6 +55,9 @@
     .PARAMETER AdvisoryVersion
     Package version to test against the optional advisory cache's affected ranges.
 
+    .PARAMETER CaseProfilePath
+    Optional validated case profile to attach for collection and handoff attribution.
+
     .PARAMETER NoReport
     Console only; write nothing to disk.
 
@@ -104,6 +107,7 @@ param(
     [string]$AdvisoryPath,
     [string]$AdvisoryPackage,
     [string]$AdvisoryVersion,
+    [string]$CaseProfilePath,
     [switch]$Pause,
     [switch]$NoPause
 )
@@ -162,6 +166,7 @@ try {
         AdvisoryPath    = $AdvisoryPath
         AdvisoryPackage = $AdvisoryPackage
         AdvisoryVersion = $AdvisoryVersion
+        CaseProfilePath = $CaseProfilePath
     }
     if (-not $EvidencePath -or $PSBoundParameters.ContainsKey('DaysBack')) { $scanArgs['DaysBack'] = $DaysBack }
     if ($EvidencePath) { $scanArgs['EvidencePath'] = $EvidencePath }

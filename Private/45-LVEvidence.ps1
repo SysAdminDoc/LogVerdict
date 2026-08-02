@@ -215,6 +215,14 @@ function Format-LVEvidenceManifest {
         }
         Add-LVLine $sb
     }
+    if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {
+        Add-LVLine $sb 'CASE PROFILE / HANDOFF'
+        Add-LVLine $sb ('  Profile ID: {0}; name: {1}; source count: {2}; redacted: {3}' -f `
+            $Result.CaseProfile.profileId, $Result.CaseProfile.name, @($Result.CaseProfile.sources).Count, $Result.CaseProfile.redaction.requested)
+        Add-LVLine $sb '  The profile records collection bounds, source hashes, notes, and operator choices; it is not a verdict.'
+        foreach ($note in @($Result.CaseProfile.notes | Where-Object { $_ })) { Add-LVLine $sb ('  Note: ' + [string]$note) }
+        Add-LVLine $sb
+    }
 
     Add-LVLine $sb 'WHAT IS DELIBERATELY NOT HERE'
     if ($Redact) {
@@ -272,6 +280,12 @@ function New-LVEvidenceBundle {
         if (-not (Test-Path -LiteralPath $r)) { continue }
         Copy-Item -LiteralPath $r -Destination $staging -Force
         $content.Add($r) | Out-Null
+    }
+
+    if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {
+        $profilePath = Join-Path $staging 'CASE-PROFILE.json'
+        Write-LVTextFile -Path $profilePath -Content ($Result.CaseProfile | ConvertTo-Json -Depth 30)
+        $content.Add($profilePath) | Out-Null
     }
 
     foreach ($t in @(Export-LVTextLogEvidence -Result $Result -Destination $staging -Redact:$Redact)) {

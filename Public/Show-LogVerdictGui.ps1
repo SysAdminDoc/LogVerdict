@@ -31,6 +31,9 @@ function Show-LogVerdictGui {
         .PARAMETER AdvisoryVersion
         Package version to test against the optional advisory cache's affected ranges.
 
+        .PARAMETER CaseProfilePath
+        Optional validated case profile to attach for collection and handoff attribution.
+
         .EXAMPLE
         Show-LogVerdictGui
 
@@ -49,6 +52,7 @@ function Show-LogVerdictGui {
         [string]$AdvisoryPath,
         [string]$AdvisoryPackage,
         [string]$AdvisoryVersion,
+        [string]$CaseProfilePath,
         [switch]$AutoScan,
         [switch]$PassThru
     )
@@ -422,6 +426,16 @@ function Show-LogVerdictGui {
                 $state = if ($advisory.Matched) { 'AFFECTED' } else { 'CACHE ENTRY' }
                 $channelLines.Add(('[{0}] {1} - {2} {3}; CVSS {4}; fixed {5}' -f `
                     $state, $advisory.Id, $advisory.Package, $advisory.Version, $advisory.CVSS, $advisory.FixedVersion)) | Out-Null
+            }
+        }
+        if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {
+            $channelLines.Add('') | Out-Null
+            $channelLines.Add('CASE PROFILE / HANDOFF') | Out-Null
+            $channelLines.Add(('Profile: {0}; sources: {1}; redacted: {2}' -f `
+                $Result.CaseProfile.profileId, @($Result.CaseProfile.sources).Count, $Result.CaseProfile.redaction.requested)) | Out-Null
+            $channelLines.Add('The profile records collection scope, hashes, notes, and operator choices; it is not a verdict.') | Out-Null
+            foreach ($note in @($Result.CaseProfile.notes | Where-Object { $_ })) {
+                $channelLines.Add(('Note: ' + [string]$note)) | Out-Null
             }
         }
         if ($channelLines.Count -eq 0) { $channelLines.Add('No event-channel status was returned.') | Out-Null }
@@ -809,6 +823,7 @@ function Show-LogVerdictGui {
         if ($AdvisoryPath) { $scanArgs['AdvisoryPath'] = $AdvisoryPath }
         if ($AdvisoryPackage) { $scanArgs['AdvisoryPackage'] = $AdvisoryPackage }
         if ($AdvisoryVersion) { $scanArgs['AdvisoryVersion'] = $AdvisoryVersion }
+        if ($CaseProfilePath) { $scanArgs['CaseProfilePath'] = $CaseProfilePath }
 
         $namedChannels = @(Get-LVGuiNamedChannel -Text $ui.TxtOverviewChannels.Text)
         if ($namedChannels.Count -gt 0) {

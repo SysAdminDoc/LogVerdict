@@ -71,6 +71,11 @@ function Invoke-LogVerdictScan {
         .PARAMETER AdvisoryVersion
         Package version to test against the optional advisory cache's affected ranges.
 
+        .PARAMETER CaseProfilePath
+        Optional validated case profile to attach to the result. The profile records
+        collection scope and operator choices for handoff; explicit scan parameters
+        remain authoritative and the profile is not used as a verdict input.
+
         .EXAMPLE
         Invoke-LogVerdictScan -DaysBack 7
 
@@ -100,9 +105,11 @@ function Invoke-LogVerdictScan {
         [ValidateRange(1, 3650)][int]$HistoryWindowDays = 30,
         [string]$AdvisoryPath,
         [string]$AdvisoryPackage,
-        [string]$AdvisoryVersion
+        [string]$AdvisoryVersion,
+        [string]$CaseProfilePath
     )
 
+    $caseProfile = if ($CaseProfilePath) { Read-LVCaseProfile -Path $CaseProfilePath } else { $null }
     if ($EvidencePath) {
         $offlineArgs = @{
             EvidencePath   = $EvidencePath
@@ -119,6 +126,7 @@ function Invoke-LogVerdictScan {
         }
         if ($PSBoundParameters.ContainsKey('DaysBack')) { $offlineArgs['DaysBack'] = $DaysBack }
         $offlineResult = Invoke-LVOfflineScan @offlineArgs
+        $offlineResult = Add-LVCaseProfileToResult -Result $offlineResult -Profile $caseProfile
         $offlineAdvisory = Get-LVAdvisoryScanContext -Path $AdvisoryPath -Package $AdvisoryPackage -Version $AdvisoryVersion
         return (Add-LVAdvisoryContextToResult -Result $offlineResult -Context $offlineAdvisory)
     }
@@ -151,6 +159,7 @@ function Invoke-LogVerdictScan {
     } else {
         $channels = Get-LVDefaultChannel
     }
+    $channelMode = if ($Channel) { 'named' } elseif ($AllChannels) { 'all' } elseif ($DiagnosticChannels) { 'diagnostic' } else { 'default' }
 
     # Probe before reading. The FilterHashtable path cannot tell a denied channel from
     # an empty one, so coverage has to be established with -LogName first or the scan
@@ -425,6 +434,19 @@ function Invoke-LogVerdictScan {
         DatabaseName   = $db.name
         DatabaseDate   = $db.updated
         RuleCount      = @($db.rules).Count
+        ScanOptions    = [ordered]@{
+            channelMode = $channelMode
+            channels = @($channels)
+            allChannels = [bool]$AllChannels
+            diagnosticChannels = [bool]$DiagnosticChannels
+            skipTextLogs = [bool]$SkipTextLogs
+            skipReliability = [bool]$SkipReliability
+            includeBenign = [bool]$IncludeBenign
+            explainUnknown = [bool]$ExplainUnknown
+            promoteToRule = [bool]$PromoteToRule
+            evidencePath = $false
+        }
+        CaseProfile    = $caseProfile
         ModelExplanationsEnabled = $modelRequested
         ModelExplanationCount = @($findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation }).Count
         PromotedDraftRules = @($promotedDrafts)

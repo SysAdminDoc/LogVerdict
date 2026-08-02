@@ -568,6 +568,9 @@ function ConvertTo-LVRedactedResult {
         }
         $copy.HealthProfiles = @($healthProfiles)
     }
+    if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {
+        $copy.CaseProfile = ConvertTo-LVCaseRedactedProfile -Profile $Result.CaseProfile -MachineName $machine
+    }
     if ($copy.PSObject.Properties['CoverageNotes']) {
         $copy.CoverageNotes = @(@($Result.CoverageNotes) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
     }

@@ -129,6 +129,17 @@ function Write-LVConsoleReport {
         Write-Host ''
     }
 
+    if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {
+        Write-Host '  CASE PROFILE / HANDOFF' -ForegroundColor Cyan
+        Write-Host '    Collection metadata and operator context; this is not a verdict.' -ForegroundColor DarkGray
+        Write-Host ('    Profile ID    : {0}' -f $Result.CaseProfile.profileId) -ForegroundColor DarkGray
+        Write-Host ('    Name          : {0}; sources {1}; redacted {2}' -f $Result.CaseProfile.name, @($Result.CaseProfile.sources).Count, $Result.CaseProfile.redaction.requested) -ForegroundColor DarkGray
+        foreach ($note in @($Result.CaseProfile.notes | Where-Object { $_ })) {
+            Write-Host ('    Note          : {0}' -f $note) -ForegroundColor DarkGray
+        }
+        Write-Host ''
+    }
+
     $tally = $Result.Findings | Group-Object -Property Verdict
     foreach ($name in @('critical', 'actionable', 'investigate', 'unknown', 'informational', 'benign')) {
         $g = $tally | Where-Object { $_.Name -eq $name }
@@ -448,6 +459,15 @@ function ConvertTo-LVTextReport {
         Add-LVLine $sb
     }
 
+    if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {
+        Add-LVLine $sb 'CASE PROFILE / HANDOFF'
+        Add-LVLine $sb 'Collection metadata and operator context; this is not a verdict.'
+        Add-LVLine $sb ('Profile ID    : {0}' -f $Result.CaseProfile.profileId)
+        Add-LVLine $sb ('Name          : {0}; sources {1}; redacted {2}' -f $Result.CaseProfile.name, @($Result.CaseProfile.sources).Count, $Result.CaseProfile.redaction.requested)
+        foreach ($note in @($Result.CaseProfile.notes | Where-Object { $_ })) { Add-LVLine $sb ('Note          : {0}' -f $note) }
+        Add-LVLine $sb
+    }
+
     if (@($Result.CoverageNotes).Count -gt 0) {
         Add-LVLine $sb 'COVERAGE - what this scan could NOT see:'
         foreach ($note in @($Result.CoverageNotes)) {
@@ -758,6 +778,16 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         }
         if (@($Result.Advisories).Count -eq 0 -and $Result.AdvisoryStatus -eq 'no-match') {
             Add-LVLine $sb '<div>No advisory in the supplied cache matches the requested package/version.</div>'
+        }
+        Add-LVLine $sb '</div>'
+    }
+    if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {
+        Add-LVLine $sb '<div class="warn"><strong>CASE PROFILE / HANDOFF.</strong><div>Collection metadata and operator context; this is not a verdict.</div>'
+        Add-LVLine $sb ('<div>Profile ID: {0}; name: {1}; sources: {2}; redacted: {3}</div>' -f `
+            (ConvertTo-LVHtmlEncoded $Result.CaseProfile.profileId), (ConvertTo-LVHtmlEncoded $Result.CaseProfile.name),
+            @($Result.CaseProfile.sources).Count, $Result.CaseProfile.redaction.requested)
+        foreach ($note in @($Result.CaseProfile.notes | Where-Object { $_ })) {
+            Add-LVLine $sb ('<div>Note: {0}</div>' -f (ConvertTo-LVHtmlEncoded $note))
         }
         Add-LVLine $sb '</div>'
     }

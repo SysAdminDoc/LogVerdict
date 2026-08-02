@@ -239,6 +239,7 @@ function Get-LVStandardContext {
         coverage = @(ConvertTo-LVStandardCoverage -Coverage @($Result.Coverage))
         healthProfiles = @(ConvertTo-LVStandardHealth -HealthProfiles @($Result.HealthProfiles))
         history = ConvertTo-LVStandardHistory -History $(if ($Result.PSObject.Properties['History']) { $Result.History } else { $null })
+        caseProfile = if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) { $Result.CaseProfile } else { $null }
         advisories = [pscustomobject][ordered]@{
             status = if ($Result.PSObject.Properties['AdvisoryStatus']) { $Result.AdvisoryStatus } else { 'not-requested' }
             cache = if ($Result.PSObject.Properties['AdvisoryCache']) { $Result.AdvisoryCache } else { $null }

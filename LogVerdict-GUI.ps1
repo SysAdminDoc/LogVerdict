@@ -25,6 +25,9 @@
     .PARAMETER AdvisoryVersion
     Package version to test against the optional advisory cache's affected ranges.
 
+    .PARAMETER CaseProfilePath
+    Optional validated case profile to attach for collection and handoff attribution.
+
     .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\LogVerdict-GUI.ps1
 
@@ -41,6 +44,7 @@ param(
     [string]$AdvisoryPath,
     [string]$AdvisoryPackage,
     [string]$AdvisoryVersion,
+    [string]$CaseProfilePath,
     [switch]$AutoScan
 )
 
@@ -60,6 +64,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     if ($AdvisoryPath) { $relaunch += @('-AdvisoryPath', $AdvisoryPath) }
     if ($AdvisoryPackage) { $relaunch += @('-AdvisoryPackage', $AdvisoryPackage) }
     if ($AdvisoryVersion) { $relaunch += @('-AdvisoryVersion', $AdvisoryVersion) }
+    if ($CaseProfilePath) { $relaunch += @('-CaseProfilePath', $CaseProfilePath) }
     if ($AutoScan) { $relaunch += '-AutoScan' }
     Start-Process -FilePath 'powershell.exe' -ArgumentList $relaunch
     exit 0
@@ -79,6 +84,7 @@ try {
     if ($AdvisoryPath) { $guiArgs['AdvisoryPath'] = $AdvisoryPath }
     if ($AdvisoryPackage) { $guiArgs['AdvisoryPackage'] = $AdvisoryPackage }
     if ($AdvisoryVersion) { $guiArgs['AdvisoryVersion'] = $AdvisoryVersion }
+    if ($CaseProfilePath) { $guiArgs['CaseProfilePath'] = $CaseProfilePath }
     Show-LogVerdictGui @guiArgs
     exit 0
 } catch {

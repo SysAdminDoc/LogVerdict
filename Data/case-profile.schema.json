@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LogVerdict case profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profileId",
+    "schemaVersion",
+    "name",
+    "purpose",
+    "operator",
+    "notes",
+    "sources",
+    "bounds",
+    "redaction",
+    "choices",
+    "hashes",
+    "attribution"
+  ],
+  "properties": {
+    "profileId": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "schemaVersion": { "const": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "purpose": { "type": "string" },
+    "operator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "name", "ticket" ],
+      "properties": {
+        "name": { "type": "string" },
+        "ticket": { "type": [ "string", "null" ] }
+      }
+    },
+    "notes": { "type": "array", "items": { "type": "string" } },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [ "source", "kind", "name", "status", "sha256", "sizeBytes" ],
+        "properties": {
+          "source": { "type": "string" },
+          "kind": { "type": "string" },
+          "name": { "type": "string" },
+          "status": { "type": "string" },
+          "sha256": { "type": [ "string", "null" ], "pattern": "^[0-9a-f]{64}$" },
+          "sizeBytes": { "type": [ "integer", "null" ], "minimum": 0 }
+        }
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "daysBack", "windowStart", "windowEnd", "channels" ],
+      "properties": {
+        "daysBack": { "type": [ "integer", "null" ], "minimum": 1 },
+        "windowStart": { "type": [ "string", "null" ], "format": "date-time" },
+        "windowEnd": { "type": [ "string", "null" ], "format": "date-time" },
+        "channels": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "requested", "rawEvidenceAllowed", "fields" ],
+      "properties": {
+        "requested": { "type": "boolean" },
+        "rawEvidenceAllowed": { "type": "boolean" },
+        "fields": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "choices": { "type": "object" },
+    "hashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "sourceManifestSha256", "sourceCount" ],
+      "properties": {
+        "sourceManifestSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "sourceCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "tool", "version", "source" ],
+      "properties": {
+        "tool": { "const": "LogVerdict" },
+        "version": { "type": "string" },
+        "source": { "type": "string" }
+      }
+    }
+  }
+}

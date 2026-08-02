@@ -34,6 +34,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added a hash-checked offline dependency/tool advisory cache with PowerShell range matching,
   CVSS/KEV/date/source metadata, explicit local/URL update and rollback commands, and a
   separate advisory report/export class that never changes event findings or exit codes.
+- Added canonical case profiles with bounded source choices, redaction policy, analyst notes,
+  source hashes, KAPE/Velociraptor collection recipes, and deterministic attributed Timesketch
+  and Hayabusa handoff timelines; profiles remain metadata and never become verdicts.
 - Added the versioned `Export-LogVerdictStandard` command with ECS, OCSF, OpenTelemetry Logs,
   and STIX 2.1 JSON adapters. All projections preserve normalized findings, source/provider/
   event fields, confidence, references, timestamps, coverage, health context, and explicit

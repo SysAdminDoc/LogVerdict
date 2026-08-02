@@ -4,21 +4,124 @@ BeforeAll {
     $script:ModulePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'LogVerdict.psd1'
     Import-Module $script:ModulePath -Force
 }
+Describe 'Case profiles and responder handoffs' {
+    BeforeAll {
+        $script:CaseResult = [pscustomobject]@{
+            Tool = 'LogVerdict'; Version = '0.8.0'; MachineName = 'HOST-9'
+            ScanTime = [datetime]'2026-08-02 12:00:00'; Duration = [timespan]::FromSeconds(2)
+            DaysBack = 7; Channels = @('System'); Elevated = $true
+            Reduction = [pscustomobject]@{ RecordCount=1; SignatureCount=1; Ratio=1 }
+            WorstVerdict = 'investigate'; ExitCode = 1; RuleCount = 1; DatabaseName='test'; DatabaseDate='2026-08-02'
+            ScanOptions = [ordered]@{ channelMode='named'; channels=@('System'); skipTextLogs=$false; skipReliability=$true; includeBenign=$false }
+            Coverage = @([pscustomobject]@{
+                Source='event'; Kind='channel'; Name='System'; Status='readable'
+                SHA256=('A' * 64); SizeBytes=100
+            })
+            EvidenceManifest = @()
+            CoverageNotes = @(); HealthProfiles = @(); SetupDiag = $null; Stability = $null
+            Horizon = @{}; HorizonWarning = $null; CrashArtifacts = @()
+            Findings = @([pscustomobject]@{
+                FirstSeen=[datetime]'2026-08-02 11:00:00'; LastSeen=[datetime]'2026-08-02 11:00:01'
+                Source='event'; Channel='System'; Provider='Test'; Id=100; Title='Test finding'
+                RuleId='LV-TEST'; Verdict='investigate'; Count=1; PerDay=0.1
+                Key='event|System|100'; SampleMessage='HOST-9 failed for C:\Users\bob'
+            })
+            Correlations = @()
+        }
+    }
+
+    It 'creates a hash-addressed profile with bounds, choices, and source hashes' {
+        $path = Join-Path $TestDrive 'case-profile.json'
+        $profile = New-LogVerdictCaseProfile -Result $script:CaseResult -Name 'Upgrade review' -Purpose 'Review HOST-9' -Note 'Check C:\Users\bob' -Ticket 'INC-42' -Redact -Path $path
+
+        Test-LogVerdictCaseProfile -Path $path -Quiet | Should -BeTrue
+        $profile.profileId | Should -Match '^[0-9a-f]{64}$'
+        $profile.bounds.daysBack | Should -Be 7
+        $profile.choices.channelMode | Should -BeExactly 'named'
+        $profile.hashes.sourceCount | Should -Be 1
+        $profile.sources[0].sha256 | Should -BeExactly (('A' * 64).ToLowerInvariant())
+        $profile.operator.name | Should -BeExactly '<USER>'
+        $profile.notes[0] | Should -Not -Match 'HOST-9|bob'
+    }
+
+    It 'rejects a profile after its content changes' {
+        $path = Join-Path $TestDrive 'case-profile-bad.json'
+        New-LogVerdictCaseProfile -Result $script:CaseResult -Path $path | Out-Null
+        $profile = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $profile.purpose = 'changed'
+        $profile | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $path -Encoding UTF8
+
+        Test-LogVerdictCaseProfile -Path $path -Quiet | Should -BeFalse
+        { Test-LogVerdictCaseProfile -Path $path } | Should -Throw '*profileId*'
+    }
+
+    It 'emits deterministic attributed Timesketch and Hayabusa handoff files' {
+        $profile = New-LogVerdictCaseProfile -Result $script:CaseResult -Name 'Handoff' -OperatorName 'analyst' -Ticket 'INC-42'
+        $firstDir = Join-Path $TestDrive 'handoff-one'
+        $secondDir = Join-Path $TestDrive 'handoff-two'
+        $first = Export-LogVerdictHandoff -Result $script:CaseResult -Profile $profile -OutputDir $firstDir
+        $second = Export-LogVerdictHandoff -Result $script:CaseResult -Profile $profile -OutputDir $secondDir
+
+        @($first.Files).Count | Should -Be 6
+        $timesketch = @(Import-Csv -LiteralPath (Join-Path $firstDir 'LogVerdict-Timesketch.csv'))
+        $timesketch.Count | Should -Be 1
+        $timesketch[0].message | Should -Match 'HOST-9'
+        $timesketch[0].datetime | Should -Match '^2026-08-02T'
+        $timesketch[0].timestamp_desc | Should -BeExactly 'LogVerdict first observed'
+        $timesketch[0].logverdict_profile_id | Should -BeExactly $profile.profileId
+        $hayabusa = @(Import-Csv -LiteralPath (Join-Path $firstDir 'LogVerdict-Hayabusa.csv'))
+        $hayabusa[0].RuleTitle | Should -BeExactly 'Test finding'
+        $hayabusa[0].Level | Should -BeExactly 'INVESTIGATE'
+        (Get-Content -LiteralPath (Join-Path $firstDir 'LogVerdict-Collection.yaml') -Raw) | Should -Match 'type: CLIENT'
+        (Get-Content -LiteralPath (Join-Path $firstDir 'LogVerdict-Collection.tkape') -Raw) | Should -Match 'Profile'
+        (Get-Content -LiteralPath (Join-Path $firstDir 'LogVerdict-Timesketch.csv') -Raw) | Should -BeExactly (Get-Content -LiteralPath (Join-Path $secondDir 'LogVerdict-Timesketch.csv') -Raw)
+    }
+
+    It 'keeps the profile visible in reports and standard export context' {
+        $result = $script:CaseResult | Select-Object *
+        $profile = New-LogVerdictCaseProfile -Result $result -Name 'Report case' -Note 'operator note'
+        $result | Add-Member -NotePropertyName CaseProfile -NotePropertyValue $profile -Force
+        $out = Join-Path $TestDrive 'case-reports'
+        Export-LogVerdictReport -Result $result -OutputDir $out -Format Text,Html | Out-Null
+        $text = Get-Content -LiteralPath (Join-Path $out 'LogVerdict-Report.txt') -Raw
+        $html = Get-Content -LiteralPath (Join-Path $out 'LogVerdict-Report.html') -Raw
+        $text | Should -Match 'CASE PROFILE / HANDOFF'
+        $html | Should -Match 'CASE PROFILE / HANDOFF'
+        $standard = Export-LogVerdictStandard -Result $result -Format Ocsf
+        $standard.Document.scan.caseProfile.profileId | Should -BeExactly $profile.profileId
+    }
+
+    It 'wires the profile path through console, scan, and GUI entry points' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $scan = Get-Content -LiteralPath (Join-Path $root 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $entry = Get-Content -LiteralPath (Join-Path $root 'Invoke-LogVerdict.ps1') -Raw
+        $gui = Get-Content -LiteralPath (Join-Path $root 'Public\Show-LogVerdictGui.ps1') -Raw
+        $guiEntry = Get-Content -LiteralPath (Join-Path $root 'LogVerdict-GUI.ps1') -Raw
+        $scan | Should -Match 'CaseProfilePath'
+        $entry | Should -Match 'CaseProfilePath'
+        $gui | Should -Match 'CaseProfilePath'
+        $guiEntry | Should -Match 'CaseProfilePath'
+    }
+}
+
 
 Describe 'Module surface' {
     It 'exports exactly the documented public functions' {
         $exported = (Get-Module LogVerdict).ExportedFunctions.Keys | Sort-Object
         $exported | Should -Be @(
             'Compare-LogVerdictScan',
+            'Export-LogVerdictHandoff',
             'Export-LogVerdictReport',
             'Export-LogVerdictStandard',
             'Get-LogVerdictAdvisory',
             'Get-LogVerdictDatabase',
             'Get-LogVerdictErrorCatalog',
             'Invoke-LogVerdictScan',
+            'New-LogVerdictCaseProfile',
             'Show-LogVerdictGui',
             'Show-LogVerdictReport',
             'Test-LogVerdictAdvisoryDatabase',
+            'Test-LogVerdictCaseProfile',
             'Test-LogVerdictDatabase',
             'Update-LogVerdictAdvisoryDatabase',
             'Update-LogVerdictDatabase',
