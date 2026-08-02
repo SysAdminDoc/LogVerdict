@@ -1,7 +1,7 @@
 # Optional dependency and tool advisories. These records are knowledge context,
 # never Windows event verdicts.
 
-$script:LVAdvisorySchemaVersion = 1
+$script:LVAdvisorySchemaVersion = 2
 
 function Get-LVAdvisoryCanonicalText {
     param([Parameter(Mandatory)]$Advisory)
@@ -34,6 +34,111 @@ function Get-LVAdvisorySourceHash {
         return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
     } finally {
         $sha.Dispose()
+    }
+}
+
+function ConvertTo-LVAdvisoryDate {
+    param([AllowNull()][string]$Value)
+
+    $parsed = [datetime]::MinValue
+    if (-not [datetime]::TryParseExact(
+        $Value,
+        'yyyy-MM-dd',
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::AssumeUniversal,
+        [ref]$parsed
+    )) {
+        return $null
+    }
+    return $parsed.ToUniversalTime().Date
+}
+
+function Get-LVAdvisoryCoverageProblem {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Database)
+
+    $problems = New-Object System.Collections.Generic.List[string]
+    $coverage = $Database.coverage
+    if ($null -eq $coverage -or $null -eq $coverage.runtime -or $null -eq $coverage.tools) {
+        $problems.Add('cache coverage requires runtime and tools sections') | Out-Null
+        return @($problems.ToArray())
+    }
+    foreach ($field in @('name', 'supportedRange', 'verified', 'source')) {
+        if (-not $coverage.runtime.PSObject.Properties[$field] -or [string]::IsNullOrWhiteSpace([string]$coverage.runtime.$field)) {
+            $problems.Add(("runtime coverage is missing {0}" -f $field)) | Out-Null
+        }
+    }
+    if (@($coverage.runtime.verifiedRuntimes).Count -eq 0) {
+        $problems.Add('runtime coverage declares no verified runtimes') | Out-Null
+    }
+    if ([string]$coverage.runtime.verified -notmatch '^\d{4}-\d{2}-\d{2}$') {
+        $problems.Add('runtime coverage verified date is unreadable') | Out-Null
+    }
+    $requiredTools = @('Pester', 'PSScriptAnalyzer', 'ps2exe')
+    $seenTools = @{}
+    foreach ($tool in @($coverage.tools | Where-Object { $_ })) {
+        $name = [string]$tool.name
+        if (-not $name) {
+            $problems.Add('tool coverage has no name') | Out-Null
+            continue
+        }
+        if ($seenTools.ContainsKey($name)) { $problems.Add(("duplicate tool coverage '{0}'" -f $name)) | Out-Null }
+        $seenTools[$name] = $true
+        foreach ($field in @('version', 'purpose', 'verified', 'source')) {
+            if (-not $tool.PSObject.Properties[$field] -or [string]::IsNullOrWhiteSpace([string]$tool.$field)) {
+                $problems.Add(("tool coverage '{0}' is missing {1}" -f $name, $field)) | Out-Null
+            }
+        }
+        if (@($tool.verifiedRuntimes).Count -eq 0) {
+            $problems.Add(("tool coverage '{0}' declares no verified runtimes" -f $name)) | Out-Null
+        }
+        if ([string]$tool.verified -notmatch '^\d{4}-\d{2}-\d{2}$') {
+            $problems.Add(("tool coverage '{0}' verified date is unreadable" -f $name)) | Out-Null
+        }
+    }
+    foreach ($required in $requiredTools) {
+        if (-not $seenTools.ContainsKey($required)) {
+            $problems.Add(("cache coverage does not declare {0}" -f $required)) | Out-Null
+        }
+    }
+    return @($problems.ToArray())
+}
+
+function Get-LVAdvisoryFreshness {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Database)
+
+    $today = [datetime]::UtcNow.Date
+    $updated = ConvertTo-LVAdvisoryDate -Value ([string]$Database.updated)
+    $retrieved = ConvertTo-LVAdvisoryDate -Value ([string]$Database.source.retrieved)
+    $modifiedDates = @($Database.advisories | ForEach-Object {
+        ConvertTo-LVAdvisoryDate -Value ([string]$_.modifiedDate)
+    } | Where-Object { $null -ne $_ } | Sort-Object)
+    $oldestModified = @($modifiedDates | Select-Object -First 1)
+    $cacheAge = if ($updated) { [int]($today - $updated).TotalDays } else { $null }
+    $sourceAge = if ($oldestModified.Count -gt 0) { [int]($today - $oldestModified[0]).TotalDays } else { $null }
+    $retrievedAge = if ($retrieved) { [int]($today - $retrieved).TotalDays } else { $null }
+    $maxCacheAge = [int]$Database.freshness.maxCacheAgeDays
+    $maxSourceAge = [int]$Database.freshness.maxSourceAgeDays
+    $reasons = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $cacheAge -or $cacheAge -lt 0 -or $cacheAge -gt $maxCacheAge) {
+        $reasons.Add(("cache updated age is {0} day(s); limit is {1}" -f $cacheAge, $maxCacheAge)) | Out-Null
+    }
+    if ($null -eq $sourceAge -or $sourceAge -lt 0 -or $sourceAge -gt $maxSourceAge) {
+        $reasons.Add(("oldest advisory source age is {0} day(s); limit is {1}" -f $sourceAge, $maxSourceAge)) | Out-Null
+    }
+    if ($null -eq $retrievedAge -or $retrievedAge -lt 0 -or $retrievedAge -gt $maxSourceAge) {
+        $reasons.Add(("source retrieval age is {0} day(s); limit is {1}" -f $retrievedAge, $maxSourceAge)) | Out-Null
+    }
+    return [pscustomobject][ordered]@{
+        Status = if ($reasons.Count -eq 0) { 'fresh' } else { [string]$Database.freshness.staleState }
+        Checked = $today.ToString('yyyy-MM-dd')
+        CacheAgeDays = $cacheAge
+        SourceAgeDays = $sourceAge
+        RetrievedAgeDays = $retrievedAge
+        MaxCacheAgeDays = $maxCacheAge
+        MaxSourceAgeDays = $maxSourceAge
+        Reason = if ($reasons.Count -gt 0) { $reasons -join '; ' } else { 'within declared UTC freshness limits' }
     }
 }
 
@@ -86,6 +191,23 @@ function Get-LVAdvisoryDatabaseProblem {
     if ([string]$Database.sourceHash -notmatch '^(?i:[0-9a-f]{64})$') {
         $problems.Add('cache sourceHash must be a SHA-256 digest') | Out-Null
     }
+    if ($null -eq $Database.freshness) {
+        $problems.Add('cache freshness policy is missing') | Out-Null
+    } else {
+        foreach ($field in @('maxCacheAgeDays', 'maxSourceAgeDays', 'dateBasis', 'sourceDateField', 'staleState', 'unavailableState')) {
+            if (-not $Database.freshness.PSObject.Properties[$field]) {
+                $problems.Add(("cache freshness policy is missing {0}" -f $field)) | Out-Null
+            }
+        }
+        foreach ($field in @('maxCacheAgeDays', 'maxSourceAgeDays')) {
+            if ($Database.freshness.PSObject.Properties[$field] -and [int]$Database.freshness.$field -le 0) {
+                $problems.Add(("cache freshness {0} must be positive" -f $field)) | Out-Null
+            }
+        }
+        if ([string]$Database.freshness.dateBasis -ne 'UTC') { $problems.Add('cache freshness dateBasis must be UTC') | Out-Null }
+        if ([string]$Database.freshness.staleState -ne 'stale') { $problems.Add('cache freshness staleState must be stale') | Out-Null }
+        if ([string]$Database.freshness.unavailableState -ne 'unavailable') { $problems.Add('cache freshness unavailableState must be unavailable') | Out-Null }
+    }
     if ($null -eq $Database.advisories -or $Database.advisories -is [string]) {
         $problems.Add('cache advisories must be an array') | Out-Null
         return @($problems.ToArray())
@@ -121,6 +243,9 @@ function Get-LVAdvisoryDatabaseProblem {
             $problems.Add(("advisory '{0}' sourceHash does not match its normalized metadata" -f $id)) | Out-Null
         }
     }
+    foreach ($coverageProblem in @(Get-LVAdvisoryCoverageProblem -Database $Database)) {
+        $problems.Add($coverageProblem) | Out-Null
+    }
     return @($problems.ToArray())
 }
 
@@ -139,6 +264,8 @@ function Get-LVAdvisoryDatabase {
         updated       = $loaded.Document.updated
         source        = $loaded.Document.source
         sourceHash    = $loaded.Document.sourceHash
+        freshness     = Get-LVAdvisoryFreshness -Database $loaded.Document
+        coverage      = $loaded.Document.coverage
         advisories    = @($loaded.Document.advisories)
         sourceLabel   = $loaded.SourceLabel
     }
@@ -243,12 +370,13 @@ function Get-LVAdvisoryFinding {
     return [pscustomobject]@{
         Records = @($records.ToArray())
         Cache   = [pscustomobject][ordered]@{
-            Status      = 'loaded'
+            Status      = $database.freshness.Status
             Name        = $database.name
             Updated     = $database.updated
             Source      = $database.source.name
             SourceUri   = $database.source.uri
             SourceHash  = $database.sourceHash
+            Freshness   = $database.freshness
             EntryCount  = @($database.advisories).Count
             PathName    = Split-Path -Leaf $database.sourceLabel
         }
@@ -275,8 +403,25 @@ function Get-LVAdvisoryScanContext {
     if ([bool]$Package -ne [bool]$Version) {
         throw 'AdvisoryPackage and AdvisoryVersion must be supplied together so a cache entry is not mistaken for a local finding.'
     }
-    $loaded = Get-LVAdvisoryFinding -Path $Path -Package $Package -Version $Version
-    $status = if ($Package) {
+    try {
+        $loaded = Get-LVAdvisoryFinding -Path $Path -Package $Package -Version $Version
+    } catch {
+        return [pscustomobject]@{
+            Status  = 'unavailable'
+            Cache   = [pscustomobject][ordered]@{
+                Status = 'unavailable'
+                Freshness = $null
+                Reason = $_.Exception.Message
+                PathName = if ($Path) { Split-Path -Leaf $Path } else { 'advisories.json' }
+            }
+            Records = @()
+            Package = $Package
+            Version = $Version
+        }
+    }
+    $status = if ($loaded.Cache.Status -ne 'fresh') {
+        $loaded.Cache.Status
+    } elseif ($Package) {
         if (@($loaded.Records).Count -gt 0) { 'affected' } else { 'no-match' }
     } else { 'cache-loaded' }
     return [pscustomobject]@{

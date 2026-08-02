@@ -125,6 +125,7 @@ Describe 'Module surface' {
             'Export-LogVerdictReport',
             'Export-LogVerdictStandard',
             'Get-LogVerdictAdvisory',
+            'Get-LogVerdictAdvisoryStatus',
             'Get-LogVerdictDatabase',
             'Get-LogVerdictErrorCatalog',
             'Invoke-LogVerdictScan',
@@ -172,6 +173,41 @@ Describe 'Dependency advisory knowledge' {
         $advisory[0].CVSS | Should -Be 7.8
         $advisory[0].SourceHash | Should -Match '^[0-9a-f]{64}$'
         $advisory[0].PSObject.Properties.Name | Should -Not -Contain 'Verdict'
+    }
+
+    It 'declares freshness policy and verified runtime/tool coverage' {
+        InModuleScope LogVerdict {
+            $database = Get-LVAdvisoryDatabase
+            $database.schemaVersion | Should -Be 2
+            $database.freshness.Status | Should -BeExactly 'fresh'
+            $database.freshness.MaxCacheAgeDays | Should -Be 60
+            @($database.coverage.runtime.verifiedRuntimes) | Should -Contain 'Windows PowerShell 5.1'
+            @($database.coverage.runtime.verifiedRuntimes) | Should -Contain 'PowerShell 7.x'
+            foreach ($tool in @(
+                [pscustomobject]@{ Name = 'Pester'; Version = '5.9.0' }
+                [pscustomobject]@{ Name = 'PSScriptAnalyzer'; Version = '1.25.0' }
+                [pscustomobject]@{ Name = 'ps2exe'; Version = '1.0.18' }
+            )) {
+                @($database.coverage.tools | Where-Object { $_.name -eq $tool.Name -and $_.version -eq $tool.Version }).Count | Should -Be 1
+            }
+        }
+    }
+
+    It 'reports stale and unavailable advisory state without changing scan findings' {
+        $path = Join-Path $TestDrive 'stale-advisories.json'
+        $cache = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Data\advisories.json') -Raw | ConvertFrom-Json
+        $cache.updated = '2020-01-01'
+        $cache.source.retrieved = '2020-01-01'
+        $cache | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
+
+        InModuleScope LogVerdict {
+            $stale = Get-LVAdvisoryScanContext -Path $TestDrive\stale-advisories.json -Package PowerShell -Version '7.4.0'
+            $stale.Status | Should -BeExactly 'stale'
+            @($stale.Records).Count | Should -Be 1
+            $missing = Get-LVAdvisoryScanContext -Path (Join-Path $TestDrive 'missing-advisories.json') -Package PowerShell -Version '7.4.0'
+            $missing.Status | Should -BeExactly 'unavailable'
+            @($missing.Records).Count | Should -Be 0
+        }
     }
 
     It 'matches version ranges without treating fixed versions as affected' {

@@ -31,6 +31,7 @@ Export-ModuleMember -Function @(
     'Invoke-LogVerdictScan',
     'Get-LogVerdictDatabase',
     'Get-LogVerdictAdvisory',
+    'Get-LogVerdictAdvisoryStatus',
     'Get-LogVerdictErrorCatalog',
     'New-LogVerdictCaseProfile',
     'Test-LogVerdictCaseProfile',

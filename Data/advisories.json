@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "name": "LogVerdict reviewed dependency and tool advisory cache",
   "updated": "2026-06-17",
   "source": {
@@ -8,6 +8,59 @@
     "retrieved": "2026-08-02"
   },
   "sourceHash": "8825e502419a9d3a7543c28be003f5da74696657a568f9b84a6a32d3b8ac59b8",
+  "freshness": {
+    "maxCacheAgeDays": 60,
+    "maxSourceAgeDays": 60,
+    "dateBasis": "UTC",
+    "sourceDateField": "modifiedDate",
+    "staleState": "stale",
+    "unavailableState": "unavailable"
+  },
+  "coverage": {
+    "runtime": {
+      "name": "PowerShell",
+      "supportedRange": ">=5.1 <8.0",
+      "verifiedRuntimes": [
+        "Windows PowerShell 5.1",
+        "PowerShell 7.x"
+      ],
+      "verified": "2026-08-02",
+      "source": ".github/workflows/ci.yml"
+    },
+    "tools": [
+      {
+        "name": "Pester",
+        "version": "5.9.0",
+        "purpose": "test",
+        "verifiedRuntimes": [
+          "Windows PowerShell 5.1",
+          "PowerShell 7.x"
+        ],
+        "verified": "2026-08-02",
+        "source": ".github/workflows/ci.yml"
+      },
+      {
+        "name": "PSScriptAnalyzer",
+        "version": "1.25.0",
+        "purpose": "quality-gate",
+        "verifiedRuntimes": [
+          "PowerShell 7.x"
+        ],
+        "verified": "2026-08-02",
+        "source": ".github/workflows/ci.yml"
+      },
+      {
+        "name": "ps2exe",
+        "version": "1.0.18",
+        "purpose": "executable-builder",
+        "verifiedRuntimes": [
+          "PowerShell 7.x"
+        ],
+        "verified": "2026-08-02",
+        "source": ".github/workflows/ci.yml"
+      }
+    ]
+  },
   "advisories": [
     {
       "id": "CVE-2026-26143",

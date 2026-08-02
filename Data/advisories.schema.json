@@ -2,9 +2,9 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "LogVerdict offline advisory cache",
   "type": "object",
-  "required": ["schemaVersion", "name", "updated", "source", "sourceHash", "advisories"],
+  "required": ["schemaVersion", "name", "updated", "source", "sourceHash", "freshness", "coverage", "advisories"],
   "properties": {
-    "schemaVersion": { "type": "integer", "const": 1 },
+    "schemaVersion": { "type": "integer", "const": 2 },
     "name": { "type": "string", "minLength": 1 },
     "updated": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
     "source": {
@@ -18,6 +18,55 @@
       "additionalProperties": false
     },
     "sourceHash": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+    "freshness": {
+      "type": "object",
+      "required": ["maxCacheAgeDays", "maxSourceAgeDays", "dateBasis", "sourceDateField", "staleState", "unavailableState"],
+      "properties": {
+        "maxCacheAgeDays": { "type": "integer", "minimum": 1 },
+        "maxSourceAgeDays": { "type": "integer", "minimum": 1 },
+        "dateBasis": { "const": "UTC" },
+        "sourceDateField": { "const": "modifiedDate" },
+        "staleState": { "const": "stale" },
+        "unavailableState": { "const": "unavailable" }
+      },
+      "additionalProperties": false
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["runtime", "tools"],
+      "properties": {
+        "runtime": {
+          "type": "object",
+          "required": ["name", "supportedRange", "verifiedRuntimes", "verified", "source"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "supportedRange": { "type": "string", "minLength": 1 },
+            "verifiedRuntimes": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+            "verified": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+            "source": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        "tools": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "object",
+            "required": ["name", "version", "purpose", "verifiedRuntimes", "verified", "source"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "version": { "type": "string", "minLength": 1 },
+              "purpose": { "type": "string", "minLength": 1 },
+              "verifiedRuntimes": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+              "verified": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+              "source": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "advisories": {
       "type": "array",
       "items": { "$ref": "#/definitions/advisory" }

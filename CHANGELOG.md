@@ -28,6 +28,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added per-asset SPDX 2.3 SBOMs and unsigned, offline-verifiable build provenance with
   source-tree, pinned-module, runtime, and artifact hashes; CI now validates and uploads
   the supply-chain records beside packaged GUI evidence.
+- Added advisory-cache schema v2 freshness policy and supported-runtime coverage for
+  PowerShell 5.1/7.x plus pinned Pester, PSScriptAnalyzer, and ps2exe versions. Stale or
+  unavailable advisory context is explicit and cannot change event findings or exit codes;
+  release gates reject stale cache metadata.
 
 ## [0.8.1] - 2026-08-02
 

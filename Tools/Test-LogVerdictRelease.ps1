@@ -67,7 +67,26 @@ if ([int]$catalogSchema.properties.schemaVersion.const -ne 2) { throw 'Typed err
 $advisoryCache = Join-Path $repoRoot 'Data/advisories.json'
 if (-not (Test-LogVerdictAdvisoryDatabase -Path $advisoryCache -Quiet)) { throw 'Offline advisory cache validation failed.' }
 $advisorySchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/advisories.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-if ([int]$advisorySchema.properties.schemaVersion.const -ne 1) { throw 'Offline advisory schema is not pinned at version 1.' }
+if ([int]$advisorySchema.properties.schemaVersion.const -ne 2) { throw 'Offline advisory schema is not pinned at version 2.' }
+$advisoryStatus = Get-LogVerdictAdvisoryStatus -Path $advisoryCache
+if ($advisoryStatus.Status -ne 'fresh') {
+    throw ("Offline advisory cache is {0}: {1}" -f $advisoryStatus.Status, $advisoryStatus.Reason)
+}
+foreach ($runtimeName in @('Windows PowerShell 5.1', 'PowerShell 7.x')) {
+    if (@($advisoryStatus.Coverage.runtime.verifiedRuntimes) -notcontains $runtimeName) {
+        throw ("Supported-runtime coverage is missing {0}." -f $runtimeName)
+    }
+}
+foreach ($requiredTool in @(
+    [pscustomobject]@{ Name = 'Pester'; Version = '5.9.0' }
+    [pscustomobject]@{ Name = 'PSScriptAnalyzer'; Version = '1.25.0' }
+    [pscustomobject]@{ Name = 'ps2exe'; Version = '1.0.18' }
+)) {
+    $toolCoverage = @($advisoryStatus.Coverage.tools | Where-Object { $_.name -eq $requiredTool.Name -and $_.version -eq $requiredTool.Version })
+    if ($toolCoverage.Count -ne 1) {
+        throw ("Supported-runtime coverage is missing pinned {0} v{1}." -f $requiredTool.Name, $requiredTool.Version)
+    }
+}
 $caseSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/case-profile.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$caseSchema.properties.schemaVersion.const -ne 1) { throw 'Case profile schema is not pinned at version 1.' }
 $reportSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/report-contract.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
