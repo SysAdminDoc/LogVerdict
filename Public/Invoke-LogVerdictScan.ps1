@@ -278,6 +278,9 @@ function Invoke-LogVerdictScan {
     if (-not $elevated) {
         $coverageNotes.Add('Scan ran without elevation. The Security channel and some text logs require administrator rights.') | Out-Null
     }
+    if ($setupDiagStatus -and $setupDiagStatus.PSObject.Properties['CoverageNote'] -and $setupDiagStatus.CoverageNote) {
+        $coverageNotes.Add([string]$setupDiagStatus.CoverageNote) | Out-Null
+    }
     if ($SkipReliability) {
         $coverageNotes.Add('Reliability Monitor was skipped by request, so the software install and removal history was not read.') | Out-Null
     } elseif (-not $script:LVReliabilityAvailable) {

@@ -1084,6 +1084,49 @@ Describe 'SetupDiag Panther integration' {
         }
     }
 
+    It 'rejects an unsigned production candidate and never executes it' {
+        InModuleScope LogVerdict -Parameters @{ exe=$script:SetupDiagExe; root=$script:SetupDiagFixtureRoot } {
+            param($exe, $root)
+            $exe | Should -Exist
+            Mock Get-Command { [pscustomobject]@{ Path=$exe; Source=$exe } }
+            Mock Test-LVSetupDiagExecutableTrust {
+                [pscustomobject]@{ Trusted=$false; Reason='Authenticode status is NotSigned, not Valid.' }
+            }
+            Mock Invoke-LVSetupDiagProcess { throw 'must not run' }
+
+            $status = Get-LVSetupDiagRecord -DaysBack 1 -LogCandidate @($root)
+            $status.Available | Should -BeFalse
+            $status.Used | Should -BeFalse
+            $status.Status | Should -BeExactly 'untrusted'
+            $status.Message | Should -Match 'Authenticode trust policy'
+            $status.CoverageNote | Should -BeExactly $status.Message
+            Assert-MockCalled Test-LVSetupDiagExecutableTrust -Times 1 -Exactly -Scope It
+            Assert-MockCalled Invoke-LVSetupDiagProcess -Times 0 -Exactly -Scope It
+        }
+    }
+
+    It 'accepts a valid Microsoft-signed production candidate' {
+        InModuleScope LogVerdict -Parameters @{ exe=$script:SetupDiagExe; root=$script:SetupDiagFixtureRoot; json=$script:SetupDiagJson } {
+            param($exe, $root, $json)
+            $exe | Should -Exist
+            $json | Should -Match 'FindSPFatalError'
+            Mock Get-Command { [pscustomobject]@{ Path=$exe; Source=$exe } }
+            Mock Test-LVSetupDiagExecutableTrust {
+                [pscustomobject]@{ Trusted=$true; Reason='Valid Microsoft Authenticode signature.' }
+            }
+            Mock Invoke-LVSetupDiagProcess {
+                param($OutputPath)
+                [IO.File]::WriteAllText($OutputPath, $json, (New-Object Text.UTF8Encoding($false)))
+                [pscustomobject]@{ ExitCode=0; TimedOut=$false; StandardOutput=''; StandardError='' }
+            }
+
+            $status = Get-LVSetupDiagRecord -DaysBack 1 -LogCandidate @($root)
+            $status.Status | Should -BeExactly 'matched'
+            Assert-MockCalled Test-LVSetupDiagExecutableTrust -Times 1 -Exactly -Scope It
+            Assert-MockCalled Invoke-LVSetupDiagProcess -Times 1 -Exactly -Scope It
+        }
+    }
+
     It 'degrades explicitly when SetupDiag is absent' {
         InModuleScope LogVerdict -Parameters @{ root=$script:SetupDiagFixtureRoot } {
             param($root)
@@ -1155,6 +1198,7 @@ Describe 'SetupDiag Panther integration' {
         $text = Get-Content -LiteralPath $path -Raw
         $text | Should -Match 'if \(\$property\.Name -ne ''Records''\)'
         $text | Should -Match 'SetupDiag\s+= \$setupDiagStatus'
+        $text | Should -Match 'CoverageNote'
     }
 }
 

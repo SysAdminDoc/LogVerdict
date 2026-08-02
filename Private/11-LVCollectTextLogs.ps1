@@ -224,20 +224,82 @@ function Get-LVTextLogRecord {
     return ConvertTo-LVArrayOutput -Value @($records.ToArray())
 }
 
+function Test-LVSetupDiagExecutableTrust {
+    <#
+        .SYNOPSIS
+        Accept only a Microsoft-signed SetupDiag executable on the production path.
+
+        .DESCRIPTION
+        SetupDiag is an optional executable rather than a bundled component. A file
+        named SetupDiag.exe found through PATH or a mutable setup directory is not
+        trustworthy merely because its name is familiar. The production discovery
+        path therefore requires a valid Authenticode signature from Microsoft.
+        Explicit CandidatePath input is reserved for the test seam and is handled
+        by Get-LVSetupDiagExecutable without invoking this policy.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    try {
+        $signature = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
+    } catch {
+        return [pscustomobject]@{
+            Trusted = $false
+            Reason  = ('Authenticode verification failed: {0}' -f $_.Exception.Message)
+        }
+    }
+
+    if ([string]$signature.Status -ne 'Valid') {
+        return [pscustomobject]@{
+            Trusted = $false
+            Reason  = ('Authenticode status is {0}, not Valid.' -f [string]$signature.Status)
+        }
+    }
+
+    $subject = ''
+    if ($signature.SignerCertificate) { $subject = [string]$signature.SignerCertificate.Subject }
+    if ($subject -notmatch '(?i)(^|,\s*)CN=(Microsoft Corporation|Microsoft Windows)(,|$)') {
+        return [pscustomobject]@{
+            Trusted = $false
+            Reason  = 'The Authenticode signer is not Microsoft Corporation or Microsoft Windows.'
+        }
+    }
+
+    return [pscustomobject]@{
+        Trusted = $true
+        Reason  = ('Valid Microsoft Authenticode signature ({0}).' -f $subject)
+    }
+}
+
 function Get-LVSetupDiagExecutable {
     <#
         .SYNOPSIS
         Find an already-present Microsoft SetupDiag executable without downloading it.
+
+        .DESCRIPTION
+        Explicit CandidatePath input is a test-only injection seam. Normal discovery
+        verifies every existing candidate before returning it. Detailed output is
+        private to the collector so rejected candidates can be surfaced as coverage
+        without changing the historical path-returning helper contract.
     #>
     [CmdletBinding()]
-    param([AllowEmptyCollection()][string[]]$CandidatePath)
+    param(
+        [AllowEmptyCollection()][string[]]$CandidatePath,
+        [switch]$Detailed
+    )
 
     $candidates = New-Object System.Collections.Generic.List[string]
-    if ($PSBoundParameters.ContainsKey('CandidatePath')) {
+    $injected = $PSBoundParameters.ContainsKey('CandidatePath')
+    if ($injected) {
         foreach ($path in @($CandidatePath)) { if ($path) { $candidates.Add($path) | Out-Null } }
     } else {
         $command = Get-Command 'SetupDiag.exe' -ErrorAction SilentlyContinue
-        if ($command -and $command.Source) { $candidates.Add([string]$command.Source) | Out-Null }
+        if ($command) {
+            $commandPath = $null
+            if ($command.PSObject.Properties['Path']) { $commandPath = [string]$command.Path }
+            if (-not $commandPath -and $command.Source) { $commandPath = [string]$command.Source }
+            if ($commandPath) { $candidates.Add($commandPath) | Out-Null }
+        }
 
         $systemDrive = $env:SystemDrive
         if (-not $systemDrive) { $systemDrive = 'C:' }
@@ -251,11 +313,24 @@ function Get-LVSetupDiagExecutable {
         )) { $candidates.Add($path) | Out-Null }
     }
 
+    $rejected = New-Object System.Collections.Generic.List[object]
     foreach ($path in @($candidates.ToArray() | Select-Object -Unique)) {
         if (Test-Path -LiteralPath $path -PathType Leaf) {
-            return (Get-Item -LiteralPath $path -ErrorAction Stop).FullName
+            $fullPath = (Get-Item -LiteralPath $path -ErrorAction Stop).FullName
+            if ($injected) {
+                if ($Detailed) { return [pscustomobject]@{ Path=$fullPath; Rejected=@() } }
+                return $fullPath
+            }
+
+            $trust = Test-LVSetupDiagExecutableTrust -Path $fullPath
+            if ($trust.Trusted) {
+                if ($Detailed) { return [pscustomobject]@{ Path=$fullPath; Rejected=@($rejected.ToArray()) } }
+                return $fullPath
+            }
+            $rejected.Add([pscustomobject]@{ Path=$fullPath; Reason=$trust.Reason }) | Out-Null
         }
     }
+    if ($Detailed) { return [pscustomobject]@{ Path=$null; Rejected=@($rejected.ToArray()) } }
     return $null
 }
 
@@ -501,10 +576,16 @@ function Get-LVSetupDiagRecord {
         [int]$TimeoutSeconds = 120
     )
 
-    $executableArgs = @{}
+    $executableArgs = @{ Detailed=$true }
     if ($PSBoundParameters.ContainsKey('ExecutableCandidate')) { $executableArgs['CandidatePath'] = $ExecutableCandidate }
-    $executable = Get-LVSetupDiagExecutable @executableArgs
+    $executableResult = Get-LVSetupDiagExecutable @executableArgs
+    $executable = $executableResult.Path
     if (-not $executable) {
+        if (@($executableResult.Rejected).Count -gt 0) {
+            $message = ('SetupDiag candidate(s) were rejected by the Microsoft Authenticode trust policy; built-in Panther rules remain active. Rejected candidate count: {0}.' -f @($executableResult.Rejected).Count)
+            Write-LVLog -Level warn -Message $message
+            return [pscustomobject]@{ Available=$false; Used=$false; Status='untrusted'; Message=$message; CoverageNote=$message; ExecutablePath=$null; LogsPath=$null; Profile=$null; Records=@() }
+        }
         $message = 'SetupDiag is not present; Panther failures will use LogVerdict built-in text rules.'
         Write-LVLog -Level info -Message $message
         return [pscustomobject]@{ Available=$false; Used=$false; Status='absent'; Message=$message; ExecutablePath=$null; LogsPath=$null; Profile=$null; Records=@() }

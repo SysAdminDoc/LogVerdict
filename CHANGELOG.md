@@ -15,6 +15,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   family/ID validation.
 - Added a committed `VERSION` source, offline release-integrity checks, pinned CI dependency
   versions, PowerShell 5.1/7 parsing and test jobs, and package hash validation.
+- Constrained discovered SetupDiag execution to valid Microsoft Authenticode signatures;
+  rejected candidates now remain an explicit coverage gap and the Panther fallback stays active.
 
 ## [0.8.0] - 2026-08-01
 
