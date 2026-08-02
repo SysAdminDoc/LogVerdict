@@ -156,6 +156,17 @@ function Format-LVEvidenceManifest {
     foreach ($c in $Content) { Add-LVLine $sb ('  {0}' -f (Split-Path -Leaf $c)) }
     Add-LVLine $sb
 
+    if ($Result.PSObject.Properties['EvidenceManifest'] -and @($Result.EvidenceManifest).Count -gt 0) {
+        Add-LVLine $sb 'SOURCE EVIDENCE MANIFEST'
+        foreach ($source in @($Result.EvidenceManifest)) {
+            $hash = if ($source.SHA256) { [string]$source.SHA256 } else { 'unavailable' }
+            $timing = if ($null -ne $source.ParseMilliseconds) { ('; parse {0} ms' -f $source.ParseMilliseconds) } else { '' }
+            $reason = if ($source.Reason) { ('; {0}' -f $source.Reason) } else { '' }
+            Add-LVLine $sb ('  {0}: {1}, {2} bytes, SHA-256 {3}{4}{5}' -f $source.Name, $source.Status, $source.SizeBytes, $hash, $timing, $reason)
+        }
+        Add-LVLine $sb
+    }
+
     Add-LVLine $sb 'WHAT IS DELIBERATELY NOT HERE'
     if ($Redact) {
         Add-LVLine $sb '  - Event channel exports (.evtx). This bundle is redacted, and .evtx is a binary'

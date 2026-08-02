@@ -194,6 +194,10 @@ powershell -ExecutionPolicy Bypass -File .\Invoke-LogVerdict.ps1
 # Re-evaluate a bundle collected on another PC with the current rule database
 .\Invoke-LogVerdict.ps1 -EvidencePath .\LogVerdict-Evidence_HOST_20260801-120000.zip
 
+# Re-evaluate one exported event log or every bounded .evtx file under a directory
+.\Invoke-LogVerdict.ps1 -EvidencePath .\System.evtx
+.\Invoke-LogVerdict.ps1 -EvidencePath .\Captured-Evtx\
+
 # Opt in to non-remedial draft explanations for unknown signatures from local Ollama
 .\Invoke-LogVerdict.ps1 -ExplainUnknown -OllamaModel llama3.2
 
@@ -203,7 +207,7 @@ powershell -ExecutionPolicy Bypass -File .\Invoke-LogVerdict.ps1
 
 Reports land in a timestamped folder on the Desktop by default (safe even for right-click-elevated runs that start in System32). Override with `-OutputDir`.
 
-Offline analysis never reads the reviewing PC. It inherits the source report's look-back window unless `-DaysBack` is supplied, reopens exported `.evtx` members when present, and uses the captured report summaries for text logs and Reliability Monitor, whose full stores are deliberately not copied into a small evidence bundle. Redacted bundles contain no raw `.evtx`, so they are re-evaluated from report summaries and carry a coverage note saying so.
+Offline analysis never reads the reviewing PC. It inherits the source report's look-back window unless `-DaysBack` is supplied, reopens exported `.evtx` members when present, and uses the captured report summaries for text logs and Reliability Monitor, whose full stores are deliberately not copied into a small evidence bundle. A direct `.evtx` path or directory is accepted as the offline source too. The source is bounded to 64 files, 512 MiB per file, 2 GiB total, and 20,000 events per file; parser time is measured against a 120-second per-file limit. Every admitted or skipped file carries size, status, parse time, reason, and a streaming SHA-256 in the coverage output and evidence manifest. Redacted bundles contain no raw `.evtx`, so they are re-evaluated from report summaries and carry a coverage note saying so.
 
 `-ExplainUnknown`, or the stronger `-PromoteToRule` switch that implies it, is the only path that contacts a model endpoint. LogVerdict accepts only plain HTTP on `localhost`, `127.0.0.1`, or `::1`, sends one reduced unknown signature at a time to Ollama's `/api/generate`, and requests structured output with no actions or fixes. Known signatures are never sent. The candidate appears in its own **MODEL-GENERATED CANDIDATE - NOT A CURATED RULING** block; a connection failure, malformed response, unexpected field, or remediation language leaves the deterministic scan intact and produces no candidate.
 

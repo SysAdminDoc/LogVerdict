@@ -3027,6 +3027,85 @@ Describe 'Offline evidence analysis' {
         }
     }
 
+    It 'scans one direct EVTX file with a source hash and parser metadata' {
+        $evtx = Join-Path $TestDrive 'single.evtx'
+        [IO.File]::WriteAllBytes($evtx, [byte[]](0x45, 0x56, 0x54, 0x58, 0x01))
+            InModuleScope LogVerdict -Parameters @{ EvtxPath=$evtx } {
+            param($EvtxPath)
+            Mock Get-WinEvent {
+                param($Oldest)
+                if ($Oldest) {
+                    return [pscustomobject]@{ LogName='System'; TimeCreated=(Get-Date).AddHours(-1) }
+                }
+                return [pscustomobject]@{
+                    LogName='System'; ProviderName='Disk'; Id=7; Level=2; LevelDisplayName='Error'
+                    TimeCreated=(Get-Date).AddHours(-1); MachineName='ARCHIVE-HOST'; RecordId=42; Message='bad block'
+                }
+            }
+
+            $result = Invoke-LVOfflineScan -EvidencePath $EvtxPath -DaysBack 1 -SkipTextLogs -SkipReliability
+            $result.Offline | Should -BeTrue
+            @($result.EvidenceManifest).Count | Should -Be 1
+            $result.EvidenceManifest[0].Status | Should -BeExactly 'parsed'
+            $result.EvidenceManifest[0].SHA256 | Should -Match '^[0-9A-F]{64}$'
+            $result.EvidenceManifest[0].RecordCount | Should -Be 1
+            $result.EvidenceManifest[0].ParseMilliseconds | Should -Not -BeNullOrEmpty
+            @($result.CoverageNotes | Where-Object { $_ -match 'SHA-256 [0-9A-F]{64}' }).Count | Should -Be 1
+            $manifest = Format-LVEvidenceManifest -Result $result -Content @()
+            $manifest | Should -Match ('SHA-256 ' + $result.EvidenceManifest[0].SHA256)
+        }
+    }
+
+    It 'bounds an EVTX directory by file count and size before parsing' {
+        $root = Join-Path $TestDrive 'evtx-bounded'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        foreach ($name in @('01.evtx', '02.evtx', '03.evtx')) {
+            [IO.File]::WriteAllBytes((Join-Path $root $name), [byte[]](0x45, 0x56, 0x54, 0x58))
+        }
+        InModuleScope LogVerdict -Parameters @{ Root=$root } {
+            param($Root)
+            Mock Get-WinEvent {
+                param($Oldest)
+                if ($Oldest) { return [pscustomobject]@{ LogName='System'; TimeCreated=(Get-Date).AddHours(-1) } }
+                return [pscustomobject]@{
+                    LogName='System'; ProviderName='Disk'; Id=7; Level=2; LevelDisplayName='Error'
+                    TimeCreated=(Get-Date).AddHours(-1); MachineName='ARCHIVE-HOST'; RecordId=42; Message='bad block'
+                }
+            }
+
+            $result = Invoke-LVOfflineScan -EvidencePath $Root -DaysBack 1 -MaxEvtxFiles 1 -SkipTextLogs -SkipReliability
+            @($result.EvidenceManifest).Count | Should -Be 2 -Because 'one extra file proves the count cap was reached'
+            @($result.EvidenceManifest | Where-Object Status -eq 'parsed').Count | Should -Be 1
+            @($result.EvidenceManifest | Where-Object Status -eq 'skipped').Count | Should -Be 1
+            $result.CoverageNotes | Should -Contain 'The offline EVTX file-count cap of 1 was reached; additional files were not enumerated.'
+            @($result.CoverageNotes | Where-Object { $_ -match 'file-count cap of 1 reached' }).Count | Should -Be 1
+        }
+
+        $large = Join-Path $TestDrive 'too-large.evtx'
+        [IO.File]::WriteAllBytes($large, [byte[]](0..15))
+        InModuleScope LogVerdict -Parameters @{ EvtxPath=$large } {
+            param($EvtxPath)
+            Mock Get-WinEvent { throw 'must not parse an oversized source' }
+            $result = Invoke-LVOfflineScan -EvidencePath $EvtxPath -DaysBack 1 -MaxEvtxFileBytes 4 -SkipTextLogs -SkipReliability
+            $result.EvidenceManifest[0].Status | Should -BeExactly 'skipped'
+            $result.EvidenceManifest[0].Reason | Should -Match 'per-file cap'
+        }
+    }
+
+    It 'reports malformed EVTX content as a source failure with parse timing' {
+        $evtx = Join-Path $TestDrive 'malformed.evtx'
+        [IO.File]::WriteAllBytes($evtx, [byte[]](0x00, 0x01, 0x02))
+        InModuleScope LogVerdict -Parameters @{ EvtxPath=$evtx } {
+            param($EvtxPath)
+            Mock Get-WinEvent { throw 'malformed event log fixture' }
+            $result = Invoke-LVOfflineScan -EvidencePath $EvtxPath -DaysBack 1 -SkipTextLogs -SkipReliability
+            $result.EvidenceManifest[0].Status | Should -BeExactly 'unreadable'
+            $result.EvidenceManifest[0].Reason | Should -Match 'malformed event log fixture'
+            $result.EvidenceManifest[0].ParseMilliseconds | Should -Not -BeNullOrEmpty
+            @($result.CoverageNotes | Where-Object { $_ -match 'EVTX malformed\.evtx: unreadable' }).Count | Should -Be 1
+        }
+    }
+
     It 'rejects an archive member that escapes the extraction directory' {
         $zipPath = Join-Path $TestDrive 'traversal.zip'
         $stream = [IO.File]::Open($zipPath, [IO.FileMode]::CreateNew)
@@ -3443,6 +3522,25 @@ Describe 'Report redaction' {
             }
             $redacted.SetupDiag.PSObject.Properties.Name | Should -Not -Contain 'Records'
             $result.SetupDiag.Message | Should -Match 'HOST-9.*bob'
+        }
+    }
+
+    It 'redacts offline source paths while retaining source hashes' {
+        InModuleScope LogVerdict {
+            $result = [pscustomobject]@{
+                MachineName = 'HOST-9'
+                EvidencePath = 'C:\Users\bob\captures\System.evtx'
+                EvidenceManifest = @([pscustomobject]@{
+                    Path='C:\Users\bob\captures\System.evtx'; Name='System.evtx'; SizeBytes=5
+                    SHA256='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+                    Status='parsed'; Reason=$null; ParseMilliseconds=12; RecordCount=1
+                })
+                Findings = @(); CrashArtifacts = @(); CoverageNotes = @()
+            }
+            $redacted = ConvertTo-LVRedactedResult -Result $result
+            $redacted.EvidencePath | Should -Not -Match 'bob|HOST-9'
+            $redacted.EvidenceManifest[0].Path | Should -Not -Match 'bob|HOST-9'
+            $redacted.EvidenceManifest[0].SHA256 | Should -BeExactly $result.EvidenceManifest[0].SHA256
         }
     }
 

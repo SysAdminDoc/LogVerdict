@@ -17,6 +17,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   versions, PowerShell 5.1/7 parsing and test jobs, and package hash validation.
 - Constrained discovered SetupDiag execution to valid Microsoft Authenticode signatures;
   rejected candidates now remain an explicit coverage gap and the Panther fallback stays active.
+- Offline analysis now accepts a direct EVTX file or directory with bounded file/byte/event
+  limits, streaming source hashes, parser timing, malformed-file status, and a per-source
+  evidence manifest.
 
 ## [0.8.0] - 2026-08-01
 

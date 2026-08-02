@@ -25,7 +25,8 @@
     Report destination. Defaults to a timestamped folder on the Desktop.
 
     .PARAMETER EvidencePath
-    Analyze a LogVerdict evidence bundle or JSON report without reading this PC.
+    Analyze a LogVerdict evidence bundle, JSON report, one .evtx file, or an .evtx
+    directory without reading this PC.
 
     .PARAMETER ExplainUnknown
     Ask a local Ollama model for separately labelled, non-remedial draft explanations

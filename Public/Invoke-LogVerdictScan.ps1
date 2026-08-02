@@ -36,9 +36,9 @@ function Invoke-LogVerdictScan {
         is to remove them.
 
         .PARAMETER EvidencePath
-        Analyze a LogVerdict evidence zip, extracted evidence directory, or JSON report
-        without reading any source on the reviewing PC. Exported .evtx files are read
-        when present; captured report signatures preserve non-event evidence.
+        Analyze a LogVerdict evidence zip, extracted evidence directory, JSON report,
+        one .evtx file, or a directory of .evtx files without reading any source on the
+        reviewing PC. Captured report signatures preserve non-event evidence.
 
         .PARAMETER ExplainUnknown
         Opt in to asking a local Ollama model for a separately labelled, non-remedial

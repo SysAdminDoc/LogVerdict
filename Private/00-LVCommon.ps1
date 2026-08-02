@@ -464,6 +464,26 @@ function ConvertTo-LVRedactedResult {
         }
         $copy.SetupDiag = $setupDiag
     }
+    foreach ($name in @('EvidencePath')) {
+        if ($copy.PSObject.Properties[$name]) {
+            $copy.$name = ConvertTo-LVRedactedText -Text ([string]$copy.$name) -MachineName $machine
+        }
+    }
+    if ($Result.PSObject.Properties['EvidenceManifest']) {
+        $sources = foreach ($source in @($Result.EvidenceManifest)) {
+            $entry = [pscustomobject]@{}
+            foreach ($prop in $source.PSObject.Properties) {
+                $entry | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+            }
+            foreach ($name in @('Path', 'Name', 'Reason')) {
+                if ($entry.PSObject.Properties[$name] -and $entry.$name) {
+                    $entry.$name = ConvertTo-LVRedactedText -Text ([string]$entry.$name) -MachineName $machine
+                }
+            }
+            $entry
+        }
+        $copy.EvidenceManifest = @($sources)
+    }
     if ($copy.PSObject.Properties['CoverageNotes']) {
         $copy.CoverageNotes = @(@($Result.CoverageNotes) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
     }
