@@ -560,6 +560,13 @@ function ConvertTo-LVRedactedText {
         return $Match.Groups[1].Value + '<USER>'
     })
 
+    # Apply the same deterministic secret/address catalog used by the staged bundle
+    # audit so standalone redacted JSON, CSV, HTML, and text reports cannot preserve a
+    # token merely because it appeared in a captured message rather than a path.
+    foreach ($pattern in @($script:LVPrivacyPattern | Where-Object { $_ -and $_.Id -ne 'profile-path' })) {
+        $t = [regex]::Replace($t, [string]$pattern.Regex, [string]$pattern.Substitution)
+    }
+
     return $t
 }
 

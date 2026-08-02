@@ -15,11 +15,19 @@ $script:LVPrivacyPattern = @(
     }
     [pscustomobject]@{
         Id = 'profile-path'; Category = 'profile-path'; Substitution = 'C:\Users\<USER>'
-        Regex = '(?i)[A-Z]:\\Users\\[^\\/:*?"<>|\r\n]+'
+        Regex = '(?i)[A-Z]:\\Users\\(?!(?:<|&lt;))[^\\/:*?"<>|\r\n]+'
+    }
+    [pscustomobject]@{
+        Id = 'ipv4'; Category = 'network-address'; Substitution = '<IP>'
+        Regex = '\b(?:\d{1,3}\.){3}\d{1,3}\b'
+    }
+    [pscustomobject]@{
+        Id = 'mac'; Category = 'network-address'; Substitution = '<MAC>'
+        Regex = '(?i)\b(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b'
     }
     [pscustomobject]@{
         Id = 'credential'; Category = 'credential-or-secret'; Substitution = '<SECRET>'
-        Regex = '(?i)\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret)\b\s*[:=]\s*["'']?(?!<[^>]+>)[^\s,;}'']+'
+        Regex = '(?i)\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|token)\b\s*[:=]\s*["'']?(?!<[^>]+>)[^\s,;}'']+'
     }
     [pscustomobject]@{
         Id = 'bearer-token'; Category = 'bearer-token'; Substitution = '<TOKEN>'
@@ -150,8 +158,9 @@ function New-LVPrivacyAudit {
             continue
         }
 
+        $auditText = $text.Replace('<SCRIPTBLOCK>', '')
         foreach ($pattern in $patterns) {
-            $privacyMatches = @([regex]::Matches($text, [string]$pattern.Regex))
+            $privacyMatches = @([regex]::Matches($auditText, [string]$pattern.Regex))
             if ($privacyMatches.Count -eq 0) { continue }
             $lineNumbers = New-Object System.Collections.Generic.List[int]
             foreach ($match in $privacyMatches) {
@@ -164,7 +173,7 @@ function New-LVPrivacyAudit {
             $findings.Add($finding) | Out-Null
         }
 
-        foreach ($placeholder in @('<USER>', '<MACHINE>', '<SID>', '<UPN>', '<SECRET>', '<TOKEN>', '<SCRIPTBLOCK>')) {
+        foreach ($placeholder in @('<USER>', '<MACHINE>', '<SID>', '<UPN>', '<SECRET>', '<TOKEN>', '<SCRIPTBLOCK>', '<IP>', '<MAC>')) {
             $count = @([regex]::Matches($text, [regex]::Escape($placeholder))).Count
             if ($count -gt 0) { $substitutionCounts[$placeholder] = $count }
         }

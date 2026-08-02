@@ -11,6 +11,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added shared byte, normalized-record, and elapsed-time collection budgets across live and
   offline collectors, with partial findings retained and explicit `truncated`/`timeout`
   coverage for every source stopped by a limit.
+- Extended deterministic redaction to generated credentials, bearer/JWT/cloud/GitHub tokens,
+  IP and MAC addresses, and token-bearing URLs, with adversarial checks across text, JSON,
+  CSV, HTML, evidence manifests, and privacy-audit output.
 
 ## [0.8.1] - 2026-08-02
 

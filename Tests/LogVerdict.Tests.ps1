@@ -4527,6 +4527,55 @@ Describe 'Report redaction' {
         Export-LogVerdictReport -Result $result -OutputDir $dir 6>$null | Out-Null
         (Get-Content (Join-Path $dir 'LogVerdict-Report.txt') -Raw) | Should -Match ([regex]::Escape($env:COMPUTERNAME))
     }
+
+    It 'masks generated secrets and network identifiers across every redacted report and bundle member' {
+        $secretValues = @(
+            'super-secret-2026',
+            'abcdefghijklmnop',
+            'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturevalue',
+            'AKIA1234567890ABCDEF',
+            'ghp_abcdefghijklmnopqrstuvwxyz123456',
+            'S-1-5-21-111111111-222222222-333333333-1000',
+            'C:\Users\secret-user\Desktop\evidence.log',
+            '10.20.30.40',
+            '00:11:22:33:44:55'
+        )
+        $secretLine = 'password=super-secret-2026 Bearer abcdefghijklmnop jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturevalue AWS AKIA1234567890ABCDEF GitHub ghp_abcdefghijklmnopqrstuvwxyz123456 SID S-1-5-21-111111111-222222222-333333333-1000 path C:\Users\secret-user\Desktop\evidence.log ip 10.20.30.40 mac 00:11:22:33:44:55 token=https://example.test/reset?token=abcdefghijklmnop'
+        $result = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
+        $result.Findings = @($result.Findings) + @([pscustomobject]@{
+            FirstSeen=(Get-Date).AddMinutes(-1); LastSeen=Get-Date; Source='event'; Channel='System'; Provider='PrivacyFixture'; Id=9001
+            Title='Privacy fixture'; RuleId='PRIVACY-FIXTURE'; Verdict='investigate'; Count=1; PerDay=1; Key='event|System|9001'
+            SampleMessage=$secretLine; Samples=@($secretLine); Ruling='Review the captured event.'; Remediation='Use the evidence context.'
+            OfficialReference=$null; Area='test'; SpanDays=0
+        })
+        $dir = Join-Path $TestDrive 'privacy-all-formats'
+        $export = Export-LogVerdictReport -Result $result -OutputDir $dir -Format Text,Json,Csv,Html -Redact -IncludeEvidence 6>$null
+
+        @('LogVerdict-Report.txt', 'LogVerdict-Report.json', 'LogVerdict-Report.csv', 'LogVerdict-Report.html', 'LogVerdict-Run.log') | ForEach-Object {
+            $text = Get-Content -LiteralPath (Join-Path $dir $_) -Raw
+            foreach ($secret in $secretValues) { $text | Should -Not -Match ([regex]::Escape($secret)) -Because "$_ must not contain generated sensitive data" }
+        }
+        $export.EvidenceBundle | Should -Not -BeNullOrEmpty
+        $zip = [IO.Compression.ZipFile]::OpenRead($export.EvidenceBundle)
+        try {
+            foreach ($entry in @($zip.Entries)) {
+                if ($entry.FullName -match '\.(evtx|dmp)$') { continue }
+                $reader = New-Object IO.StreamReader($entry.Open())
+                try { $memberText = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                foreach ($secret in $secretValues) { $memberText | Should -Not -Match ([regex]::Escape($secret)) -Because "$($entry.FullName) must not contain generated sensitive data" }
+            }
+        } finally { $zip.Dispose() }
+
+        $dirty = Join-Path $TestDrive 'privacy-dirty.txt'
+        Set-Content -LiteralPath $dirty -Value $secretLine -Encoding UTF8
+        InModuleScope LogVerdict -Parameters @{ p = $dirty; machine = 'HOST-9' } {
+            param($p, $machine)
+            $audit = New-LVPrivacyAudit -Path @($p) -MachineName $machine -UserName 'secret-user' -Redacted
+            $audit.Status | Should -BeExactly 'blocked'
+            $audit.Findings[0].PSObject.Properties.Name | Should -Not -Contain 'Value'
+            ($audit | ConvertTo-Json -Depth 8) | Should -Not -Match 'super-secret-2026|AKIA1234567890ABCDEF|ghp_abcdefghijklmnopqrstuvwxyz123456'
+        }
+    }
 }
 
 Describe 'Reliability Monitor collection' {
