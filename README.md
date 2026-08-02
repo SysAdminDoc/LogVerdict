@@ -402,6 +402,20 @@ does not promote accepted material automatically.
 
 `match` accepts `source`, `channel`, `provider` (trailing `*` wildcard allowed), `eventId`, `messagePattern` (regex), and `eventData`. A structured condition looks like `{"all":[{"field":"EventData.Image","endswith":"\\\\powershell.exe"}]}`; unsupported Sigma modifiers remain inactive importer candidates. More match keys means higher specificity, and the most specific matching rule wins.
 
+## Provider extensions
+
+Local providers are explicit, versioned extension units for collectors that LogVerdict does not ship. A provider directory contains `manifest.json`, a relative PowerShell entrypoint, and optional hash-pinned fixtures. The manifest must declare schema version 1, a lowercase provider id, SemVer version, `read-only` permission, `collect`/`normalize`/`coverage`/`redaction` capabilities, and the SHA-256 of the entrypoint. Optional `reportProjection.fields` names the small set of redacted fields the provider may show in reports. Fixtures are validated by path and SHA-256 before execution.
+
+Providers are never discovered or executed implicitly. Review the manifest and then opt in explicitly:
+
+```powershell
+$provider = Get-LogVerdictProvider -Path .\MyProvider
+Test-LogVerdictProvider -Path .\MyProvider
+Invoke-LogVerdictScan -ProviderPath .\MyProvider -AllowUntrustedProvider
+```
+
+The entrypoint receives a read-only context and must return one schema-versioned object with `records`, `coverage`, and optional `reportProjection`. Records are bounded by the scan's shared byte/record/time budget, normalized to the event contract, and redacted again at the host boundary. Their provider identity is prefixed as `extension:<id>`; they cannot provide curated `Verdict` or `RuleId` values, match the built-in Windows rules accidentally, or change the scan exit code. Invalid records are rejected and every provider contributes explicit coverage and untrusted provenance to JSON, text, HTML, and standard report data. Provider execution is live-only and cannot be combined with `-EvidencePath`.
+
 ## Requirements
 
 Windows 10/11. Windows PowerShell 5.1 (stock) or PowerShell 7.x. **No dependencies** - the whole point is that it runs on a broken machine with nothing installed.

@@ -140,6 +140,22 @@ function Write-LVConsoleReport {
         Write-Host ''
     }
 
+    if ($Result.PSObject.Properties['ProviderExtensions'] -and @($Result.ProviderExtensions).Count -gt 0) {
+        Write-Host '  PROVIDER EXTENSIONS (EXPLICIT, UNTRUSTED)' -ForegroundColor Cyan
+        Write-Host '    Extensions contributed redacted evidence only; curated verdicts and rule IDs remain core-owned.' -ForegroundColor DarkGray
+        foreach ($extension in @($Result.ProviderExtensions | Where-Object { $_ })) {
+            Write-Host ('    Provider       : {0} {1}; {2} record(s), {3} rejected, trust {4}' -f `
+                $extension.Id, $extension.Version, $extension.RecordCount, $extension.RejectedRecords, $extension.Trust) -ForegroundColor DarkGray
+        }
+        foreach ($projection in @($Result.ProviderProjections | Where-Object { $_ })) {
+            Write-Host ('    Projection     : {0}' -f $projection.ProviderId) -ForegroundColor DarkGray
+            foreach ($field in @($projection.Fields.PSObject.Properties | Where-Object { $_ })) {
+                Write-Host ('      {0}: {1}' -f $field.Name, $field.Value) -ForegroundColor DarkGray
+            }
+        }
+        Write-Host ''
+    }
+
     $tally = $Result.Findings | Group-Object -Property Verdict
     foreach ($name in @('critical', 'actionable', 'investigate', 'unknown', 'informational', 'benign')) {
         $g = $tally | Where-Object { $_.Name -eq $name }
@@ -515,6 +531,22 @@ function ConvertTo-LVTextReport {
         Add-LVLine $sb
     }
 
+    if ($Result.PSObject.Properties['ProviderExtensions'] -and @($Result.ProviderExtensions).Count -gt 0) {
+        Add-LVLine $sb 'PROVIDER EXTENSIONS (EXPLICIT, UNTRUSTED)'
+        Add-LVLine $sb 'Extensions contributed redacted evidence only; curated verdicts and rule IDs remain core-owned.'
+        foreach ($extension in @($Result.ProviderExtensions | Where-Object { $_ })) {
+            Add-LVLine $sb ('Provider       : {0} {1}; {2} record(s), {3} rejected, trust {4}' -f `
+                $extension.Id, $extension.Version, $extension.RecordCount, $extension.RejectedRecords, $extension.Trust)
+        }
+        foreach ($projection in @($Result.ProviderProjections | Where-Object { $_ })) {
+            Add-LVLine $sb ('Projection     : {0}' -f $projection.ProviderId)
+            foreach ($field in @($projection.Fields.PSObject.Properties | Where-Object { $_ })) {
+                Add-LVLine $sb ('  {0}: {1}' -f $field.Name, $field.Value)
+            }
+        }
+        Add-LVLine $sb
+    }
+
     if (@($Result.CoverageNotes).Count -gt 0) {
         Add-LVLine $sb 'COVERAGE - what this scan could NOT see:'
         foreach ($note in @($Result.CoverageNotes)) {
@@ -860,6 +892,21 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             @($Result.CaseProfile.sources).Count, $Result.CaseProfile.redaction.requested)
         foreach ($note in @($Result.CaseProfile.notes | Where-Object { $_ })) {
             Add-LVLine $sb ('<div>Note: {0}</div>' -f (ConvertTo-LVHtmlEncoded $note))
+        }
+        Add-LVLine $sb '</div>'
+    }
+    if ($Result.PSObject.Properties['ProviderExtensions'] -and @($Result.ProviderExtensions).Count -gt 0) {
+        Add-LVLine $sb '<div class="warn"><strong>PROVIDER EXTENSIONS (EXPLICIT, UNTRUSTED).</strong><div>Extensions contributed redacted evidence only; curated verdicts and rule IDs remain core-owned.</div>'
+        foreach ($extension in @($Result.ProviderExtensions | Where-Object { $_ })) {
+            Add-LVLine $sb ('<div>Provider: {0} {1}; {2} record(s); {3} rejected; trust: {4}</div>' -f `
+                (ConvertTo-LVHtmlEncoded $extension.Id), (ConvertTo-LVHtmlEncoded $extension.Version),
+                $extension.RecordCount, $extension.RejectedRecords, (ConvertTo-LVHtmlEncoded $extension.Trust))
+        }
+        foreach ($projection in @($Result.ProviderProjections | Where-Object { $_ })) {
+            Add-LVLine $sb ('<div>Projection: {0}</div>' -f (ConvertTo-LVHtmlEncoded $projection.ProviderId))
+            foreach ($field in @($projection.Fields.PSObject.Properties | Where-Object { $_ })) {
+                Add-LVLine $sb ('<div>{0}: {1}</div>' -f (ConvertTo-LVHtmlEncoded $field.Name), (ConvertTo-LVHtmlEncoded ([string]$field.Value)))
+            }
         }
         Add-LVLine $sb '</div>'
     }

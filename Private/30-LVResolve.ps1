@@ -221,6 +221,12 @@ function Test-LVRuleMatch {
         [Parameter(Mandatory)]$Signature
     )
 
+    # Extension records are evidence, not a way for a provider to inherit or
+    # accidentally trigger a curated Windows rule. An explicitly reviewed rule
+    # can be added later through the normal database path, but an extension never
+    # gets a verdict merely because it happens to share an event ID or source.
+    if ($Signature.PSObject.Properties['ProviderExtension'] -and $Signature.ProviderExtension) { return $false }
+
     $m = $Rule.match
 
     if ($m.source   -and $m.source  -ne $Signature.Source)  { return $false }

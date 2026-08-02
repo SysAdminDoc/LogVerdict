@@ -128,6 +128,8 @@ Describe 'Module surface' {
             'Get-LogVerdictAdvisoryStatus',
             'Get-LogVerdictDatabase',
             'Get-LogVerdictErrorCatalog',
+            'Get-LogVerdictProvider',
+            'Invoke-LogVerdictProvider',
             'Invoke-LogVerdictScan',
             'New-LogVerdictCaseProfile',
             'Show-LogVerdictGui',
@@ -135,6 +137,7 @@ Describe 'Module surface' {
             'Test-LogVerdictAdvisoryDatabase',
             'Test-LogVerdictCaseProfile',
             'Test-LogVerdictDatabase',
+            'Test-LogVerdictProvider',
             'Update-LogVerdictAdvisoryDatabase',
             'Update-LogVerdictDatabase',
             'Watch-LogVerdict'
@@ -158,6 +161,126 @@ Describe 'Module surface' {
         $manifest = Test-ModuleManifest -Path (Join-Path $root 'LogVerdict.psd1')
         $manifest.Version.ToString() | Should -BeExactly $version
         (Get-Content -LiteralPath (Join-Path $root 'README.md') -Raw) | Should -Match ("shields\.io/badge/version-{0}-blue" -f [regex]::Escape($version))
+    }
+}
+
+Describe 'Versioned provider extension contract' {
+    BeforeAll {
+        $script:ProviderRoot = Join-Path $TestDrive 'provider-contract'
+        New-Item -ItemType Directory -Path $script:ProviderRoot -Force | Out-Null
+        $script:ProviderEntrypoint = Join-Path $script:ProviderRoot 'provider.ps1'
+        @'
+param([hashtable]$Context)
+[pscustomobject][ordered]@{
+    schemaVersion = 1
+    records = @(
+        [pscustomobject][ordered]@{
+            id = 4242
+            channel = 'vendor-channel'
+            provider = 'vendor-provider'
+            message = 'secret=TOPSECRET token=abcdefghijklmnopqrstuvwxyz123456 user@example.com C:\Users\alice'
+            timeCreated = '2026-08-02T12:00:00Z'
+            level = 2
+            levelName = 'Error'
+            recordId = 7
+            structuredData = [pscustomobject]@{
+                EventData = [pscustomobject]@{ Secret = 'TOPSECRET'; Machine = $env:COMPUTERNAME }
+            }
+        }
+        [pscustomobject]@{ id = 'not-an-event-id'; message = 'rejected' }
+    )
+    coverage = @([pscustomobject]@{ name = 'vendor source'; status = 'readable'; observedRecords = 2; reason = 'C:\Users\alice' })
+    reportProjection = [pscustomobject]@{ Summary = 'secret=TOPSECRET'; Ignored = 'not declared' }
+}
+'@ | Set-Content -LiteralPath $script:ProviderEntrypoint -Encoding UTF8
+        $fixturePath = Join-Path $script:ProviderRoot 'fixture.json'
+        '{"fixture":"provider contract"}' | Set-Content -LiteralPath $fixturePath -Encoding UTF8
+        $manifest = [ordered]@{
+            schemaVersion = 1
+            id = 'test.provider'
+            name = 'Provider contract fixture'
+            version = '1.2.3'
+            entrypoint = 'provider.ps1'
+            entrypointSha256 = Get-LVTestSha256 -Path $script:ProviderEntrypoint
+            capabilities = @('collect', 'normalize', 'coverage', 'redaction', 'fixtures', 'reportProjection')
+            permissions = @('read-only')
+            fixtures = @([ordered]@{ id = 'sample'; path = 'fixture.json'; sha256 = (Get-LVTestSha256 -Path $fixturePath) })
+            reportProjection = [ordered]@{ fields = @('Summary') }
+        }
+        $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $script:ProviderRoot 'manifest.json') -Encoding UTF8
+    }
+
+    It 'validates the manifest, entrypoint pin, and fixture pin without execution' {
+        $plan = Get-LogVerdictProvider -Path $script:ProviderRoot
+        $plan.Id | Should -BeExactly 'test.provider'
+        $plan.Trust | Should -BeExactly 'untrusted'
+        @($plan.Fixtures).Count | Should -Be 1
+        $plan.Fixtures[0].SHA256 | Should -Match '^[0-9a-f]{64}$'
+        Test-LogVerdictProvider -Path $script:ProviderRoot -Quiet | Should -BeTrue
+    }
+
+    It 'requires explicit approval and normalizes redacted evidence without curated verdict fields' {
+        { Invoke-LogVerdictProvider -Provider $script:ProviderRoot -Context @{ CollectionBudget = (InModuleScope LogVerdict { New-LVCollectionBudget -MaxBytes 1MB -MaxRecords 10 -MaxSeconds 60 }) } } |
+            Should -Throw '*AllowUntrustedProvider*'
+
+        InModuleScope LogVerdict {
+            param($providerPath)
+            $budget = New-LVCollectionBudget -MaxBytes 1MB -MaxRecords 10 -MaxSeconds 60
+            $result = Invoke-LogVerdictProvider -Provider $providerPath -Context @{ CollectionBudget = $budget } -AllowUntrustedProvider
+            $result.ProviderId | Should -BeExactly 'test.provider'
+            $result.Trust | Should -BeExactly 'untrusted'
+            $result.RejectedRecords | Should -Be 1
+            $result.Records.Count | Should -Be 1
+            $record = $result.Records[0]
+            $record.Source | Should -BeExactly 'event'
+            $record.Provider | Should -BeExactly 'extension:test.provider'
+            $record.Channel | Should -BeExactly 'extension:test.provider/vendor-channel'
+            $record.Id | Should -Be 4242
+            $record.Message | Should -Not -Match 'TOPSECRET|alice@example.com|C:\\Users\\alice'
+            $record.StructuredData.EventData.Secret | Should -Not -BeExactly 'TOPSECRET'
+            $record.PSObject.Properties.Name | Should -Not -Contain 'Verdict'
+            $record.PSObject.Properties.Name | Should -Not -Contain 'RuleId'
+            $result.ReportProjection[0].ProviderId | Should -BeExactly 'test.provider'
+            $result.ReportProjection[0].Fields.Summary | Should -Not -Match 'TOPSECRET'
+            $result.Coverage[0].Source | Should -BeExactly 'provider'
+            $result.Coverage[0].Origin | Should -BeExactly 'provider'
+            $signature = (Get-LVSignatureReduction -Record @($record) -WindowDays 30).Signatures[0]
+            $rule = [pscustomobject]@{
+                id = 'CURATED-4242'; lvOrdinal = 0
+                match = [pscustomobject]@{ source = 'event'; eventId = 4242 }
+                verdict = 'critical'; title = 'Must not match'; plain = 'Must not match'; why = 'Must not match'; action = 'Must not match'
+                confidence = 'high'; status = 'supported'
+            }
+            (Resolve-LVVerdict -Signature @($signature) -Database ([pscustomobject]@{ rules = @($rule) })).Verdict | Should -BeExactly 'unknown'
+        } -Parameters @{ providerPath = $script:ProviderRoot }
+    }
+
+    It 'merges provider evidence into a live scan with explicit provenance' {
+        $scan = Invoke-LogVerdictScan -DaysBack 1 -Channel 'ProviderContractMissingChannel' -SkipTextLogs -SkipReliability `
+            -ProviderPath $script:ProviderRoot -AllowUntrustedProvider 6>$null
+        $scan.ProviderExtensions[0].Id | Should -BeExactly 'test.provider'
+        $scan.ProviderExtensions[0].RecordCount | Should -Be 1
+        @($scan.Coverage | Where-Object { $_.Source -eq 'provider' -and $_.Name -match 'test.provider' }).Count | Should -BeGreaterThan 0
+        $providerFinding = @($scan.Findings | Where-Object { $_.ProviderExtension -eq 'test.provider' })
+        $providerFinding.Count | Should -Be 1
+        $providerFinding[0].RuleId | Should -BeNullOrEmpty
+        $scan.ProviderProjections[0].Fields.Summary | Should -Not -Match 'TOPSECRET'
+        $reportDir = Join-Path $TestDrive 'provider-reports'
+        Export-LogVerdictReport -Result $scan -OutputDir $reportDir -Format Text,Html 6>$null | Out-Null
+        (Get-Content -LiteralPath (Join-Path $reportDir 'LogVerdict-Report.txt') -Raw) | Should -Match 'PROVIDER EXTENSIONS'
+        (Get-Content -LiteralPath (Join-Path $reportDir 'LogVerdict-Report.html') -Raw) | Should -Match 'test\.provider'
+        $standard = Export-LogVerdictStandard -Result $scan -Format Ocsf
+        $standard.Document.scan.providerProjections[0].ProviderId | Should -BeExactly 'test.provider'
+    }
+
+    It 'rejects a changed entrypoint or fixture before it can run' {
+        Add-Content -LiteralPath $script:ProviderEntrypoint -Value '# changed'
+        Test-LogVerdictProvider -Path $script:ProviderRoot -Quiet | Should -BeFalse
+        $manifest = Get-Content -LiteralPath (Join-Path $script:ProviderRoot 'manifest.json') -Raw | ConvertFrom-Json
+        $manifest.entrypointSha256 = Get-LVTestSha256 -Path $script:ProviderEntrypoint
+        $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $script:ProviderRoot 'manifest.json') -Encoding UTF8
+        Add-Content -LiteralPath (Join-Path $script:ProviderRoot 'fixture.json') -Value 'changed'
+        Test-LogVerdictProvider -Path $script:ProviderRoot -Quiet | Should -BeFalse
     }
 }
 

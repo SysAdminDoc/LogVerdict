@@ -154,6 +154,7 @@ function Get-LVSignatureReduction {
                 # may still never have occurred within minutes of each other.
                 Times         = (New-Object System.Collections.Generic.List[datetime])
                 StructuredData = $null
+                ProviderExtension = if ($r.PSObject.Properties['ProviderExtension']) { $r.ProviderExtension } else { $null }
                 Area          = $r.PSObject.Properties['Area'] | ForEach-Object { $_.Value }
             }
         }

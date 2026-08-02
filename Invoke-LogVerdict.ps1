@@ -62,6 +62,13 @@
     .PARAMETER CaseProfilePath
     Optional validated case profile to attach for collection and handoff attribution.
 
+    .PARAMETER ProviderPath
+    Optional local provider manifest or directory. Provider execution is opt-in and
+    requires -AllowUntrustedProvider.
+
+    .PARAMETER AllowUntrustedProvider
+    Explicitly approve the pinned provider entrypoints named by ProviderPath.
+
     .PARAMETER MaxCollectionBytes
     Shared byte budget for live and offline collection. Incomplete sources are reported
     as truncated rather than treated as clean.
@@ -123,6 +130,8 @@ param(
     [string]$AdvisoryPackage,
     [string]$AdvisoryVersion,
     [string]$CaseProfilePath,
+    [string[]]$ProviderPath,
+    [switch]$AllowUntrustedProvider,
     [ValidateRange(1, 8589934592)][long]$MaxCollectionBytes = 536870912,
     [ValidateRange(1, 10000000)][int]$MaxCollectionRecords = 100000,
     [ValidateRange(1, 86400)][int]$MaxCollectionSeconds = 600,
@@ -186,6 +195,8 @@ try {
         AdvisoryPackage = $AdvisoryPackage
         AdvisoryVersion = $AdvisoryVersion
         CaseProfilePath = $CaseProfilePath
+        ProviderPath = $ProviderPath
+        AllowUntrustedProvider = $AllowUntrustedProvider
         MaxCollectionBytes = $MaxCollectionBytes
         MaxCollectionRecords = $MaxCollectionRecords
         MaxCollectionSeconds = $MaxCollectionSeconds

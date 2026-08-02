@@ -147,6 +147,12 @@ $evidenceSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/evidence-c
 if ([int]$evidenceSchema.properties.Contract.properties.schemaVersion.const -ne 1) { throw 'Evidence contract schema is not pinned at version 1.' }
 $reviewSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/review-artifact.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$reviewSchema.properties.schemaVersion.const -ne 1) { throw 'Review artifact schema is not pinned at version 1.' }
+$providerSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/provider.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([int]$providerSchema.properties.schemaVersion.const -ne 1 -or
+    @($providerSchema.required) -notcontains 'entrypointSha256' -or
+    @($providerSchema.properties.capabilities.items.enum) -notcontains 'redaction') {
+    throw 'Provider extension manifest schema is not pinned at version 1 with the required redaction and entrypoint contract.'
+}
 
 $scoopPath = Join-Path $ManifestDirectory 'scoop/logverdict.json'
 $wingetPath = Join-Path $ManifestDirectory 'winget/SysAdminDoc.LogVerdict.yaml'

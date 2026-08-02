@@ -80,6 +80,14 @@ function Invoke-LogVerdictScan {
         collection scope and operator choices for handoff; explicit scan parameters
         remain authoritative and the profile is not used as a verdict input.
 
+        .PARAMETER ProviderPath
+        One or more local provider manifests or provider directories. Providers are
+        live-only, explicitly opt-in, and contribute redacted normalized evidence.
+
+        .PARAMETER AllowUntrustedProvider
+        Explicitly approve execution of the pinned provider entrypoints named by
+        ProviderPath. Providers are always marked untrusted and cannot supply verdicts.
+
         .EXAMPLE
         Invoke-LogVerdictScan -DaysBack 7
 
@@ -112,6 +120,8 @@ function Invoke-LogVerdictScan {
         [string]$AdvisoryPackage,
         [string]$AdvisoryVersion,
         [string]$CaseProfilePath,
+        [string[]]$ProviderPath,
+        [switch]$AllowUntrustedProvider,
         [ValidateRange(1, 8589934592)][long]$MaxCollectionBytes = 536870912,
         [ValidateRange(1, 10000000)][int]$MaxCollectionRecords = 100000,
         [ValidateRange(1, 86400)][int]$MaxCollectionSeconds = 600
@@ -120,6 +130,7 @@ function Invoke-LogVerdictScan {
     $collectionBudget = New-LVCollectionBudget -MaxBytes $MaxCollectionBytes -MaxRecords $MaxCollectionRecords -MaxSeconds $MaxCollectionSeconds
     $caseProfile = if ($CaseProfilePath) { Read-LVCaseProfile -Path $CaseProfilePath } else { $null }
     if ($EvidencePath) {
+        if ($ProviderPath) { throw 'Provider extensions are live-only and cannot be combined with -EvidencePath.' }
         $offlineArgs = @{
             EvidencePath   = $EvidencePath
             Channel        = $Channel
@@ -337,6 +348,53 @@ function Invoke-LogVerdictScan {
         }
     }
 
+    $providerExtensions = New-Object System.Collections.Generic.List[object]
+    $providerCoverage = New-Object System.Collections.Generic.List[object]
+    $providerProjections = New-Object System.Collections.Generic.List[object]
+    if ($ProviderPath) {
+        if (-not $AllowUntrustedProvider) {
+            throw 'ProviderPath requires -AllowUntrustedProvider after reviewing each pinned entrypoint.'
+        }
+        foreach ($providerPathItem in @($ProviderPath)) {
+            $provider = Read-LVProviderPlan -Path $providerPathItem
+            $providerTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
+            $providerContext = @{
+                schemaVersion = 1
+                providerId = $provider.Id
+                providerVersion = $provider.Version
+                daysBack = $DaysBack
+                windowStart = $started.AddDays(-1 * [Math]::Abs($DaysBack)).ToUniversalTime().ToString('o')
+                windowEnd = (Get-Date).ToUniversalTime().ToString('o')
+                machineName = $env:COMPUTERNAME
+                redaction = 'mandatory'
+                CollectionBudget = Get-LVCollectionBudgetSnapshot -Budget $collectionBudget
+                arguments = [ordered]@{ channels = @($channels); skipTextLogs = [bool]$SkipTextLogs; skipReliability = [bool]$SkipReliability }
+            }
+            $providerResult = Invoke-LVProvider -Provider $provider -Context $providerContext -CollectionBudget $collectionBudget -AllowUntrustedProvider
+            foreach ($record in @($providerResult.Records)) { $records.Add($record) | Out-Null }
+            foreach ($coverage in @($providerResult.Coverage)) { $providerCoverage.Add($coverage) | Out-Null }
+            foreach ($projection in @($providerResult.ReportProjection)) { $providerProjections.Add($projection) | Out-Null }
+            $providerExtensions.Add([pscustomobject][ordered]@{
+                Id = $provider.Id
+                Name = $provider.Name
+                Version = $provider.Version
+                Trust = $provider.Trust
+                Capabilities = @($provider.Capabilities)
+                FixtureCount = @($provider.Manifest.fixtures).Count
+                RecordCount = @($providerResult.Records).Count
+                RejectedRecords = $providerResult.RejectedRecords
+                BudgetStop = $providerResult.BudgetStop
+            }) | Out-Null
+            if ($providerTimer) {
+                $providerTimer.Stop()
+                $providerStatus = @($providerResult.Coverage | Where-Object { $_ } | Select-Object -ExpandProperty Status -First 1)
+                & $recordPerformance -Source 'provider' -Kind 'extension' -Name $provider.Id -Status ([string]$(if ($providerStatus) { $providerStatus } else { 'empty' })) `
+                    -ObservedRecords @($providerResult.Records).Count -SkippedRecords $providerResult.RejectedRecords -Cap $null `
+                    -ElapsedMilliseconds ([int64][Math]::Round($providerTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'provider'
+            }
+        }
+    }
+
     $all = @($records.ToArray())
     Write-LVLog -Level info -Message ('Reducing {0} record(s) to signatures...' -f $all.Count)
     $reductionTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
@@ -472,6 +530,9 @@ function Invoke-LogVerdictScan {
     foreach ($entry in @($script:LVEventCoverage) + @($script:LVTextLogCoverage)) {
         if ($entry) { $coverageSources.Add($entry) | Out-Null }
     }
+    foreach ($entry in @($providerCoverage.ToArray())) {
+        if ($entry) { $coverageSources.Add($entry) | Out-Null }
+    }
     if ($script:LVChannelMetadataErrorCount -gt 0) {
         $coverageSources.Add((New-LVCoverageRecord -Source 'event' -Kind 'metadata' -Name 'channel enumeration' -Status 'not-observed' `
             -Reason 'Channel metadata could not be read, so those channels were not enumerated.' `
@@ -551,6 +612,8 @@ function Invoke-LogVerdictScan {
         PerformanceTelemetry = [bool]$PerformanceTelemetry
         Performance    = @($performance.ToArray())
         HealthProfiles = @($healthProfiles)
+        ProviderExtensions = @($providerExtensions.ToArray())
+        ProviderProjections = @($providerProjections.ToArray())
         Reduction      = $stat
         Findings       = @($findings)
         Correlations   = @($correlations)
