@@ -49,7 +49,7 @@ Collect  ->  Reduce  ->  Resolve  ->  Correlate  ->  Report
 
 1. **Collect** - diagnostic sources are read-only. The window stores only its small preferences file under `%LOCALAPPDATA%\LogVerdict`; report files are written only when requested.
 2. **Reduce** - event records group by `Provider + EventID`. Text logs take two passes. First, typed slots mask timestamps, paths, SIDs, IPv4/IPv6 addresses, MAC addresses, URLs, FQDNs, UPNs, package identities, versions, GUIDs, hex and numbers. Then numeric, error-code and version slots with at most three distinct values in their template family are promoted back into the signature: two recurring HRESULTs remain two diagnoses, while a thousand transient operation ids remain one family. Identity and volatile slots are never promoted. Original token count participates in the hash, and reports show the reduction ratio before and after promotion.
-3. **Resolve** - each signature is matched against [`Data/verdicts.json`](Data/verdicts.json), a curated database of human-written rulings. Most-specific rule wins. Some rules escalate by rate: corrected hardware errors are noise at a trickle and a failing component at volume.
+3. **Resolve** - each signature is matched against [`Data/verdicts.json`](Data/verdicts.json), a curated database of human-written rulings. Most-specific rule wins. Some rules escalate by rate: corrected hardware errors are noise at a trickle and a failing component at volume. Event rules can additionally use the v6 bounded structured subset: named `EventData.<field>`/`UserData.<field>` predicates combined with `all`, `any`, and `not`, using `equals`, `contains`, `startswith`, `endswith`, or `regex`; rendered localized message text is not required for those matches.
 
 Unknown signatures are also checked against the bundled [`Data/error-codes.json`](Data/error-codes.json) reference catalog. The catalog currently carries 3,157 typed entries: 2,745 Microsoft WinError.h statuses, 378 kernel bug-check codes, 13 common HRESULTs, nine NTSTATUS values, seven Setup/servicing codes, and five Windows Update codes. Each entry retains canonical numeric fields, applicability, retrieval date, and source metadata; one-time indexes keep repeated lookups bounded. A catalog match improves the explanation but stays `unknown` until provider-specific context justifies a reviewed verdict. Regenerate it from current Microsoft Learn tables with `Tools\Import-MicrosoftErrorCatalog.ps1`; the normal scan never makes a network call.
 
@@ -360,7 +360,7 @@ levels, tags, false positives, references, authors, conditions, mapping warnings
 of `pending`; no imported rule can become active. Use `-ExistingPath` with `-DiffPath` to review added, changed, and
 removed candidates between imports. The importer is offline and never edits `Data\verdicts.json`.
 
-`match` accepts `source`, `channel`, `provider` (trailing `*` wildcard allowed), `eventId`, and `messagePattern` (regex). More match keys means higher specificity, and the most specific matching rule wins.
+`match` accepts `source`, `channel`, `provider` (trailing `*` wildcard allowed), `eventId`, `messagePattern` (regex), and `eventData`. A structured condition looks like `{"all":[{"field":"EventData.Image","endswith":"\\\\powershell.exe"}]}`; unsupported Sigma modifiers remain inactive importer candidates. More match keys means higher specificity, and the most specific matching rule wins.
 
 ## Requirements
 

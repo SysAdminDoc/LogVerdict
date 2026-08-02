@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "name": "LogVerdict core verdict database",
   "updated": "2026-08-01",
   "notes": "Rules are evaluated most-specific first. A signature matching no rule is reported as 'unknown' with its raw evidence - never with a guessed cause. Each rule carries a 'verified' date because guidance ages, and a 'status' controlling whether it is used: stable and test rules match, experimental rules match, deprecated and unsupported rules are retained for traceability but never applied.",

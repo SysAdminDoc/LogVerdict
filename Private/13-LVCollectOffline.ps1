@@ -186,6 +186,7 @@ function ConvertFrom-LVArchivedSignature {
         LevelName     = [string]$Finding.LevelName
         SampleMessage = [string]$Finding.SampleMessage
         Samples       = @($Finding.Samples)
+        StructuredData = if ($Finding.PSObject.Properties['StructuredData']) { $Finding.StructuredData } else { $null }
         ResultCode    = if ($Finding.PSObject.Properties['ResultCode']) { $Finding.ResultCode } else { $null }
         ExtendCode    = if ($Finding.PSObject.Properties['ExtendCode']) { $Finding.ExtendCode } else { $null }
         Phase         = if ($Finding.PSObject.Properties['Phase']) { $Finding.Phase } else { $null }
@@ -426,8 +427,10 @@ function Read-LVArchivedEventFile {
         if ($eventRecord.LogName) { $recordChannel = [string]$eventRecord.LogName }
         $errorContext = New-LVErrorContext -InputObject $eventRecord -Message ([string]$message) `
             -FallbackMessage $fallbackMessage
+        $structuredData = Get-LVEventStructuredData -EventObject $eventRecord
         $estimatedBytes = 256
         if ($message) { $estimatedBytes += [Text.Encoding]::UTF8.GetByteCount([string]$message) }
+        if ($structuredData) { $estimatedBytes += [Text.Encoding]::UTF8.GetByteCount(($structuredData | ConvertTo-Json -Depth 5 -Compress)) }
         if ($CollectionBudget -and (([int64]$CollectionBudget.BytesRead + $estimatedBytes) -gt [int64]$CollectionBudget.MaxBytes)) {
             $budgetStop = 'truncated'
             break
@@ -443,6 +446,7 @@ function Read-LVArchivedEventFile {
             MachineName = [string]$eventRecord.MachineName
             RecordId    = $eventRecord.RecordId
             Message     = ([string]$message).Trim()
+            StructuredData = $structuredData
             ResultCode  = $errorContext.ResultCode
             ExtendCode  = $errorContext.ExtendCode
             Phase       = $errorContext.Phase

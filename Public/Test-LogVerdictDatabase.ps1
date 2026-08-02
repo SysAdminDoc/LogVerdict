@@ -87,11 +87,18 @@ function Test-LogVerdictDatabase {
 
         if ($null -eq $rule.match) {
             $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'no match block' }) | Out-Null
-        } elseif ($rule.match.messagePattern) {
-            try {
-                [void][regex]::new($rule.match.messagePattern)
-            } catch {
-                $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("messagePattern is not a valid regex: {0}" -f $_.Exception.Message) }) | Out-Null
+        } else {
+            if ($rule.match.messagePattern) {
+                try {
+                    [void][regex]::new($rule.match.messagePattern)
+                } catch {
+                    $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("messagePattern is not a valid regex: {0}" -f $_.Exception.Message) }) | Out-Null
+                }
+            }
+            if ($rule.match.eventData) {
+                foreach ($problem in @(Get-LVStructuredConditionProblems -Condition $rule.match.eventData)) {
+                    $problems.Add([pscustomobject]@{ RuleId = $id; Problem = [string]$problem }) | Out-Null
+                }
             }
         }
 

@@ -107,5 +107,6 @@ function ConvertTo-LVWatchEventRecord {
         MachineName = if ($EventObject.PSObject.Properties['MachineName']) { $EventObject.MachineName } else { $null }
         RecordId    = if ($EventObject.PSObject.Properties['RecordId']) { $EventObject.RecordId } else { $null }
         Message     = $message.Trim()
+        StructuredData = Get-LVEventStructuredData -EventObject $EventObject
     }
 }

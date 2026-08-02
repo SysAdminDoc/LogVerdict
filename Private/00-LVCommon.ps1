@@ -16,7 +16,7 @@ $script:LVVerdictRank = @{
 # than the code knows about is a hard failure, not a best effort: silently mis-reading
 # rules would produce confident rulings from fields the code never looked at.
 $script:LVSchemaVersionMin = 1
-$script:LVSchemaVersionMax = 5
+$script:LVSchemaVersionMax = 6
 
 # How many occurrence timestamps a single signature retains for correlation. Past
 # this the signature is a continuous stream rather than a set of incidents, and
@@ -570,6 +570,25 @@ function ConvertTo-LVRedactedText {
     return $t
 }
 
+function ConvertTo-LVRedactedStructuredData {
+    param([AllowNull()]$StructuredData, [AllowNull()][string]$MachineName)
+
+    if (-not $StructuredData) { return $null }
+    $copy = [pscustomobject][ordered]@{}
+    foreach ($section in @('EventData', 'UserData')) {
+        $source = $StructuredData.PSObject.Properties[$section]
+        if (-not $source -or -not $source.Value) { continue }
+        $values = [ordered]@{}
+        foreach ($property in @($source.Value.PSObject.Properties)) {
+            $values[$property.Name] = @(@($property.Value) | ForEach-Object {
+                ConvertTo-LVRedactedText -Text ([string]$_) -MachineName $MachineName
+            })
+        }
+        $copy | Add-Member -NotePropertyName $section -NotePropertyValue ([pscustomobject]$values) -Force
+    }
+    return $copy
+}
+
 function ConvertTo-LVRedactedResult {
     <#
         .SYNOPSIS
@@ -617,6 +636,9 @@ function ConvertTo-LVRedactedResult {
                 })
             }
             $c.ErrorContext = $context
+        }
+        if ($c.PSObject.Properties['StructuredData'] -and $c.StructuredData) {
+            $c.StructuredData = ConvertTo-LVRedactedStructuredData -StructuredData $c.StructuredData -MachineName $machine
         }
         if ($c.PSObject.Properties['Samples']) {
             $c.Samples = @(@($f.Samples) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })

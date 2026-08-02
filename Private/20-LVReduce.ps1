@@ -153,12 +153,16 @@ function Get-LVSignatureReduction {
                 # entirely a question about the inside: two signatures whose spans overlap
                 # may still never have occurred within minutes of each other.
                 Times         = (New-Object System.Collections.Generic.List[datetime])
+                StructuredData = $null
                 Area          = $r.PSObject.Properties['Area'] | ForEach-Object { $_.Value }
             }
         }
 
         $b = $buckets[$key]
         $b.Count++
+        if ($r.PSObject.Properties['StructuredData'] -and $r.StructuredData) {
+            $b.StructuredData = Merge-LVEventStructuredData -Existing $b.StructuredData -Incoming $r.StructuredData
+        }
 
         foreach ($field in @(
             @{ Context = 'ResultCode'; Bucket = 'ResultCodes' },

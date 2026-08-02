@@ -213,6 +213,7 @@ function Get-LVSigmaEventMapping {
     if ($categoryEventId.ContainsKey($category.ToLowerInvariant())) { $match.eventId = $categoryEventId[$category.ToLowerInvariant()] }
     if ($service.ToLowerInvariant() -eq 'powershell' -and $category.ToLowerInvariant() -eq 'ps_script') { $match.eventId = 4104 }
 
+    $eventDataConditions = New-Object System.Collections.Generic.List[object]
     foreach ($property in $Detection.Fields.PSObject.Properties) {
         $parts = @($property.Name -split '\|', 2)
         $field = $parts[0]
@@ -225,18 +226,25 @@ function Get-LVSigmaEventMapping {
         }
         if ($field -match '^(?i:channel|logname)$' -and $values.Count -eq 1) { $match.channel = [string]$values[0]; continue }
         if ($field -match '^(?i:provider|providername|provider_name)$' -and $values.Count -eq 1) { $match.provider = [string]$values[0]; continue }
-        if ($values.Count -eq 1 -and $values[0] -isnot [System.Array] -and $modifier -in @('contains', 'startswith', 'endswith', 'equals')) {
-            $escaped = [regex]::Escape([string]$values[0])
-            $pattern = switch ($modifier) {
-                'contains'  { $escaped }
-                'startswith' { '^' + $escaped }
-                'endswith' { $escaped + '$' }
-                default { $escaped }
+        $structuredModifier = if ($modifier -eq 're') { 'regex' } else { $modifier }
+        if ($values.Count -gt 0 -and $structuredModifier -in @('contains', 'startswith', 'endswith', 'equals', 'regex')) {
+            $fieldName = if ($field -match '^(?i:(EventData|UserData)\.)') { $field } else { 'EventData.' + $field }
+            $predicates = foreach ($value in $values) {
+                $predicate = [ordered]@{ field = $fieldName }
+                $predicate[$structuredModifier] = [string]$value
+                [pscustomobject]$predicate
             }
-            if ($match.messagePattern) { $match.messagePattern = '(?:' + $match.messagePattern + ')|(?:' + $pattern + ')' } else { $match.messagePattern = $pattern }
+            if (@($predicates).Count -eq 1) {
+                $eventDataConditions.Add($predicates[0]) | Out-Null
+            } else {
+                $eventDataConditions.Add([pscustomobject][ordered]@{ any = @($predicates) }) | Out-Null
+            }
         } elseif ($values.Count -gt 0) {
-            $warnings.Add("Detection field '$($property.Name)' could not be represented exactly in LogVerdict's messagePattern contract.") | Out-Null
+            $warnings.Add("Detection field '$($property.Name)' uses unsupported modifier '$modifier'; it remains an inactive review candidate.") | Out-Null
         }
+    }
+    if ($eventDataConditions.Count -gt 0) {
+        $match.eventData = [pscustomobject][ordered]@{ all = @($eventDataConditions.ToArray()) }
     }
     if ($Detection.Condition -and [string]$Detection.Condition -notmatch ('^(?i:{0})(\s+and\s+{0})?$' -f [regex]::Escape([string]$Detection.Selection))) {
         $warnings.Add("Detection condition '$($Detection.Condition)' is broader than the selected mapping and requires review.") | Out-Null

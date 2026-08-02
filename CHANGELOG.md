@@ -17,6 +17,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added versioned `LogVerdict.Report` and `LogVerdict.Evidence` JSON contracts and schemas with
   explicit redaction/raw state, live/offline mode, compatibility metadata, source coverage,
   included-file hashes, legacy migration markers, and future-schema rejection in report export.
+- Added schema v6 structured EventData/UserData matching with bounded `all`/`any`/`not`
+  conditions and locale-safe value modifiers; Sigma imports now map supported fields into
+  inactive review candidates and warn on unsupported modifiers.
 
 ## [0.8.1] - 2026-08-02
 

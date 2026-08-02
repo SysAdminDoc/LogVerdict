@@ -316,9 +316,11 @@ function Get-LVEventRecord {
 
             $providerLocale = if ($e.PSObject.Properties['ProviderLocale']) { [string]$e.ProviderLocale } elseif ($e.PSObject.Properties['Locale']) { [string]$e.Locale } else { [string]$script:LVUICulture }
             $errorContext = New-LVErrorContext -InputObject $e -Message ([string]$message) -FallbackMessage $fallbackMessage -ProviderLocale $providerLocale
+            $structuredData = Get-LVEventStructuredData -EventObject $e
 
             $estimatedBytes = 256
             if ($message) { $estimatedBytes += [Text.Encoding]::UTF8.GetByteCount([string]$message) }
+            if ($structuredData) { $estimatedBytes += [Text.Encoding]::UTF8.GetByteCount(($structuredData | ConvertTo-Json -Depth 5 -Compress)) }
             if ($CollectionBudget -and (([int64]$CollectionBudget.BytesRead + $estimatedBytes) -gt [int64]$CollectionBudget.MaxBytes)) {
                 $budgetStop = 'truncated'
                 break
@@ -339,6 +341,7 @@ function Get-LVEventRecord {
                 MachineName  = $e.MachineName
                 RecordId     = $e.RecordId
                 Message      = $message.Trim()
+                StructuredData = $structuredData
                 ResultCode   = $errorContext.ResultCode
                 ExtendCode   = $errorContext.ExtendCode
                 Phase        = $errorContext.Phase

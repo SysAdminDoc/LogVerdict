@@ -73,6 +73,7 @@ function ConvertTo-LVFixtureSignature {
         ProviderLocale = $context.ProviderLocale
         FallbackMessage = $context.FallbackMessage
         ErrorContext  = $context
+        StructuredData = if ($s.PSObject.Properties['StructuredData']) { $s.StructuredData } else { $null }
         Count         = 1
         PerDay        = $perDay
         SpanDays      = 0

@@ -80,6 +80,11 @@ function Get-LVDatabaseTrustProblem {
                 $problems.Add([pscustomobject]@{ RuleId=$id; Problem='active rule requires references[], sources[], or provenance=internal-observation' }) | Out-Null
             }
         }
+        if ($rule.match -and $rule.match.eventData) {
+            foreach ($problem in @(Get-LVStructuredConditionProblems -Condition $rule.match.eventData)) {
+                $problems.Add([pscustomobject]@{ RuleId=$id; Problem=[string]$problem }) | Out-Null
+            }
+        }
     }
 
     foreach ($correlationRule in @($Database.correlations | Where-Object { $_ })) {
@@ -203,6 +208,7 @@ function Get-LVRuleSpecificity {
     if ($m.phase)                    { $score += 2 }
     if ($m.operation)                { $score += 2 }
     if ($m.providerLocale)            { $score += 1 }
+    if ($m.eventData)                 { $score += 10 }
     if ($m.provider)                 { $score += 2 }
     if ($m.channel)                  { $score += 2 }
     if ($m.source)                   { $score += 1 }
@@ -246,6 +252,11 @@ function Test-LVRuleMatch {
     if ($m.providerLocale) {
         $actual = [string](Get-LVErrorContextField -InputObject $Signature -Name 'ProviderLocale')
         if (-not $actual -or (($actual -split '-')[0] -ine (([string]$m.providerLocale) -split '-')[0])) { return $false }
+    }
+
+    if ($m.eventData) {
+        if ($Signature.Source -notin @('event', 'reliability')) { return $false }
+        if (-not (Test-LVStructuredCondition -Condition $m.eventData -Signature $Signature)) { return $false }
     }
 
     if ($m.messagePattern) {

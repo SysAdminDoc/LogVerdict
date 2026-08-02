@@ -1822,6 +1822,23 @@ Describe 'Cross-version, locale, and fixture coverage' {
         }
     }
 
+    It 'extracts named EventData and UserData fields from event XML with bounded values' {
+        InModuleScope LogVerdict {
+            $event = [pscustomobject]@{
+                Xml = @'
+<Event><EventData><Data Name="Image">C:\Tools\app.exe</Data><Data Name="Code">0x80070057</Data></EventData><UserData><Root><Status>Failed</Status></Root></UserData></Event>
+'@
+                Properties = @()
+            }
+            $event | Add-Member -MemberType ScriptMethod -Name ToXml -Value { $this.Xml } -Force
+            $structured = Get-LVEventStructuredData -EventObject $event
+
+            $structured.EventData.Image | Should -BeExactly 'C:\Tools\app.exe'
+            $structured.EventData.Code | Should -BeExactly '0x80070057'
+            $structured.UserData.Status | Should -BeExactly 'Failed'
+        }
+    }
+
     It 'exercises a text-log fixture through the real collector shape' {
         $fixture = $script:CoverageFixtures.fixtures | Where-Object kind -eq 'textlog' | Select-Object -First 1
         $path = Join-Path $TestDrive 'coverage-fixture.log'
@@ -2257,6 +2274,38 @@ Describe 'Verdict resolution' {
             } finally {
                 $script:LVUICulture = $original
             }
+        }
+    }
+
+    It 'matches structured EventData and UserData conditions without rendered message prose' {
+        InModuleScope LogVerdict {
+            $sig = [pscustomobject]@{
+                Key='Acme/1'; Source='event'; Channel='System'; Provider='Acme'; Id=1
+                Count=1; PerDay=0.1; SampleMessage='localized provider text'; FirstSeen=(Get-Date); LastSeen=(Get-Date)
+                StructuredData = [pscustomobject]@{
+                    EventData = [pscustomobject]@{ Image='C:\Tools\app.exe'; Code='0x80070057' }
+                    UserData = [pscustomobject]@{ Status='Failed' }
+                }
+            }
+            $rule = [pscustomobject]@{
+                id='STRUCT-1'; status='stable'; verified='2026-08-02'
+                match=[pscustomobject]@{
+                    source='event'; provider='Acme'; eventId=1
+                    eventData=[pscustomobject]@{ all=@(
+                        [pscustomobject]@{ field='EventData.Image'; endswith='app.exe' }
+                        [pscustomobject]@{ any=@(
+                            [pscustomobject]@{ field='UserData.Status'; equals='failed' }
+                            [pscustomobject]@{ field='EventData.Code'; equals='0x999' }
+                        ) }
+                    ) }
+                }
+                verdict='actionable'; title='structured'; plain='p'; why='w'; action='a'; confidence='high'
+            }
+            $db = [pscustomobject]@{ schemaVersion=6; rules=@($rule) }
+            (Resolve-LVVerdict -Signature @($sig) -Database $db)[0].RuleId | Should -BeExactly 'STRUCT-1'
+
+            $bad = [pscustomobject]@{ field='EventData.Image'; contains='app'; wildcard='unsupported' }
+            @(Get-LVStructuredConditionProblems -Condition $bad).Count | Should -BeGreaterThan 0
         }
     }
 
@@ -4932,6 +4981,8 @@ level: high
         $candidates[0].match.channel | Should -BeExactly 'Microsoft-Windows-Sysmon/Operational'
         $candidates[0].match.provider | Should -BeExactly 'Microsoft-Windows-Sysmon'
         $candidates[0].match.eventId | Should -Be 1
+        $candidates[0].match.eventData.all[0].field | Should -BeExactly 'EventData.Image'
+        $candidates[0].match.eventData.all[0].endswith | Should -BeExactly '\\powershell.exe'
         $candidates[0].sigma.tags | Should -Contain 'attack.execution'
         $candidates[0].falsepositives | Should -Contain 'Administrative scripts'
         $candidates[0].sources[0].licence | Should -BeExactly 'DRL-1.1'
