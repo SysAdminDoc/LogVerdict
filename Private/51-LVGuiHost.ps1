@@ -568,12 +568,24 @@ function ConvertTo-LVGuiDetail {
     if ($Finding.UndatedCount -gt 0) {
         $meta.Add(('{0} line(s) carried no timestamp' -f $Finding.UndatedCount))
     }
+    foreach ($context in @(
+        @{ Name='result'; Value=$Finding.ResultCode },
+        @{ Name='extend'; Value=$Finding.ExtendCode },
+        @{ Name='phase'; Value=$Finding.Phase },
+        @{ Name='operation'; Value=$Finding.Operation },
+        @{ Name='provider locale'; Value=$Finding.ProviderLocale }
+    )) {
+        if ($context.Value) { $meta.Add(('{0} {1}' -f $context.Name, $context.Value)) }
+    }
 
     $falsePositive = @($Finding.FalsePositives | Where-Object { $_ })
     $reference = @(@(@($Finding.References) + @($Finding.Sources | ForEach-Object { $_.uri })) |
         Where-Object { $_ } | Select-Object -Unique)
     $sample = @($Finding.Samples | Where-Object { $_ })
     if ($sample.Count -eq 0) { $sample = @([string]$Finding.SampleMessage) }
+    if ($Finding.FallbackMessage -and $sample -notcontains [string]$Finding.FallbackMessage) {
+        $sample += [string]$Finding.FallbackMessage
+    }
 
     if ($Finding.RuleId) {
         $provenancePart = New-Object System.Collections.Generic.List[string]

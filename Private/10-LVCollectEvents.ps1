@@ -278,12 +278,17 @@ function Get-LVEventRecord {
 
         foreach ($e in $events) {
             $message = $e.Message
+            $fallbackMessage = $null
             if ([string]::IsNullOrWhiteSpace($message)) {
                 # Provider metadata missing (uninstalled software, or an offline copy).
                 # Keep the record - the signature is still valid, the prose just is not.
                 $message = '(no message template registered for this provider on this machine)'
+                $fallbackMessage = $message
                 $metadataMissing++
             }
+
+            $providerLocale = if ($e.PSObject.Properties['ProviderLocale']) { [string]$e.ProviderLocale } elseif ($e.PSObject.Properties['Locale']) { [string]$e.Locale } else { [string]$script:LVUICulture }
+            $errorContext = New-LVErrorContext -InputObject $e -Message ([string]$message) -FallbackMessage $fallbackMessage -ProviderLocale $providerLocale
 
             $records.Add([pscustomobject]@{
                 Source       = 'event'
@@ -300,6 +305,13 @@ function Get-LVEventRecord {
                 MachineName  = $e.MachineName
                 RecordId     = $e.RecordId
                 Message      = $message.Trim()
+                ResultCode   = $errorContext.ResultCode
+                ExtendCode   = $errorContext.ExtendCode
+                Phase        = $errorContext.Phase
+                Operation    = $errorContext.Operation
+                ProviderLocale = $errorContext.ProviderLocale
+                FallbackMessage = $errorContext.FallbackMessage
+                ErrorContext = $errorContext
             }) | Out-Null
         }
         $coverageStatus = if ($isTruncated) { 'truncated' } elseif ($events.Count -eq 0) { 'empty' } else { 'readable' }

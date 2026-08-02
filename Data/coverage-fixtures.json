@@ -55,6 +55,52 @@
       }
     },
     {
+      "id": "setup-composite-code-german",
+      "kind": "composite-code",
+      "locale": "de-DE",
+      "record": {
+        "Source": "textlog",
+        "Channel": "SetupDiag",
+        "Provider": "Microsoft SetupDiag",
+        "Id": 0,
+        "ResultCode": "0xC1900101",
+        "ExtendCode": "0x00000000",
+        "Phase": "Downlevel",
+        "Operation": "Process",
+        "ProviderLocale": "de-DE",
+        "FallbackMessage": "Fehler beim Verarbeiten des Upgradevorgangs.",
+        "Message": "Fehler beim Verarbeiten des Upgradevorgangs."
+      },
+      "expected": {
+        "errorName": "MOSETUP_E_PROCESS_CRASH",
+        "phase": "upgrade",
+        "operation": "process"
+      }
+    },
+    {
+      "id": "windows-update-composite-code-japanese",
+      "kind": "composite-code",
+      "locale": "ja-JP",
+      "record": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-WindowsUpdateClient",
+        "Id": 20,
+        "ResultCode": "0x80240017",
+        "ExtendCode": "0x80070005",
+        "Phase": "update",
+        "Operation": "applicability",
+        "ProviderLocale": "ja-JP",
+        "FallbackMessage": "\u66f4\u65b0\u306e\u9069\u7528\u6027\u3092\u5224\u65ad\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002",
+        "Message": "\u66f4\u65b0\u306e\u9069\u7528\u6027\u3092\u5224\u65ad\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002"
+      },
+      "expected": {
+        "errorName": "WU_E_NOT_APPLICABLE",
+        "phase": "update",
+        "operation": "applicability"
+      }
+    },
+    {
       "id": "offline-evtx-malformed",
       "kind": "offline-evtx",
       "name": "malformed.evtx",

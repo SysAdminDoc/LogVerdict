@@ -37,6 +37,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added canonical case profiles with bounded source choices, redaction policy, analyst notes,
   source hashes, KAPE/Velociraptor collection recipes, and deterministic attributed Timesketch
   and Hayabusa handoff timelines; profiles remain metadata and never become verdicts.
+- Preserved Windows Setup/Update composite result and extended codes, phase, operation, provider
+  locale, and fallback text through localized matching, reduction, reports, GUI details, and
+  standard exports; added German and Japanese non-English fixtures.
 - Added the versioned `Export-LogVerdictStandard` command with ECS, OCSF, OpenTelemetry Logs,
   and STIX 2.1 JSON adapters. All projections preserve normalized findings, source/provider/
   event fields, confidence, references, timestamps, coverage, health context, and explicit

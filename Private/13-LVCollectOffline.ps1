@@ -186,6 +186,13 @@ function ConvertFrom-LVArchivedSignature {
         LevelName     = [string]$Finding.LevelName
         SampleMessage = [string]$Finding.SampleMessage
         Samples       = @($Finding.Samples)
+        ResultCode    = if ($Finding.PSObject.Properties['ResultCode']) { $Finding.ResultCode } else { $null }
+        ExtendCode    = if ($Finding.PSObject.Properties['ExtendCode']) { $Finding.ExtendCode } else { $null }
+        Phase         = if ($Finding.PSObject.Properties['Phase']) { $Finding.Phase } else { $null }
+        Operation     = if ($Finding.PSObject.Properties['Operation']) { $Finding.Operation } else { $null }
+        ProviderLocale = if ($Finding.PSObject.Properties['ProviderLocale']) { $Finding.ProviderLocale } else { $null }
+        FallbackMessage = if ($Finding.PSObject.Properties['FallbackMessage']) { $Finding.FallbackMessage } else { $null }
+        ErrorContext  = if ($Finding.PSObject.Properties['ErrorContext']) { $Finding.ErrorContext } else { $null }
         Times         = @($times.ToArray() | Sort-Object)
         Area          = $Finding.Area
         PerDay        = [double]$Finding.PerDay
@@ -367,11 +374,15 @@ function Read-LVArchivedEventFile {
     foreach ($eventRecord in $events) {
         $message = $null
         try { $message = $eventRecord.Message } catch { $message = $null }
+        $fallbackMessage = $null
         if ([string]::IsNullOrWhiteSpace([string]$message)) {
             $message = '(no message template registered for this provider on this machine)'
+            $fallbackMessage = $message
         }
         $recordChannel = $channel
         if ($eventRecord.LogName) { $recordChannel = [string]$eventRecord.LogName }
+        $errorContext = New-LVErrorContext -InputObject $eventRecord -Message ([string]$message) `
+            -FallbackMessage $fallbackMessage
         $records.Add([pscustomobject]@{
             Source      = 'event'
             Channel     = $recordChannel
@@ -383,6 +394,13 @@ function Read-LVArchivedEventFile {
             MachineName = [string]$eventRecord.MachineName
             RecordId    = $eventRecord.RecordId
             Message     = ([string]$message).Trim()
+            ResultCode  = $errorContext.ResultCode
+            ExtendCode  = $errorContext.ExtendCode
+            Phase       = $errorContext.Phase
+            Operation   = $errorContext.Operation
+            ProviderLocale = $errorContext.ProviderLocale
+            FallbackMessage = $errorContext.FallbackMessage
+            ErrorContext = $errorContext
         }) | Out-Null
     }
 

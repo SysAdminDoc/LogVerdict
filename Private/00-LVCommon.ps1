@@ -467,6 +467,24 @@ function ConvertTo-LVRedactedResult {
         if ($c.PSObject.Properties['SampleMessage']) {
             $c.SampleMessage = ConvertTo-LVRedactedText -Text $c.SampleMessage -MachineName $machine
         }
+        if ($c.PSObject.Properties['FallbackMessage']) {
+            $c.FallbackMessage = ConvertTo-LVRedactedText -Text $c.FallbackMessage -MachineName $machine
+        }
+        if ($c.PSObject.Properties['ErrorContext'] -and $c.ErrorContext) {
+            $context = [pscustomobject]@{}
+            foreach ($prop in $c.ErrorContext.PSObject.Properties) {
+                $context | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+            }
+            if ($context.PSObject.Properties['FallbackMessage']) {
+                $context.FallbackMessage = ConvertTo-LVRedactedText -Text $context.FallbackMessage -MachineName $machine
+            }
+            if ($context.PSObject.Properties['FallbackMessages']) {
+                $context.FallbackMessages = @(@($context.FallbackMessages) | ForEach-Object {
+                    ConvertTo-LVRedactedText -Text $_ -MachineName $machine
+                })
+            }
+            $c.ErrorContext = $context
+        }
         if ($c.PSObject.Properties['Samples']) {
             $c.Samples = @(@($f.Samples) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
         }

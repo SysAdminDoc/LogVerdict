@@ -239,9 +239,17 @@ function ConvertTo-LVFlatFindingRow {
             Why               = $finding.Why
             Action            = $finding.Action
             SampleMessage     = $finding.SampleMessage
+            ResultCode        = $finding.ResultCode
+            ExtendCode        = $finding.ExtendCode
+            Phase             = $finding.Phase
+            Operation         = $finding.Operation
+            ProviderLocale    = $finding.ProviderLocale
+            FallbackMessage   = $finding.FallbackMessage
             ErrorCode         = $finding.ErrorCode
             ErrorCatalogKind  = $finding.ErrorCatalogKind
             ErrorName         = $finding.ErrorName
+            ErrorPhase        = $finding.ErrorPhase
+            ErrorOperation    = $finding.ErrorOperation
             Reference         = $finding.Reference
             Burst             = if ($finding.PSObject.Properties['Burst']) { $finding.Burst } else { $false }
             BurstOnset        = if ($finding.PSObject.Properties['BurstOnset'] -and $finding.BurstOnset) { ([datetime]$finding.BurstOnset).ToString('o') } else { $null }
@@ -278,7 +286,8 @@ function ConvertTo-LVCoverageCsvRow {
         Count             = $null; PerDay = $null; FirstSeen = $null; LastSeen = $null
         Verdict           = $null; Title = $null; RuleId = $null; Confidence = $null
         Plain             = $null; Why = $null; Action = $null; SampleMessage = $null
-        ErrorCode         = $null; ErrorCatalogKind = $null; ErrorName = $null; Reference = $null
+        ResultCode        = $null; ExtendCode = $null; Phase = $null; Operation = $null; ProviderLocale = $null; FallbackMessage = $null
+        ErrorCode         = $null; ErrorCatalogKind = $null; ErrorName = $null; ErrorPhase = $null; ErrorOperation = $null; Reference = $null
         Burst             = $null; BurstOnset = $null; BurstCount = $null; BurstWindowMinutes = $null
         CoverageSource    = $Coverage.Source; CoverageKind = $Coverage.Kind; CoverageName = $Coverage.Name
         CoverageStatus    = $Coverage.Status; CoverageReason = $Coverage.Reason; CoveragePath = $Coverage.Path
@@ -316,7 +325,8 @@ function ConvertTo-LVHealthCsvRow {
         Count = $null; PerDay = $null; FirstSeen = $null; LastSeen = $null
         Verdict = $null; Title = $null; RuleId = $null; Confidence = $null
         Plain = $null; Why = $null; Action = $null; SampleMessage = $null
-        ErrorCode = $null; ErrorCatalogKind = $null; ErrorName = $null; Reference = $null
+        ResultCode = $null; ExtendCode = $null; Phase = $null; Operation = $null; ProviderLocale = $null; FallbackMessage = $null
+        ErrorCode = $null; ErrorCatalogKind = $null; ErrorName = $null; ErrorPhase = $null; ErrorOperation = $null; Reference = $null
         Burst = $null; BurstOnset = $null; BurstCount = $null; BurstWindowMinutes = $null
         CoverageSource = $null; CoverageKind = $null; CoverageName = $null; CoverageStatus = $null
         CoverageReason = $null; CoveragePath = $null; CoverageWindowStart = $null; CoverageWindowEnd = $null
@@ -366,7 +376,8 @@ function ConvertTo-LVCsvReport {
         Count = $null; PerDay = $null; FirstSeen = $null; LastSeen = $null
         Verdict = $null; Title = $null; RuleId = $null; Confidence = $null
         Plain = $null; Why = $null; Action = $null; SampleMessage = $null
-        ErrorCode = $null; ErrorCatalogKind = $null; ErrorName = $null; Reference = $null
+        ResultCode = $null; ExtendCode = $null; Phase = $null; Operation = $null; ProviderLocale = $null; FallbackMessage = $null
+        ErrorCode = $null; ErrorCatalogKind = $null; ErrorName = $null; ErrorPhase = $null; ErrorOperation = $null; Reference = $null
         Burst = $null; BurstOnset = $null; BurstCount = $null; BurstWindowMinutes = $null
         CoverageSource = $null; CoverageKind = $null; CoverageName = $null; CoverageStatus = $null
         CoverageReason = $null; CoveragePath = $null; CoverageWindowStart = $null; CoverageWindowEnd = $null
@@ -551,6 +562,16 @@ function ConvertTo-LVTextReport {
         if ($f.PSObject.Properties['Burst'] -and $f.Burst) {
             Add-LVLine $sb ('  Burst       : began {0}; {1} occurrence(s) in {2} minute(s)' -f (Format-LVWhen $f.BurstOnset), $f.BurstCount, $f.BurstWindowMinutes)
         }
+        $context = @()
+        if ($f.ResultCode) { $context += 'result ' + [string]$f.ResultCode }
+        if ($f.ExtendCode) { $context += 'extend ' + [string]$f.ExtendCode }
+        if ($f.Phase) { $context += 'phase ' + [string]$f.Phase }
+        if ($f.Operation) { $context += 'operation ' + [string]$f.Operation }
+        if ($f.ProviderLocale) { $context += 'provider locale ' + [string]$f.ProviderLocale }
+        if ($f.ErrorPhase -and $f.ErrorPhase -ne $f.Phase) { $context += 'catalog phase ' + [string]$f.ErrorPhase }
+        if ($f.ErrorOperation -and $f.ErrorOperation -ne $f.Operation) { $context += 'catalog operation ' + [string]$f.ErrorOperation }
+        if ($context.Count -gt 0) { Add-LVLine $sb ('  Structured   : {0}' -f ($context -join '; ')) }
+        if ($f.FallbackMessage) { Add-LVLine $sb ('  Fallback text: {0}' -f $f.FallbackMessage) }
         Add-LVLine $sb ('  Rule        : {0} (confidence: {1}{2})' -f $f.RuleId, $f.Confidence, $(if ($f.Verified) { ', verified ' + $f.Verified } else { '' }))
         foreach ($fp in @($f.FalsePositives)) {
             Add-LVLine $sb ('  Not this if : {0}' -f $fp)
@@ -875,6 +896,20 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         Add-LVLine $sb ('<div class="meta">{0} &middot; {1} occurrence(s) &middot; {2}/day &middot; {3} to {4} &middot; rule {5} ({6}{7})</div>' -f (ConvertTo-LVHtmlEncoded $f.Key), $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen), $f.RuleId, $f.Confidence, $(if ($f.Verified) { ', verified ' + $f.Verified } else { '' }))
         if ($f.PSObject.Properties['Burst'] -and $f.Burst) {
             Add-LVLine $sb ('<div class="row"><div class="lbl">Burst</div><div>{0} &middot; {1} occurrence(s) in {2} minute(s)</div></div>' -f (Format-LVWhen $f.BurstOnset), $f.BurstCount, $f.BurstWindowMinutes)
+        }
+        $context = @()
+        if ($f.ResultCode) { $context += 'result ' + [string]$f.ResultCode }
+        if ($f.ExtendCode) { $context += 'extend ' + [string]$f.ExtendCode }
+        if ($f.Phase) { $context += 'phase ' + [string]$f.Phase }
+        if ($f.Operation) { $context += 'operation ' + [string]$f.Operation }
+        if ($f.ProviderLocale) { $context += 'provider locale ' + [string]$f.ProviderLocale }
+        if ($f.ErrorPhase -and $f.ErrorPhase -ne $f.Phase) { $context += 'catalog phase ' + [string]$f.ErrorPhase }
+        if ($f.ErrorOperation -and $f.ErrorOperation -ne $f.Operation) { $context += 'catalog operation ' + [string]$f.ErrorOperation }
+        if ($context.Count -gt 0) {
+            Add-LVLine $sb ('<div class="row"><div class="lbl">Structured context</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded ($context -join '; ')))
+        }
+        if ($f.FallbackMessage) {
+            Add-LVLine $sb ('<div class="row"><div class="lbl">Fallback text</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.FallbackMessage))
         }
         Add-LVLine $sb ('<div class="row"><div class="lbl">Means</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.Plain))
         Add-LVLine $sb ('<div class="row"><div class="lbl">Matters</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.Why))

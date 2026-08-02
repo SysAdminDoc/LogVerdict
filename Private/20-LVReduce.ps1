@@ -30,6 +30,8 @@ function Get-LVSignatureReduction {
     $families = @{}
     $initialKeys = @{}
     foreach ($r in $Record) {
+        $recordContext = New-LVErrorContext -InputObject $r -Message ([string]$r.Message) `
+            -FallbackMessage ([string](Get-LVErrorContextField -InputObject $r -Name 'FallbackMessage'))
         $kind = 'stable'
         $initialKey = $null
         $data = $null
@@ -60,7 +62,7 @@ function Get-LVSignatureReduction {
         $initialKeys[$initialKey] = $true
         $prepared.Add([pscustomobject]@{
             Record=$r; Kind=$kind; InitialKey=$initialKey; TemplateData=$data
-            FamilyKey=$(if ($kind -eq 'text') { $familyKey } else { $null })
+            FamilyKey=$(if ($kind -eq 'text') { $familyKey } else { $null }); Context=$recordContext
         }) | Out-Null
     }
 
@@ -140,6 +142,12 @@ function Get-LVSignatureReduction {
                 LevelName     = $r.LevelName
                 SampleMessage = $r.Message
                 Samples       = (New-Object System.Collections.Generic.List[string])
+                ResultCodes   = @()
+                ExtendCodes   = @()
+                Phases        = @()
+                Operations    = @()
+                ProviderLocales = @()
+                FallbackMessages = @()
                 # Every occurrence time, capped. FirstSeen and LastSeen describe the span
                 # but say nothing about what happened INSIDE it, and correlation is
                 # entirely a question about the inside: two signatures whose spans overlap
@@ -151,6 +159,20 @@ function Get-LVSignatureReduction {
 
         $b = $buckets[$key]
         $b.Count++
+
+        foreach ($field in @(
+            @{ Context = 'ResultCode'; Bucket = 'ResultCodes' },
+            @{ Context = 'ExtendCode'; Bucket = 'ExtendCodes' },
+            @{ Context = 'Phase'; Bucket = 'Phases' },
+            @{ Context = 'Operation'; Bucket = 'Operations' },
+            @{ Context = 'ProviderLocale'; Bucket = 'ProviderLocales' },
+            @{ Context = 'FallbackMessage'; Bucket = 'FallbackMessages' }
+        )) {
+            $value = ConvertTo-LVErrorContextText $item.Context.($field.Context)
+            if ($value -and @($b.($field.Bucket)) -notcontains $value) {
+                $b.($field.Bucket) = @($b.($field.Bucket)) + $value
+            }
+        }
 
         # Undated records carry a null time (text-log lines with no parseable
         # timestamp). PowerShell compares $null as less than any date, so guarding
@@ -198,6 +220,34 @@ function Get-LVSignatureReduction {
         $b | Add-Member -NotePropertyName 'PerDay'   -NotePropertyValue ([Math]::Round($b.Count / $denominator, 2)) -Force
         $b | Add-Member -NotePropertyName 'SpanDays' -NotePropertyValue ([Math]::Round($spanDays, 1)) -Force
         $b | Add-Member -NotePropertyName 'Samples'  -NotePropertyValue (@($b.Samples.ToArray())) -Force
+        $resultCodes = @($b.ResultCodes | Sort-Object)
+        $extendCodes = @($b.ExtendCodes | Sort-Object)
+        $phases = @($b.Phases | Sort-Object)
+        $operations = @($b.Operations | Sort-Object)
+        $providerLocales = @($b.ProviderLocales | Sort-Object)
+        $fallbackMessages = @($b.FallbackMessages | Sort-Object)
+        $resultCode = if ($resultCodes.Count -gt 0) { $resultCodes[0] } else { $null }
+        $extendCode = if ($extendCodes.Count -gt 0) { $extendCodes[0] } else { $null }
+        $phase = if ($phases.Count -gt 0) { $phases[0] } else { $null }
+        $operation = if ($operations.Count -gt 0) { $operations[0] } else { $null }
+        $providerLocale = if ($providerLocales.Count -gt 0) { $providerLocales[0] } else { $null }
+        $fallbackMessage = if ($fallbackMessages.Count -gt 0) { $fallbackMessages[0] } else { $null }
+        $b | Add-Member -NotePropertyName 'ResultCodes' -NotePropertyValue $resultCodes -Force
+        $b | Add-Member -NotePropertyName 'ExtendCodes' -NotePropertyValue $extendCodes -Force
+        $b | Add-Member -NotePropertyName 'Phases' -NotePropertyValue $phases -Force
+        $b | Add-Member -NotePropertyName 'Operations' -NotePropertyValue $operations -Force
+        $b | Add-Member -NotePropertyName 'ProviderLocales' -NotePropertyValue $providerLocales -Force
+        $b | Add-Member -NotePropertyName 'FallbackMessages' -NotePropertyValue $fallbackMessages -Force
+        $b | Add-Member -NotePropertyName 'ResultCode' -NotePropertyValue $resultCode -Force
+        $b | Add-Member -NotePropertyName 'ExtendCode' -NotePropertyValue $extendCode -Force
+        $b | Add-Member -NotePropertyName 'Phase' -NotePropertyValue $phase -Force
+        $b | Add-Member -NotePropertyName 'Operation' -NotePropertyValue $operation -Force
+        $b | Add-Member -NotePropertyName 'ProviderLocale' -NotePropertyValue $providerLocale -Force
+        $b | Add-Member -NotePropertyName 'FallbackMessage' -NotePropertyValue $fallbackMessage -Force
+        $b | Add-Member -NotePropertyName 'ErrorContext' -NotePropertyValue ([pscustomobject][ordered]@{
+            ResultCodes=$resultCodes; ExtendCodes=$extendCodes; Phases=$phases; Operations=$operations
+            ProviderLocales=$providerLocales; FallbackMessages=$fallbackMessages
+        }) -Force
         # Sorted once here rather than by every consumer. The correlator's sliding window
         # is only correct over an ordered sequence, and records do not arrive in time
         # order - channels are read one after another, each already sorted within itself.

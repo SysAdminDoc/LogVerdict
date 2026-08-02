@@ -54,6 +54,8 @@ function ConvertTo-LVFixtureSignature {
 
     $id = 0
     if ($null -ne $s.Id) { $id = [int]$s.Id }
+    $context = New-LVErrorContext -InputObject $s -Message ([string]$s.SampleMessage) `
+        -FallbackMessage ([string]$s.FallbackMessage)
 
     return [pscustomobject]@{
         Key           = ('fixture/{0}' -f $Fixture.ruleId)
@@ -63,6 +65,14 @@ function ConvertTo-LVFixtureSignature {
         Id            = $id
         SampleMessage = [string]$s.SampleMessage
         Samples       = @([string]$s.SampleMessage)
+        SignatureKey  = if ($s.PSObject.Properties['SignatureKey']) { $s.SignatureKey } else { $null }
+        ResultCode    = $context.ResultCode
+        ExtendCode    = $context.ExtendCode
+        Phase         = $context.Phase
+        Operation     = $context.Operation
+        ProviderLocale = $context.ProviderLocale
+        FallbackMessage = $context.FallbackMessage
+        ErrorContext  = $context
         Count         = 1
         PerDay        = $perDay
         SpanDays      = 0

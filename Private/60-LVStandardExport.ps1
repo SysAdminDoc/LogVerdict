@@ -134,6 +134,16 @@ function ConvertTo-LVStandardFinding {
         errorCode = $Finding.ErrorCode
         errorCatalogKind = $Finding.ErrorCatalogKind
         errorName = $Finding.ErrorName
+        errorPhase = $Finding.ErrorPhase
+        errorOperation = $Finding.ErrorOperation
+        errorContext = [pscustomobject][ordered]@{
+            resultCode = $Finding.ResultCode
+            extendCode = $Finding.ExtendCode
+            phase = $Finding.Phase
+            operation = $Finding.Operation
+            providerLocale = $Finding.ProviderLocale
+            fallbackMessage = $Finding.FallbackMessage
+        }
         references = @(Get-LVStandardReference -Finding $Finding)
         event = [pscustomobject]$eventRecord
         burst = if ($Finding.PSObject.Properties['Burst']) { [bool]$Finding.Burst } else { $false }

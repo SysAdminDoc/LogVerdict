@@ -32,6 +32,136 @@ function ConvertTo-LVErrorHex {
     return ('0x{0:X8}' -f [uint32]$number)
 }
 
+function Get-LVErrorContextField {
+    <#
+        Read a typed composite-code field from either the record itself or its
+        ErrorContext child. Keeping this accessor tolerant lets old fixtures and
+        new collectors travel through the same resolver.
+    #>
+    param(
+        [AllowNull()]$InputObject,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $InputObject) { return $null }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($property) { return $property.Value }
+    $context = $InputObject.PSObject.Properties['ErrorContext']
+    if ($context -and $context.Value) {
+        $nested = $context.Value.PSObject.Properties[$Name]
+        if ($nested) { return $nested.Value }
+    }
+    return $null
+}
+
+function ConvertTo-LVErrorContextText {
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return $null }
+    $text = ([string]$Value -replace '\s+', ' ').Trim()
+    if ($text) { return $text }
+    return $null
+}
+
+function New-LVErrorContext {
+    <#
+        Normalize the invariant fields Windows Update, SetupDiag, and event
+        providers expose around a failure. Rendered Message is deliberately only
+        a fallback: matching can use these fields when a provider localizes prose
+        or has no message resource installed.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$InputObject,
+        [AllowNull()][string]$Message,
+        [AllowNull()][string]$FallbackMessage,
+        [string]$ProviderLocale
+    )
+
+    $resultCode = ConvertTo-LVErrorHex -Value ([string](Get-LVErrorContextField -InputObject $InputObject -Name 'ResultCode'))
+    if (-not $resultCode) {
+        foreach ($name in @('Result', 'FailureCode', 'ErrorCode', 'HResult', 'HRESULT')) {
+            $resultCode = ConvertTo-LVErrorHex -Value ([string](Get-LVErrorContextField -InputObject $InputObject -Name $name))
+            if ($resultCode) { break }
+        }
+    }
+    $extendCode = ConvertTo-LVErrorHex -Value ([string](Get-LVErrorContextField -InputObject $InputObject -Name 'ExtendCode'))
+    if (-not $extendCode) {
+        foreach ($name in @('ExtendedErrorCode', 'ExtendedCode', 'ErrorExtendCode', 'Extend')) {
+            $extendCode = ConvertTo-LVErrorHex -Value ([string](Get-LVErrorContextField -InputObject $InputObject -Name $name))
+            if ($extendCode) { break }
+        }
+    }
+
+    $rawParts = New-Object System.Collections.Generic.List[string]
+    foreach ($value in @($Message, $FallbackMessage)) {
+        $line = ConvertTo-LVErrorContextText $value
+        if ($line) { $rawParts.Add($line) | Out-Null }
+    }
+    foreach ($name in @('FailureDetails', 'LogErrorLine', 'FailureData', 'Message')) {
+        $value = Get-LVErrorContextField -InputObject $InputObject -Name $name
+        foreach ($part in @($value)) {
+            $line = ConvertTo-LVErrorContextText $part
+            if ($line) { $rawParts.Add($line) | Out-Null }
+        }
+    }
+    $raw = $rawParts -join ' | '
+    $codes = New-Object System.Collections.Generic.List[string]
+    foreach ($match in [regex]::Matches($raw, '(?i)(?<![0-9a-f])0x[0-9a-f]{1,8}(?![0-9a-f])')) {
+        $code = ConvertTo-LVErrorHex -Value $match.Value
+        if ($code -and -not $codes.Contains($code)) { $codes.Add($code) | Out-Null }
+    }
+    if (-not $resultCode -and $codes.Count -gt 0) { $resultCode = $codes[0] }
+    if (-not $extendCode -and $codes.Count -gt 1) { $extendCode = $codes[1] }
+
+    $phase = ConvertTo-LVErrorContextText (Get-LVErrorContextField -InputObject $InputObject -Name 'Phase')
+    if (-not $phase) {
+        foreach ($name in @('LastPhase', 'SetupPhase')) {
+            $phase = ConvertTo-LVErrorContextText (Get-LVErrorContextField -InputObject $InputObject -Name $name)
+            if ($phase) { break }
+        }
+    }
+    $operation = ConvertTo-LVErrorContextText (Get-LVErrorContextField -InputObject $InputObject -Name 'Operation')
+    if (-not $operation) {
+        foreach ($name in @('LastOperation', 'SetupOperation')) {
+            $operation = ConvertTo-LVErrorContextText (Get-LVErrorContextField -InputObject $InputObject -Name $name)
+            if ($operation) { break }
+        }
+    }
+    if (-not $phase) {
+        $phaseMatch = [regex]::Match($raw, '(?i)(?:last\s*phase|phase)\s*[:=]\s*([^,;|]+)')
+        if ($phaseMatch.Success) { $phase = ConvertTo-LVErrorContextText $phaseMatch.Groups[1].Value }
+    }
+    if (-not $operation) {
+        $operationMatch = [regex]::Match($raw, '(?i)(?:last\s*operation|operation)\s*[:=]\s*([^,;|]+)')
+        if ($operationMatch.Success) { $operation = ConvertTo-LVErrorContextText $operationMatch.Groups[1].Value }
+    }
+
+    if (-not $ProviderLocale) {
+        $ProviderLocale = [string](Get-LVErrorContextField -InputObject $InputObject -Name 'ProviderLocale')
+    }
+    if (-not $ProviderLocale) {
+        foreach ($name in @('Locale', 'Culture', 'Language')) {
+            $ProviderLocale = [string](Get-LVErrorContextField -InputObject $InputObject -Name $name)
+            if ($ProviderLocale) { break }
+        }
+    }
+    $source = [string](Get-LVErrorContextField -InputObject $InputObject -Name 'Source')
+    if (-not $ProviderLocale -and (-not $source -or $source -in @('event', 'reliability'))) {
+        $ProviderLocale = [string]$script:LVUICulture
+    }
+
+    $fallback = ConvertTo-LVErrorContextText $FallbackMessage
+    return [pscustomobject][ordered]@{
+        ResultCode      = $resultCode
+        ExtendCode      = $extendCode
+        Phase           = $phase
+        Operation       = $operation
+        ProviderLocale  = (ConvertTo-LVErrorContextText $ProviderLocale)
+        FallbackMessage = $fallback
+    }
+}
+
 function Get-LVErrorNormalizedField {
     param(
         [Parameter(Mandatory)][string]$Kind,
@@ -206,8 +336,12 @@ function Get-LVErrorCatalogMatch {
     foreach ($property in @('SampleMessage', 'Message', 'Key')) {
         if ($Signature.PSObject.Properties[$property] -and $Signature.$property) { $sample += ' ' + [string]$Signature.$property }
     }
-    foreach ($property in @('ErrorCode', 'HResult', 'HRESULT', 'Status', 'NtStatus', 'NTSTATUS', 'ExtendCode', 'FailureCode', 'Result', 'Code', 'ExitCode')) {
+    foreach ($property in @('ErrorCode', 'HResult', 'HRESULT', 'Status', 'NtStatus', 'NTSTATUS', 'ResultCode', 'ExtendCode', 'FailureCode', 'Result', 'Code', 'ExitCode', 'Phase', 'Operation')) {
         if ($Signature.PSObject.Properties[$property] -and $null -ne $Signature.$property) { $sample += ' ' + [string]$Signature.$property }
+    }
+    foreach ($property in @('ResultCode', 'ExtendCode', 'Phase', 'Operation', 'ProviderLocale', 'FallbackMessage')) {
+        $value = Get-LVErrorContextField -InputObject $Signature -Name $property
+        if ($null -ne $value -and [string]$value) { $sample += ' ' + [string]$value }
     }
     $bugCheckContext = $sample -match '(?i)(?:minidump|bug.?check|stop.?code)'
     $hexMatches = [regex]::Matches($sample, '(?i)(?<![0-9a-f])0x[0-9a-f]{1,8}(?![0-9a-f])')
@@ -261,4 +395,7 @@ function Add-LVErrorCatalogContext {
     $Signature | Add-Member -NotePropertyName 'ErrorExplanation' -NotePropertyValue $entry.explanation -Force
     $Signature | Add-Member -NotePropertyName 'ErrorReference' -NotePropertyValue $entry.reference -Force
     $Signature | Add-Member -NotePropertyName 'ErrorSource' -NotePropertyValue $entry.source -Force
+    $Signature | Add-Member -NotePropertyName 'ErrorApplicability' -NotePropertyValue $entry.applicability -Force
+    $Signature | Add-Member -NotePropertyName 'ErrorPhase' -NotePropertyValue $entry.phase -Force
+    $Signature | Add-Member -NotePropertyName 'ErrorOperation' -NotePropertyValue $entry.operation -Force
 }

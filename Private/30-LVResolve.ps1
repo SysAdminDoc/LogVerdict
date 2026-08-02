@@ -198,6 +198,11 @@ function Get-LVRuleSpecificity {
     $m = $Rule.match
     if ($null -ne $m.eventId)        { $score += 8 }
     if ($m.messagePattern)           { $score += 4 }
+    if ($m.resultCode)               { $score += 8 }
+    if ($m.extendCode)               { $score += 4 }
+    if ($m.phase)                    { $score += 2 }
+    if ($m.operation)                { $score += 2 }
+    if ($m.providerLocale)            { $score += 1 }
     if ($m.provider)                 { $score += 2 }
     if ($m.channel)                  { $score += 2 }
     if ($m.source)                   { $score += 1 }
@@ -219,6 +224,29 @@ function Test-LVRuleMatch {
         if (-not ($m.provider.EndsWith('*') -and $Signature.Provider -like $m.provider)) { return $false }
     }
     if ($null -ne $m.eventId -and [int]$m.eventId -ne [int]$Signature.Id) { return $false }
+
+    if ($m.resultCode) {
+        $actual = ConvertTo-LVErrorHex -Value ([string](Get-LVErrorContextField -InputObject $Signature -Name 'ResultCode'))
+        $expected = ConvertTo-LVErrorHex -Value ([string]$m.resultCode)
+        if (-not $actual -or -not $expected -or $actual -ne $expected) { return $false }
+    }
+    if ($m.extendCode) {
+        $actual = ConvertTo-LVErrorHex -Value ([string](Get-LVErrorContextField -InputObject $Signature -Name 'ExtendCode'))
+        $expected = ConvertTo-LVErrorHex -Value ([string]$m.extendCode)
+        if (-not $actual -or -not $expected -or $actual -ne $expected) { return $false }
+    }
+    if ($m.phase) {
+        $actual = [string](Get-LVErrorContextField -InputObject $Signature -Name 'Phase')
+        if (-not $actual -or $actual -ine [string]$m.phase) { return $false }
+    }
+    if ($m.operation) {
+        $actual = [string](Get-LVErrorContextField -InputObject $Signature -Name 'Operation')
+        if (-not $actual -or $actual -ine [string]$m.operation) { return $false }
+    }
+    if ($m.providerLocale) {
+        $actual = [string](Get-LVErrorContextField -InputObject $Signature -Name 'ProviderLocale')
+        if (-not $actual -or (($actual -split '-')[0] -ine (([string]$m.providerLocale) -split '-')[0])) { return $false }
+    }
 
     if ($m.messagePattern) {
         # Event messages are rendered from the provider's localized MUI resources, so an

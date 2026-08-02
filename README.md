@@ -52,6 +52,8 @@ Collect  ->  Reduce  ->  Resolve  ->  Correlate  ->  Report
 3. **Resolve** - each signature is matched against [`Data/verdicts.json`](Data/verdicts.json), a curated database of human-written rulings. Most-specific rule wins. Some rules escalate by rate: corrected hardware errors are noise at a trickle and a failing component at volume.
 
 Unknown signatures are also checked against the bundled [`Data/error-codes.json`](Data/error-codes.json) reference catalog. The catalog currently carries 3,157 typed entries: 2,745 Microsoft WinError.h statuses, 378 kernel bug-check codes, 13 common HRESULTs, nine NTSTATUS values, seven Setup/servicing codes, and five Windows Update codes. Each entry retains canonical numeric fields, applicability, retrieval date, and source metadata; one-time indexes keep repeated lookups bounded. A catalog match improves the explanation but stays `unknown` until provider-specific context justifies a reviewed verdict. Regenerate it from current Microsoft Learn tables with `Tools\Import-MicrosoftErrorCatalog.ps1`; the normal scan never makes a network call.
+
+Windows Setup and Windows Update records also retain invariant result and extended codes, phase, operation, provider locale, and fallback text when localized provider prose is unavailable or not useful for matching. Reports and standard exports carry that structured context alongside the catalog's phase and operation, so a German, Japanese, or message-resource-missing capture can still be compared without translating its rendered message.
 4. **Correlate** - signatures that occurred within minutes of each other are reported together, above the flat list, with the window of time to look at. Corrected hardware errors and an unexpected restart are each easy to dismiss alone; together they name a cause. Correlations are curated, never inferred - on one machine the loudest signature co-occurs with everything, so a discovered correlation is mostly an artefact of volume.
 5. **Report** - console, plain text, JSON, and a self-contained dark HTML page that opens anywhere with no network access. The HTML report filters by verdict or text entirely offline, still shows every finding when scripting is disabled, and prints as a light document suitable for a ticket or PDF.
 
@@ -136,7 +138,8 @@ Case profiles make a scan repeatable without copying raw event messages. `New-Lo
 
 `-Format Csv` writes `LogVerdict-Report.csv` with one scalar row per ordinary finding. Its stable columns include
 the scan identity, source (`event`, `text`, or `reliability`), provider and event id, occurrence count and rate,
-first and last timestamps, verdict, ruling prose, error-catalog fields, and the official reference. Correlations
+first and last timestamps, verdict, ruling prose, composite result/extend codes, phase, operation, provider locale,
+fallback text, error-catalog fields, and the official reference. Correlations
 remain in the text, JSON, and HTML reports. The row shape is deliberately suitable for `Import-Csv`,
 `Export-Csv`, `Out-GridView`, or a ticketing-system import without knowing LogVerdict's nested JSON schema.
 

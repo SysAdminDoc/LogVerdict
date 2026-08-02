@@ -556,6 +556,42 @@ function ConvertFrom-LVSetupDiagJson {
         if ($line -and -not $remediation.Contains($line)) { $remediation.Add($line) | Out-Null }
     }
 
+    $contextInput = [ordered]@{
+        ResultCode = $null; ExtendCode = $null; Phase = $null; Operation = $null
+        ProviderLocale = $null; FailureDetails = (Get-LVSetupDiagValue -InputObject $item -Name 'FailureDetails')
+        LogErrorLine = (Get-LVSetupDiagValue -InputObject $item -Name 'LogErrorLine')
+        FailureData = (Get-LVSetupDiagValue -InputObject $item -Name 'FailureData')
+    }
+    foreach ($name in @('ResultCode', 'Result', 'FailureCode', 'ErrorCode', 'Error')) {
+        $value = Get-LVSetupDiagValue -InputObject $item -Name $name
+        if ($null -ne $value -and [string]$value) { $contextInput.ResultCode = $value; break }
+    }
+    foreach ($name in @('ExtendCode', 'ExtendedErrorCode', 'ExtendedCode', 'ErrorExtendCode', 'Extend')) {
+        $value = Get-LVSetupDiagValue -InputObject $item -Name $name
+        if ($null -ne $value -and [string]$value) { $contextInput.ExtendCode = $value; break }
+    }
+    foreach ($name in @('Phase', 'LastPhase', 'SetupPhase')) {
+        $value = Get-LVSetupDiagValue -InputObject $item -Name $name
+        if ($null -ne $value -and [string]$value) { $contextInput.Phase = $value; break }
+    }
+    foreach ($name in @('Operation', 'LastOperation', 'SetupOperation')) {
+        $value = Get-LVSetupDiagValue -InputObject $item -Name $name
+        if ($null -ne $value -and [string]$value) { $contextInput.Operation = $value; break }
+    }
+    foreach ($name in @('ProviderLocale', 'Locale', 'Culture', 'Language')) {
+        $value = Get-LVSetupDiagValue -InputObject $item -Name $name
+        if ($null -ne $value -and [string]$value) { $contextInput.ProviderLocale = $value; break }
+    }
+    if (-not $contextInput.ProviderLocale -and $systemInfo) {
+        foreach ($name in @('ProviderLocale', 'Locale', 'Culture', 'Language')) {
+            $value = Get-LVSetupDiagValue -InputObject $systemInfo -Name $name
+            if ($null -ne $value -and [string]$value) { $contextInput.ProviderLocale = $value; break }
+        }
+    }
+    $fallbackMessage = ($failure.ToArray() -join ' | ')
+    $errorContext = New-LVErrorContext -InputObject ([pscustomobject]$contextInput) `
+        -Message $fallbackMessage -FallbackMessage $fallbackMessage
+
     $message = New-Object System.Collections.Generic.List[string]
     $identity = 'Microsoft SetupDiag'
     if ($version) { $identity += ' ' + $version }
@@ -580,6 +616,13 @@ function ConvertFrom-LVSetupDiagJson {
         Hint = 'Microsoft SetupDiag matched its curated upgrade-failure rules against the Panther log set.'
         SignatureKey = 'SetupDiag/' + $profileName.ToLowerInvariant()
         Message = $message -join ' '
+        ResultCode = $errorContext.ResultCode
+        ExtendCode = $errorContext.ExtendCode
+        Phase = $errorContext.Phase
+        Operation = $errorContext.Operation
+        ProviderLocale = $errorContext.ProviderLocale
+        FallbackMessage = $errorContext.FallbackMessage
+        ErrorContext = $errorContext
     }
 
     return [pscustomobject]@{
@@ -587,6 +630,13 @@ function ConvertFrom-LVSetupDiagJson {
         Profile = $profileName
         Version = $version
         Remediation = @($remediation.ToArray())
+        ResultCode = $errorContext.ResultCode
+        ExtendCode = $errorContext.ExtendCode
+        Phase = $errorContext.Phase
+        Operation = $errorContext.Operation
+        ProviderLocale = $errorContext.ProviderLocale
+        FallbackMessage = $errorContext.FallbackMessage
+        ErrorContext = $errorContext
         Record = $record
         When = $when
     }

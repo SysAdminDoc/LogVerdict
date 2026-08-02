@@ -660,6 +660,64 @@ Describe 'Bundled Microsoft error catalog' {
         $catalogPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data/error-codes.json'
         ([IO.File]::ReadAllBytes($catalogPath) | Where-Object { $_ -gt 127 }).Count | Should -Be 0
     }
+
+    It 'retains composite setup and update context when prose is localized' {
+        $coveragePath = Join-Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'Data') 'coverage-fixtures.json'
+        $coverage = Get-Content -LiteralPath $coveragePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $fixtures = @($coverage.fixtures | Where-Object kind -eq 'composite-code')
+        $fixtures.Count | Should -Be 2
+        InModuleScope LogVerdict -Parameters @{ Fixtures = $fixtures } {
+            param($Fixtures)
+            foreach ($fixture in $Fixtures) {
+                $context = New-LVErrorContext -InputObject $fixture.record -Message $fixture.record.Message `
+                    -FallbackMessage $fixture.record.FallbackMessage
+                $context.ResultCode | Should -BeExactly $fixture.record.ResultCode
+                $context.ExtendCode | Should -BeExactly $fixture.record.ExtendCode
+                $context.Phase | Should -BeExactly $fixture.record.Phase
+                $context.Operation | Should -BeExactly $fixture.record.Operation
+                $context.ProviderLocale | Should -BeExactly $fixture.record.ProviderLocale
+                $context.FallbackMessage | Should -BeExactly $fixture.record.FallbackMessage
+
+                $signature = [pscustomobject]@{
+                    Key = $fixture.id; Source = $fixture.record.Source; Channel = $fixture.record.Channel
+                    Provider = $fixture.record.Provider; Id = [int]$fixture.record.Id
+                    SampleMessage = $fixture.record.Message; Count = 1; PerDay = 0.1
+                    ResultCode = $context.ResultCode; ExtendCode = $context.ExtendCode
+                    Phase = $context.Phase; Operation = $context.Operation
+                    ProviderLocale = $context.ProviderLocale; FallbackMessage = $context.FallbackMessage
+                    ErrorContext = $context
+                }
+                $resolved = @(Resolve-LVVerdict -Signature @($signature) -Database ([pscustomobject]@{ rules=@() }))
+                $resolved[0].ErrorName | Should -BeExactly $fixture.expected.errorName
+                $resolved[0].ErrorPhase | Should -BeExactly $fixture.expected.phase
+                $resolved[0].ErrorOperation | Should -BeExactly $fixture.expected.operation
+            }
+
+            $setup = $Fixtures | Where-Object id -eq 'setup-composite-code-german'
+            $typedRule = [pscustomobject]@{
+                id = 'FIXTURE-COMPOSITE'; lvOrdinal = 0
+                match = [pscustomobject]@{
+                    source = 'textlog'; channel = 'SetupDiag'; provider = 'Microsoft SetupDiag'
+                    resultCode = '0xC1900101'; extendCode = '0x00000000'
+                    phase = 'Downlevel'; operation = 'Process'; providerLocale = 'de-DE'
+                }
+                verdict = 'actionable'; title = 'Typed composite fixture'; plain = 'Typed fields matched.'
+                why = 'The test does not depend on English message prose.'; action = 'Keep the structured fields.'
+                confidence = 'high'
+            }
+            $typedSignature = [pscustomobject]@{
+                Key = 'setup/composite'; Source = 'textlog'; Channel = 'SetupDiag'; Provider = 'Microsoft SetupDiag'; Id = 0
+                SampleMessage = $setup.record.Message; Count = 1; PerDay = 0.1
+                ResultCode = $setup.record.ResultCode; ExtendCode = $setup.record.ExtendCode
+                Phase = $setup.record.Phase; Operation = $setup.record.Operation
+                ProviderLocale = $setup.record.ProviderLocale; FallbackMessage = $setup.record.FallbackMessage
+                ErrorContext = New-LVErrorContext -InputObject $setup.record -Message $setup.record.Message -FallbackMessage $setup.record.FallbackMessage
+            }
+            $typed = @(Resolve-LVVerdict -Signature @($typedSignature) -Database ([pscustomobject]@{ rules=@($typedRule) }))
+            $typed[0].RuleId | Should -BeExactly 'FIXTURE-COMPOSITE'
+            $typed[0].Verdict | Should -BeExactly 'actionable'
+        }
+    }
 }
 
 Describe 'Opt-in verdict database updates' {
@@ -1324,6 +1382,10 @@ Describe 'SetupDiag Panther integration' {
             $decoded.Record.Provider | Should -BeExactly 'Microsoft SetupDiag'
             $decoded.Record.Channel | Should -BeExactly 'SetupDiag'
             $decoded.Record.SignatureKey | Should -BeExactly 'SetupDiag/findspfatalerror'
+            $decoded.Record.ResultCode | Should -BeExactly '0x80070057'
+            $decoded.Record.Phase | Should -BeExactly 'Downlevel'
+            $decoded.Record.Operation | Should -BeExactly 'Gather data'
+            $decoded.Record.FallbackMessage | Should -Match 'LastPhase = Downlevel'
             $decoded.Record.Message | Should -Match 'Failure:.*LastPhase = Downlevel'
             $decoded.Record.Message | Should -Match 'Remediation: Remove the incompatible component'
 
