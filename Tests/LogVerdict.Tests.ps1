@@ -5025,6 +5025,111 @@ detection:
     }
 }
 
+Describe 'Redacted review artifacts' {
+    BeforeAll {
+        $root = Split-Path $PSScriptRoot -Parent
+        $script:ReviewExporter = Join-Path $root 'Tools\Export-LogVerdictReviewArtifact.ps1'
+        $script:ReviewImporter = Join-Path $root 'Tools\Import-LogVerdictReviewArtifact.ps1'
+
+        function Export-ReviewResultFixture {
+            param([string]$Path)
+
+            $result = [pscustomobject][ordered]@{
+                Contract = [pscustomobject][ordered]@{ schemaVersion = 1; name = 'LogVerdict.Report'; mode = 'offline' }
+                Tool = 'LogVerdict'; Version = '0.8.1'; MachineName = 'HOST-9'
+                ScanTime = [datetime]'2026-08-02T12:00:00Z'; DaysBack = 7; Offline = $true
+                Coverage = @(); WorstVerdict = 'unknown'; ExitCode = 1
+                Findings = @([pscustomobject][ordered]@{
+                    Key = 'event|System|100'; RuleId = $null; Verdict = 'unknown'; Confidence = 'none'; Title = 'Unrecognized activity'
+                    Source = 'event'; Channel = 'System'; Provider = 'Test'; Id = 100; Count = 2; PerDay = 0.2
+                    FirstSeen = [datetime]'2026-08-02T11:00:00Z'; LastSeen = [datetime]'2026-08-02T11:00:01Z'
+                    SampleMessage = 'HOST-9 failed for C:\Users\bob'; Samples = @('HOST-9 failed for C:\Users\bob')
+                    StructuredData = [pscustomobject]@{ EventData = [pscustomobject]@{ Image = 'C:\Users\bob\app.exe' } }
+                })
+            }
+            $result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Path -Encoding UTF8
+        }
+
+        function Export-ReviewCandidateFixture {
+            param([string]$Path)
+
+            $queue = [pscustomobject][ordered]@{
+                schemaVersion = 1
+                rules = @([pscustomobject][ordered]@{
+                    id = 'SIGMA-review-1'; status = 'unsupported'; confidence = 'draft'; title = '[Sigma review] Test'
+                    match = [pscustomobject][ordered]@{ source = 'event'; channel = 'System'; provider = 'Test'; eventId = 100 }
+                    falsepositives = @('maintenance by HOST-9')
+                    sigma = [pscustomobject][ordered]@{ reviewStatus = 'pending'; sourcePath = 'rules\test.yml'; sourceHash = ('a' * 64) }
+                })
+            }
+            $queue | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Path -Encoding UTF8
+        }
+    }
+
+    It 'combines stable unknown and candidate ids while redacting evidence' {
+        $resultPath = Join-Path $TestDrive 'review-result.json'
+        $candidatePath = Join-Path $TestDrive 'review-candidates.json'
+        $artifactPath = Join-Path $TestDrive 'review-artifact.json'
+        Export-ReviewResultFixture -Path $resultPath
+        Export-ReviewCandidateFixture -Path $candidatePath
+
+        $first = & $script:ReviewExporter -ResultPath $resultPath -CandidatePath @($candidatePath, $candidatePath) `
+            -OutputPath $artifactPath -GeneratedAt '2026-08-02T12:00:00.0000000Z'
+        @($first.items).Count | Should -Be 2
+        @($first.items | Select-Object -ExpandProperty id) | Should -Contain 'SIGMA-review-1'
+        $unknown = @($first.items | Where-Object { $_.kind -eq 'unknown' })[0]
+        $unknown.id | Should -Match '^UNKNOWN-[0-9A-F]{12}$'
+        $unknown.evidence.sampleMessage | Should -BeExactly '<MACHINE> failed for C:\Users\<USER>'
+        $unknown.evidence.structuredData.EventData.Image | Should -BeExactly 'C:\Users\<USER>\app.exe'
+        $first.privacy.redacted | Should -BeTrue
+        $first.privacy.rawEvidence | Should -BeFalse
+        $candidate = @($first.items | Where-Object { $_.kind -eq 'candidate' })[0]
+        $candidate.falsePositives[0] | Should -BeExactly 'maintenance by <MACHINE>'
+        $candidate.provenance.sourceType | Should -BeExactly 'sigma'
+        $candidate.fixture.origin | Should -BeExactly 'review-scaffold'
+    }
+
+    It 'imports review changes as a diff without touching the curated database' {
+        $resultPath = Join-Path $TestDrive 'review-diff-result.json'
+        $candidatePath = Join-Path $TestDrive 'review-diff-candidates.json'
+        $firstPath = Join-Path $TestDrive 'review-first.json'
+        $secondPath = Join-Path $TestDrive 'review-second.json'
+        $diffPath = Join-Path $TestDrive 'review-diff.json'
+        Export-ReviewResultFixture -Path $resultPath
+        Export-ReviewCandidateFixture -Path $candidatePath
+        & $script:ReviewExporter -ResultPath $resultPath -CandidatePath $candidatePath -OutputPath $firstPath `
+            -GeneratedAt '2026-08-02T12:00:00.0000000Z' | Out-Null
+
+        $reviewed = Get-Content -LiteralPath $firstPath -Raw | ConvertFrom-Json
+        $unknownId = @($reviewed.items | Where-Object { $_.kind -eq 'unknown' })[0].id
+        $candidateId = @($reviewed.items | Where-Object { $_.kind -eq 'candidate' })[0].id
+        @($reviewed.items | Where-Object { $_.id -eq $unknownId })[0].review.status = 'accepted'
+        $reviewed.items = @($reviewed.items | Where-Object { $_.id -ne $candidateId })
+        $reviewed | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $secondPath -Encoding UTF8
+
+        $before = Get-LVTestSha256 -Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'Data\verdicts.json')
+        $diff = & $script:ReviewImporter -ArtifactPath $secondPath -ExistingPath $firstPath -OutputPath $diffPath
+        $after = Get-LVTestSha256 -Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'Data\verdicts.json')
+        $diff.diff.counts.added | Should -Be 0
+        $diff.diff.counts.changed | Should -Be 1
+        $diff.diff.counts.removed | Should -Be 1
+        $diff.reviewed | Should -Contain $unknownId
+        $diff.curatedDatabaseUpdated | Should -BeFalse
+        $after | Should -BeExactly $before
+        (Get-Content -LiteralPath $diffPath -Raw) | Should -Match 'curatedDatabaseUpdated'
+    }
+
+    It 'rejects an artifact that claims to contain raw evidence' {
+        $path = Join-Path $TestDrive 'review-invalid.json'
+        $artifact = [pscustomobject]@{
+            schemaVersion = 1; name = 'LogVerdict.ReviewArtifact'; privacy = [pscustomobject]@{ redacted = $false; rawEvidence = $true }
+            items = @()
+        }
+        $artifact | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding UTF8
+        { & $script:ReviewImporter -ArtifactPath $path } | Should -Throw '*redacted=true*'
+    }
+}
+
 Describe 'Rule regression fixtures' {
     BeforeAll {
         $script:DataDir     = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data'

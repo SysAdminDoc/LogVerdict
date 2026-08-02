@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/SysAdminDoc/LogVerdict/blob/main/Data/review-artifact.schema.json",
+  "title": "LogVerdict redacted review artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name", "generatedAt", "tool", "version", "privacy", "run", "items", "import"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "name": { "const": "LogVerdict.ReviewArtifact" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "tool": { "const": "LogVerdict" },
+    "version": { "type": "string" },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["redacted", "rawEvidence", "statement"],
+      "properties": {
+        "redacted": { "const": true },
+        "rawEvidence": { "const": false },
+        "statement": { "type": "string", "minLength": 1 }
+      }
+    },
+    "run": { "type": "object" },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "status", "confidence", "context", "evidence", "provenance", "falsePositives", "fixture", "review"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["unknown", "candidate"] },
+          "status": { "const": "pending" },
+          "confidence": { "type": "string" },
+          "context": { "type": "object" },
+          "evidence": { "type": "object" },
+          "provenance": { "type": "object" },
+          "falsePositives": { "type": "array", "items": { "type": "string" } },
+          "candidate": { "type": "object" },
+          "fixture": { "type": "object" },
+          "review": {
+            "type": "object",
+            "required": ["status"],
+            "properties": {
+              "status": { "enum": ["pending", "accepted", "rejected", "needs-evidence"] },
+              "verdict": { "type": ["string", "null"] },
+              "confidence": { "type": ["string", "null"] },
+              "notes": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "import": { "type": "object" }
+  }
+}

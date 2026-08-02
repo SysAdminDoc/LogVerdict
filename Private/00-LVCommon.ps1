@@ -677,8 +677,11 @@ function ConvertTo-LVRedactedResult {
         $c
     }
 
-    $copy.Findings = @($findings)
-    $copy.CrashArtifacts = @($crash)
+    $copy | Add-Member -NotePropertyName 'Findings' -NotePropertyValue @($findings) -Force
+    # CrashArtifacts is optional in the versioned report contract. Add the redacted
+    # empty field when a legacy/minimal report omitted it instead of relying on a
+    # property assignment that fails on a PSCustomObject without that member.
+    $copy | Add-Member -NotePropertyName 'CrashArtifacts' -NotePropertyValue @($crash) -Force
     if ($Result.PSObject.Properties['SetupDiag'] -and $Result.SetupDiag) {
         $setupDiag = [pscustomobject]@{}
         foreach ($prop in $Result.SetupDiag.PSObject.Properties) {
@@ -689,7 +692,7 @@ function ConvertTo-LVRedactedResult {
                 $setupDiag.$name = ConvertTo-LVRedactedText -Text ([string]$setupDiag.$name) -MachineName $machine
             }
         }
-        $copy.SetupDiag = $setupDiag
+        $copy | Add-Member -NotePropertyName 'SetupDiag' -NotePropertyValue $setupDiag -Force
     }
     foreach ($name in @('EvidencePath')) {
         if ($copy.PSObject.Properties[$name]) {
@@ -747,7 +750,7 @@ function ConvertTo-LVRedactedResult {
     if ($copy.PSObject.Properties['CoverageNotes']) {
         $copy.CoverageNotes = @(@($Result.CoverageNotes) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
     }
-    $copy.MachineName = '<MACHINE>'
+    $copy | Add-Member -NotePropertyName 'MachineName' -NotePropertyValue '<MACHINE>' -Force
     $copy | Add-Member -NotePropertyName 'Redacted' -NotePropertyValue $true -Force
     $copy = ConvertTo-LVReportContract -Result $copy -Redacted
 

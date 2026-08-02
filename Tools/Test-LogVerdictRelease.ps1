@@ -71,6 +71,8 @@ $reportSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/report-contr
 if ([int]$reportSchema.properties.Contract.properties.schemaVersion.const -ne 1) { throw 'Report contract schema is not pinned at version 1.' }
 $evidenceSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/evidence-contract.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$evidenceSchema.properties.Contract.properties.schemaVersion.const -ne 1) { throw 'Evidence contract schema is not pinned at version 1.' }
+$reviewSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/review-artifact.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([int]$reviewSchema.properties.schemaVersion.const -ne 1) { throw 'Review artifact schema is not pinned at version 1.' }
 
 $scoopPath = Join-Path $ManifestDirectory 'scoop/logverdict.json'
 $wingetPath = Join-Path $ManifestDirectory 'winget/SysAdminDoc.LogVerdict.yaml'

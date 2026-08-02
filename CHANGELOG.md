@@ -20,6 +20,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added schema v6 structured EventData/UserData matching with bounded `all`/`any`/`not`
   conditions and locale-safe value modifiers; Sigma imports now map supported fields into
   inactive review candidates and warn on unsupported modifiers.
+- Added a versioned redacted review artifact that deduplicates unknown findings and inactive
+  candidates, carries stable IDs, provenance, false-positive fields and fixture scaffolds,
+  and imports reviewed changes as a diff without mutating the curated database.
 
 ## [0.8.1] - 2026-08-02
 

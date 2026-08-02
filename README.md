@@ -62,6 +62,18 @@ Evidence bundles add `EVIDENCE-CONTRACT.json`, which records the report contract
 
 **No language model is involved by default.** Every ruling and remediation is a curated rule written by a human. A signature with no matching rule is reported as `unknown` with its raw evidence and no guess at a cause. An explicit `-ExplainUnknown` opt-in can ask a local Ollama model for a separately labelled candidate explanation; it never changes the verdict and output containing remediation language is discarded.
 
+Unknowns and inactive candidates can be exchanged as one redacted review queue without changing the curated database. Export a JSON report first, then combine it with one or more Sigma/local candidate queues:
+
+```powershell
+Invoke-LogVerdictScan | Export-LogVerdictReport -OutputDir .\report -Format Json
+.\Tools\Export-LogVerdictReviewArtifact.ps1 -ResultPath .\report\LogVerdict-Report.json `
+  -CandidatePath .\Data\verdicts.local.json -OutputPath .\review.json
+.\Tools\Import-LogVerdictReviewArtifact.ps1 -ArtifactPath .\review.json `
+  -ExistingPath .\previous-review.json -OutputPath .\review-diff.json
+```
+
+The artifact carries stable unknown/candidate IDs, source/provider/event context, redacted samples and structured data, provenance, false-positive fields, and a fixture scaffold. Reviewers edit `review.status` and its fields; import reports added/changed/removed items and always leaves `Data\verdicts.json` untouched.
+
 ## Usage
 
 ### The window
@@ -359,6 +371,11 @@ and simple detection fields, and emits attributed `unsupported`/`draft` candidat
 levels, tags, false positives, references, authors, conditions, mapping warnings, source hashes, and a `reviewStatus`
 of `pending`; no imported rule can become active. Use `-ExistingPath` with `-DiffPath` to review added, changed, and
 removed candidates between imports. The importer is offline and never edits `Data\verdicts.json`.
+
+`Tools\Export-LogVerdictReviewArtifact.ps1` accepts the Sigma queue (or a local `rules` JSON file) through
+`-CandidatePath`, so unknown findings, model candidates, and third-party candidates can be reviewed in one
+redacted artifact. `Tools\Import-LogVerdictReviewArtifact.ps1` validates that contract and emits a diff only; it
+does not promote accepted material automatically.
 
 `match` accepts `source`, `channel`, `provider` (trailing `*` wildcard allowed), `eventId`, `messagePattern` (regex), and `eventData`. A structured condition looks like `{"all":[{"field":"EventData.Image","endswith":"\\\\powershell.exe"}]}`; unsupported Sigma modifiers remain inactive importer candidates. More match keys means higher specificity, and the most specific matching rule wins.
 
