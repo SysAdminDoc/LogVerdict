@@ -15,6 +15,8 @@ the system theme, display mode, or the user's existing processes.
 param(
     [Parameter(Mandatory = $true)][string]$GuiPath,
     [string]$EvidencePath = (Join-Path ([IO.Path]::GetTempPath()) ('LogVerdict-gui-smoke-{0}.json' -f $PID)),
+    [string]$ScreenshotPath,
+    [string]$ScreenshotMetadataPath,
     [ValidateSet('Normal', 'HighContrast')][string]$Theme = 'Normal',
     [ValidateRange(15, 180)][int]$TimeoutSeconds = 60
 )
@@ -22,6 +24,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $resolvedGui = (Resolve-Path -LiteralPath $GuiPath -ErrorAction Stop).Path
 if (-not (Test-Path -LiteralPath $resolvedGui -PathType Leaf)) { throw "GUI artifact not found: $GuiPath" }
+if ($ScreenshotMetadataPath -and -not $ScreenshotPath) {
+    throw 'ScreenshotMetadataPath requires ScreenshotPath.'
+}
 
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
 if (-not ('LogVerdict.GuiSmoke.Native' -as [type])) {
@@ -52,6 +57,7 @@ $evidence = [ordered]@{
 $process = $null
 $oldHighContrast = $env:LOGVERDICT_TEST_HIGH_CONTRAST
 $oldHold = $env:LOGVERDICT_GUI_SMOKE_HOLD_MS
+$oldScreenshotPath = $env:LOGVERDICT_GUI_SCREENSHOT_PATH
 
 function Add-SmokeCheck {
     param(
@@ -151,10 +157,57 @@ function Find-SmokeText {
     return @($all | Where-Object { $_.Current.Name -like ('*{0}*' -f $Text) -and -not $_.Current.IsOffscreen } | Select-Object -First 1)
 }
 
+function Save-SmokeScreenshot {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '',
+        Justification = 'The screenshot is an explicitly requested test artifact.')]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$MetadataPath
+    )
+
+    Add-Type -AssemblyName System.Drawing
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "WPF did not generate the requested GUI screenshot: $Path"
+    }
+    $image = [System.Drawing.Image]::FromFile($Path)
+    try {
+        $width = $image.Width
+        $height = $image.Height
+    } finally {
+        $image.Dispose()
+    }
+
+    if ($MetadataPath) {
+        $metadataParent = Split-Path -Parent $MetadataPath
+        if ($metadataParent -and -not (Test-Path -LiteralPath $metadataParent)) {
+            New-Item -ItemType Directory -Path $metadataParent -Force | Out-Null
+        }
+        $version = (& (Join-Path $PSScriptRoot 'Get-LogVerdictVersion.ps1')).Trim()
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $hash = ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($Path)))).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $sha.Dispose()
+        }
+        [ordered]@{
+            schemaVersion = 1
+            artifact = [IO.Path]::GetFileName($resolvedGui)
+            artifactVersion = $version
+            theme = $Theme
+            screenshot = [IO.Path]::GetFileName($Path)
+            screenshotSha256 = $hash
+            width = $width
+            height = $height
+            generatedAt = (Get-Date).ToUniversalTime().ToString('o')
+        } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $MetadataPath -Encoding UTF8
+    }
+}
+
 try {
     if ($Theme -eq 'HighContrast') { $env:LOGVERDICT_TEST_HIGH_CONTRAST = '1' }
     else { $env:LOGVERDICT_TEST_HIGH_CONTRAST = '0' }
     $env:LOGVERDICT_GUI_SMOKE_HOLD_MS = '5000'
+    if ($ScreenshotPath) { $env:LOGVERDICT_GUI_SCREENSHOT_PATH = [IO.Path]::GetFullPath($ScreenshotPath) }
 
     $process = Start-Process -FilePath $resolvedGui -ArgumentList @('-DaysBack', '1') -PassThru
     $evidence.processId = $process.Id
@@ -205,6 +258,14 @@ try {
     }
 
     Invoke-SmokeButton -Root $rootElement -Name 'Overview' | Out-Null
+    Wait-SmokeElement -Description 'rendered overview for documentation screenshot' -Getter {
+        Find-SmokeText -Root $rootElement -Text 'Look back this many days'
+    } | Out-Null
+    if ($ScreenshotPath) {
+        Save-SmokeScreenshot -Path $ScreenshotPath -MetadataPath $ScreenshotMetadataPath
+        Add-SmokeCheck -Id 'documentation-screenshot' -Passed $true `
+            -Details ('Captured the rendered normal GUI window at {0}x{1}' -f $bounds.width, $bounds.height)
+    }
     Set-SmokeText -Root $rootElement -Name 'Alternate verdict database' -Value (Join-Path ([IO.Path]::GetTempPath()) 'LogVerdict-missing-smoke.json')
     Invoke-SmokeButton -Root $rootElement -Name 'Run scan' | Out-Null
     Wait-SmokeElement -Description 'invalid database error state' -Getter { Find-SmokeText -Root $rootElement -Text 'Rule database not found' } | Out-Null
@@ -254,6 +315,8 @@ try {
     else { $env:LOGVERDICT_TEST_HIGH_CONTRAST = $oldHighContrast }
     if ($null -eq $oldHold) { Remove-Item Env:LOGVERDICT_GUI_SMOKE_HOLD_MS -ErrorAction SilentlyContinue }
     else { $env:LOGVERDICT_GUI_SMOKE_HOLD_MS = $oldHold }
+    if ($null -eq $oldScreenshotPath) { Remove-Item Env:LOGVERDICT_GUI_SCREENSHOT_PATH -ErrorAction SilentlyContinue }
+    else { $env:LOGVERDICT_GUI_SCREENSHOT_PATH = $oldScreenshotPath }
     $evidence.finishedAt = (Get-Date).ToUniversalTime().ToString('o')
     $parent = Split-Path -Parent $EvidencePath
     if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }

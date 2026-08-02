@@ -62,6 +62,58 @@ foreach ($entry in $catalog) {
         throw ("Typed error catalog entry '{0}' failed normalized metadata validation." -f $entry.id)
     }
 }
+$database = Get-LogVerdictDatabase
+$ruleCount = @($database.rules).Count
+$formattedCatalogCount = '{0:N0}' -f $catalog.Count
+foreach ($stalePhrase in @('1,855 red icons', '71 signatures', '1,017 of them')) {
+    if ($readme -match [regex]::Escape($stalePhrase)) {
+        throw ("README contains a volatile scan example that must not be shipped: '{0}'." -f $stalePhrase)
+    }
+}
+if ($readme -notmatch ('(?m)\b{0} rules ship\b' -f [regex]::Escape($ruleCount))) {
+    throw ("README does not describe the current {0} bundled rules." -f $ruleCount)
+}
+if ($readme -notmatch ('(?m)\b{0}-entry typed\b' -f [regex]::Escape($formattedCatalogCount))) {
+    throw ("README does not describe the current {0}-entry typed catalog." -f $formattedCatalogCount)
+}
+$databaseUsage = 'Update-LogVerdictDatabase -ReleaseTag v{0}' -f $version
+if ($readme -notmatch [regex]::Escape($databaseUsage)) {
+    throw ("README usage examples do not reference the current release tag v{0}." -f $version)
+}
+$guiHost = Get-Content -LiteralPath (Join-Path $repoRoot 'Public/Show-LogVerdictGui.ps1') -Raw -Encoding UTF8
+$expectedGuiBinding = "`$ui.TxtVersion.Text = 'v{0}' -f `$script:LVVersion"
+if ($guiHost -notmatch [regex]::Escape($expectedGuiBinding)) {
+    throw 'GUI version text is not bound to the shared VERSION source.'
+}
+$guiXaml = Get-Content -LiteralPath (Join-Path $repoRoot 'Private/50-LVGuiXaml.ps1') -Raw -Encoding UTF8
+if ($guiXaml -match 'x:Name="TxtVersion"[^>]*Text="v\d+\.\d+\.\d+"') {
+    throw 'GUI XAML contains a stale hard-coded version.'
+}
+$documentationScreenshot = Join-Path $repoRoot 'docs/screenshot-gui.png'
+$documentationMetadata = Join-Path $repoRoot 'docs/screenshot-gui.json'
+if (-not (Test-Path -LiteralPath $documentationScreenshot -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $documentationMetadata -PathType Leaf)) {
+    throw 'Current GUI screenshot and metadata sidecar are required.'
+}
+$screenshotMetadata = Get-Content -LiteralPath $documentationMetadata -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([int]$screenshotMetadata.schemaVersion -ne 1 -or
+    [string]$screenshotMetadata.artifactVersion -ne $version -or
+    [string]$screenshotMetadata.theme -ne 'Normal' -or
+    [string]$screenshotMetadata.screenshot -ne 'screenshot-gui.png') {
+    throw 'GUI screenshot metadata does not describe the current normal release artifact.'
+}
+$screenshotSha = [Security.Cryptography.SHA256]::Create()
+try {
+    $screenshotHash = ([BitConverter]::ToString($screenshotSha.ComputeHash([IO.File]::ReadAllBytes($documentationScreenshot)))).Replace('-', '').ToLowerInvariant()
+} finally {
+    $screenshotSha.Dispose()
+}
+if ([string]$screenshotMetadata.screenshotSha256 -ne $screenshotHash) {
+    throw 'GUI screenshot metadata hash does not match docs/screenshot-gui.png.'
+}
+if ([int]$screenshotMetadata.width -le 0 -or [int]$screenshotMetadata.height -le 0) {
+    throw 'GUI screenshot metadata has invalid dimensions.'
+}
 $catalogSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/error-codes.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$catalogSchema.properties.schemaVersion.const -ne 2) { throw 'Typed error catalog schema is not pinned at version 2.' }
 $advisoryCache = Join-Path $repoRoot 'Data/advisories.json'

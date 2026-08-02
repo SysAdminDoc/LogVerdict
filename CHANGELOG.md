@@ -6,6 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## Unreleased
 
+- Replaced volatile README scan totals with stable product language and regenerated the GUI
+  screenshot from the packaged WPF visual tree; release validation now checks the screenshot
+  hash, version metadata, current rule/catalog examples, and runtime GUI version binding.
 - Restored Windows PowerShell 5.1 compatibility for manifest validation and test hashing by
   using `Test-ModuleManifest` and a runtime-neutral SHA-256 helper.
 - Added shared byte, normalized-record, and elapsed-time collection budgets across live and

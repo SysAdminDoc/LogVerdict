@@ -4,7 +4,7 @@
 
 Scan a Windows PC's logs, collapse them into the handful of distinct things that actually happened, and rule on each one in plain English: **what it means, why it matters, and what to do about it.**
 
-Event Viewer shows you 1,855 red icons. LogVerdict shows you 71 signatures, tells you that 1,017 of them are one warning Microsoft documents as harmless, and puts the disk error you actually needed to see at the top.
+Event Viewer shows you a wall of red icons. LogVerdict collapses repeats, explains what remains in plain English, and puts the highest-priority evidence first. Volatile scan totals are intentionally omitted here; the packaged GUI smoke test generates the current visual reference from the release artifact.
 
 ![The LogVerdict window](docs/screenshot-gui.png)
 

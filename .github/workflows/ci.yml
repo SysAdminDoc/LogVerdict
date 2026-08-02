@@ -147,7 +147,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $normal = Join-Path $env:RUNNER_TEMP 'logverdict-gui-normal.json'
           $highContrast = Join-Path $env:RUNNER_TEMP 'logverdict-gui-high-contrast.json'
-          .\Tools\Test-LogVerdictGuiArtifact.ps1 -GuiPath .\dist\LogVerdict-GUI.exe -EvidencePath $normal -Theme Normal
+          $screenshot = Join-Path $env:RUNNER_TEMP 'logverdict-gui-normal.png'
+          $screenshotMetadata = Join-Path $env:RUNNER_TEMP 'logverdict-gui-normal-screenshot.json'
+          .\Tools\Test-LogVerdictGuiArtifact.ps1 -GuiPath .\dist\LogVerdict-GUI.exe -EvidencePath $normal -Theme Normal -ScreenshotPath $screenshot -ScreenshotMetadataPath $screenshotMetadata
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\Tools\Test-LogVerdictGuiArtifact.ps1 -GuiPath .\dist\LogVerdict-GUI.exe -EvidencePath $highContrast -Theme HighContrast
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -169,6 +171,8 @@ jobs:
           path: |
             ${{ runner.temp }}/logverdict-gui-normal.json
             ${{ runner.temp }}/logverdict-gui-high-contrast.json
+            ${{ runner.temp }}/logverdict-gui-normal.png
+            ${{ runner.temp }}/logverdict-gui-normal-screenshot.json
             ${{ runner.temp }}/logverdict-gui-coverage.json
             ${{ runner.temp }}/logverdict-supply-chain/**
           if-no-files-found: warn

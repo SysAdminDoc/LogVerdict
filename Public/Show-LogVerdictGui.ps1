@@ -1079,6 +1079,27 @@ function Show-LogVerdictGui {
         $window.Add_ContentRendered({ $ui.BtnScan.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent))) })
     }
 
+    # Release QA can request a deterministic screenshot from WPF's own visual tree.
+    # That avoids compositor and remote-desktop capture differences while ensuring the
+    # documentation image is rendered by the exact packaged GUI being tested.
+    $documentationScreenshotPath = $env:LOGVERDICT_GUI_SCREENSHOT_PATH
+    if (-not [string]::IsNullOrWhiteSpace($documentationScreenshotPath)) {
+        $window.Add_ContentRendered({
+            $target = $documentationScreenshotPath
+            $width = [Math]::Max(1, [int][Math]::Ceiling($window.ActualWidth))
+            $height = [Math]::Max(1, [int][Math]::Ceiling($window.ActualHeight))
+            $directory = [IO.Path]::GetDirectoryName($target)
+            if ($directory) { [IO.Directory]::CreateDirectory($directory) | Out-Null }
+            $bitmap = New-Object System.Windows.Media.Imaging.RenderTargetBitmap(
+                $width, $height, 96, 96, [System.Windows.Media.PixelFormats]::Pbgra32)
+            $bitmap.Render($window)
+            $encoder = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
+            $encoder.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+            $stream = [IO.File]::Open($target, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+            try { $encoder.Save($stream) } finally { $stream.Dispose() }
+        })
+    }
+
     & $showPage 'Overview'
     $null = $window.ShowDialog()
 
