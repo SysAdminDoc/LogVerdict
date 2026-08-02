@@ -12,7 +12,7 @@ function Update-LogVerdictDatabase {
         .previous.json suffix and can be restored with -Rollback.
 
         .PARAMETER ReleaseTag
-        A GitHub release tag such as v0.7.0. Omit it to use the latest stable release.
+        A GitHub release tag such as v0.8.0. Omit it to use the latest stable release.
 
         .PARAMETER TargetPath
         The local override to install. Defaults to Data\verdicts.local.json for the

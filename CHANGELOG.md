@@ -4,6 +4,13 @@ All notable changes to LogVerdict are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-08-01
+
+### Added
+
+- Unknown signatures now expose compact occurrence bursts with an onset and duration across the console, text, HTML, JSON, and CSV reports; a regular trickle remains unlabelled and the verdict stays `unknown`.
+
+
 ## [0.7.0] - 2026-08-01
 
 ### Added
@@ -13,7 +20,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added `-Format Csv` report output with one stable scalar row per finding for pipelines, grid views, and ticket imports; the richer reports retain correlations and nested evidence.
 - Added a licence-checked `Tools\Import-EvtxECmdMap.ps1` bootstrap that emits attributed, inactive drafts with salient fields but no machine-generated rulings.
 - Event coverage now reports observed RecordId discontinuities and backwards timestamps by channel, while explicitly avoiding a tampering verdict.
-- Unknown signatures now expose compact occurrence bursts with an onset and duration across the console, text, HTML, JSON, and CSV reports; a regular trickle remains unlabelled and the verdict stays `unknown`.
 - **Bundled Microsoft error knowledge.** The application now carries 2,745 WinError.h statuses, 378 kernel bug-check codes, and 13 common HRESULTs with official names, descriptions, explanations, and links. Unknown signatures are enriched locally while remaining unknown until provider-specific evidence supports a reviewed rule; `Tools\Import-MicrosoftErrorCatalog.ps1` refreshes the catalog from current Microsoft Learn tables.
 - **Existing SetupDiag installations now deepen Panther analysis.** LogVerdict discovers an already-present Microsoft SetupDiag, runs it offline with `/NoTel` against the newest Panther log set, and merges its structured profile, failure details, and remediation as an attributed finding. Execution is bounded and temporary; no tool is downloaded, `/AddReg` is never used, and absence, stale logs, success, required elevation, launch failure, timeout, or invalid output all fall back explicitly to the built-in Panther collector.
 - Reproducible Scoop and winget manifests for the immutable v0.7.0 release. `Tools\New-PackageManifests.ps1` downloads an existing release, hashes both unsigned executables, emits a Scoop package with the console shim and GUI shortcut, and emits an x64 winget portable package for the console tool. Offline asset mode keeps generation directly testable without network access.
@@ -202,6 +208,7 @@ Initial release. The deterministic core: collect, reduce, resolve, report. No la
 - Pester 5 suite covering template masking, reduction, rule specificity, escalation, unknown handling and report rendering.
 
 [0.7.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.7.0
+[0.8.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.8.0
 [0.6.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.6.0
 [0.5.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.5.0
 [0.4.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.4.0
