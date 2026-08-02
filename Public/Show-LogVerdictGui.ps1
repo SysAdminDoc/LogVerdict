@@ -104,6 +104,7 @@ function Show-LogVerdictGui {
         Job        = $null
         Timer      = $null
         Sink       = $null
+        SmokeHoldUntil = $null
         Search     = ''
         ReportDir  = $null
         HtmlPath   = $null
@@ -864,6 +865,14 @@ function Show-LogVerdictGui {
 
         try {
             $state.Job = Start-LVScanJob -ScanArgs $scanArgs -LogSink $state.Sink
+            $state.SmokeHoldUntil = $null
+            $holdMilliseconds = 0
+            if ([int]::TryParse([string]$env:LOGVERDICT_GUI_SMOKE_HOLD_MS, [ref]$holdMilliseconds) -and $holdMilliseconds -gt 0) {
+                # A bounded test-only hold makes the packaged cancellation path
+                # deterministic without slowing ordinary launches or changing scan
+                # collection semantics.
+                $state.SmokeHoldUntil = (Get-Date).AddMilliseconds([Math]::Min(30000, $holdMilliseconds))
+            }
         } catch {
             & $setStatus ('Could not start the scan: {0}' -f $_.Exception.Message)
             return
@@ -963,10 +972,12 @@ function Show-LogVerdictGui {
 
         if ($null -eq $state.Job) { $timer.Stop(); return }
         if (-not $state.Job.Async.IsCompleted) { return }
+        if ($state.SmokeHoldUntil -and (Get-Date) -lt $state.SmokeHoldUntil) { return }
 
         $timer.Stop()
         $job = $state.Job
         $state.Job = $null
+        $state.SmokeHoldUntil = $null
 
         try {
             $result = Complete-LVScanJob -Job $job

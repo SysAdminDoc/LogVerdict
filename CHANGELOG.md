@@ -23,6 +23,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added a versioned redacted review artifact that deduplicates unknown findings and inactive
   candidates, carries stable IDs, provenance, false-positive fields and fixture scaffolds,
   and imports reviewed changes as a diff without mutating the curated database.
+- Added packaged GUI launch smoke coverage for real UI Automation navigation, placement,
+  error/empty/cancelled states, normal/high-contrast themes, and uploaded coverage evidence.
 
 ## [0.8.1] - 2026-08-02
 

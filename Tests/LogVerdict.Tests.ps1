@@ -1769,6 +1769,7 @@ Describe 'Cross-version, locale, and fixture coverage' {
     BeforeAll {
         $script:CoverageFixturePath = Join-Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'Data') 'coverage-fixtures.json'
         $script:CoverageFixtures = Get-Content -LiteralPath $script:CoverageFixturePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $script:CoverageGate = Join-Path (Split-Path $PSScriptRoot -Parent) 'Tools\Test-LogVerdictCoverage.ps1'
     }
 
     It 'ships a versioned manifest with every required coverage kind' {
@@ -1778,6 +1779,24 @@ Describe 'Cross-version, locale, and fixture coverage' {
         foreach ($kind in @('event', 'textlog', 'offline-evtx', 'elevation', 'gui', 'display')) {
             @($fixtures | Where-Object kind -eq $kind).Count | Should -BeGreaterThan 0
         }
+    }
+
+    It 'promotes a passing packaged GUI placement record into the display coverage gate' {
+        $evidencePath = Join-Path $TestDrive 'gui-smoke-evidence.json'
+        $reportPath = Join-Path $TestDrive 'gui-coverage.json'
+        [pscustomobject]@{
+            schemaVersion = 1
+            passed = $true
+            processId = 1234
+            placement = [pscustomobject]@{ fullyInsideWorkingArea = $true; screen = '\\.\DISPLAY1' }
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $evidencePath -Encoding UTF8
+
+        & $script:CoverageGate -OutputPath $reportPath -DisplayEvidencePath $evidencePath | Out-Null
+        $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+        $display = @($report.Coverage | Where-Object Id -eq 'gui-isolated-display')
+        $display.Count | Should -Be 1
+        $display[0].Status | Should -BeExactly 'readable'
+        $display[0].ProcessId | Should -Be 1234
     }
 
     It 'normalizes old and new provider schemas without discarding structured metadata' {

@@ -9,12 +9,13 @@ Validates the committed representative fixtures, exercises the module's private 
 markup and elevation observation seams, and emits a structured coverage report. A
 fixture that is deliberately malformed or a platform capability that was not present
 is recorded with its explicit status; those conditions are not silently treated as a
-passing test. The gate fails only for an invalid fixture contract or an observed
-regression.
+passing test. When -DisplayEvidencePath is supplied, the gate also verifies the
+placement evidence emitted by the packaged GUI launch smoke test.
 #>
 [CmdletBinding()]
 param(
-    [string]$OutputPath = (Join-Path ([IO.Path]::GetTempPath()) ('LogVerdict-coverage-{0}.json' -f $PID))
+    [string]$OutputPath = (Join-Path ([IO.Path]::GetTempPath()) ('LogVerdict-coverage-{0}.json' -f $PID)),
+    [string]$DisplayEvidencePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -164,7 +165,24 @@ try {
     }
 
     $displayFixture = $fixtures | Where-Object kind -eq 'display' | Select-Object -First 1
-    if ($env:LOGVERDICT_ISOLATED_DISPLAY -eq '1') {
+    if ($DisplayEvidencePath) {
+        if (-not (Test-Path -LiteralPath $DisplayEvidencePath -PathType Leaf)) {
+            Add-LVCoverageFailure ("GUI display evidence was not found: {0}" -f $DisplayEvidencePath)
+        } else {
+            try {
+                $displayEvidence = Get-Content -LiteralPath $DisplayEvidencePath -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ([int]$displayEvidence.schemaVersion -ne 1 -or -not $displayEvidence.passed -or
+                    -not $displayEvidence.placement.fullyInsideWorkingArea) {
+                    throw 'GUI evidence did not report a passing launch or in-bounds placement.'
+                }
+                Add-LVCoverageResult -Id $displayFixture.id -Status 'readable' `
+                    -Reason 'The packaged GUI launch smoke test reported a real window inside its working area.' `
+                    -Details @{ EvidencePath = $DisplayEvidencePath; ProcessId = $displayEvidence.processId; Screen = $displayEvidence.placement.screen }
+            } catch {
+                Add-LVCoverageFailure ("GUI display evidence failed validation: {0}" -f $_.Exception.Message)
+            }
+        }
+    } elseif ($env:LOGVERDICT_ISOLATED_DISPLAY -eq '1') {
         Add-LVCoverageResult -Id $displayFixture.id -Status 'readable' `
             -Reason 'An explicit isolated-display runner reported availability.'
     } else {

@@ -519,7 +519,7 @@ function Get-LVGuiXaml {
         </StackPanel>
 
         <StackPanel Grid.Row="1">
-          <ToggleButton x:Name="NavOverview" Style="{StaticResource NavButton}" IsChecked="True">
+          <ToggleButton x:Name="NavOverview" Style="{StaticResource NavButton}" AutomationProperties.Name="Overview" IsChecked="True">
             <StackPanel Orientation="Horizontal">
               <Border Width="24" Height="24" CornerRadius="6" Background="{DynamicResource NavIconActive}">
                 <TextBlock Text="O" HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -528,7 +528,7 @@ function Get-LVGuiXaml {
               <TextBlock Text="Overview" Margin="11,0,0,0" VerticalAlignment="Center"/>
             </StackPanel>
           </ToggleButton>
-          <ToggleButton x:Name="NavFindings" Style="{StaticResource NavButton}">
+          <ToggleButton x:Name="NavFindings" Style="{StaticResource NavButton}" AutomationProperties.Name="Findings">
             <StackPanel Orientation="Horizontal">
               <Border Width="24" Height="24" CornerRadius="6" Background="{DynamicResource Surface0}">
                 <TextBlock Text="F" HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -537,7 +537,7 @@ function Get-LVGuiXaml {
               <TextBlock Text="Findings" Margin="11,0,0,0" VerticalAlignment="Center"/>
             </StackPanel>
           </ToggleButton>
-          <ToggleButton x:Name="NavCoverage" Style="{StaticResource NavButton}">
+          <ToggleButton x:Name="NavCoverage" Style="{StaticResource NavButton}" AutomationProperties.Name="Coverage">
             <StackPanel Orientation="Horizontal">
               <Border Width="24" Height="24" CornerRadius="6" Background="{DynamicResource Surface0}">
                 <TextBlock Text="C" HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -546,7 +546,7 @@ function Get-LVGuiXaml {
               <TextBlock Text="Coverage" Margin="11,0,0,0" VerticalAlignment="Center"/>
             </StackPanel>
           </ToggleButton>
-          <ToggleButton x:Name="NavActivity" Style="{StaticResource NavButton}">
+          <ToggleButton x:Name="NavActivity" Style="{StaticResource NavButton}" AutomationProperties.Name="Activity">
             <StackPanel Orientation="Horizontal">
               <Border Width="24" Height="24" CornerRadius="6" Background="{DynamicResource Surface0}">
                 <TextBlock Text="A" HorizontalAlignment="Center" VerticalAlignment="Center"
