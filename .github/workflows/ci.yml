@@ -27,6 +27,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Install-Module Pester -RequiredVersion 5.9.0 -Scope CurrentUser -Force -AllowClobber
           Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -AllowClobber
+          Install-Module ps2exe -RequiredVersion 1.0.18 -Scope CurrentUser -Force -AllowClobber
 
       - name: Parse all PowerShell with this runtime
         shell: ${{ matrix.shell }}
@@ -112,9 +113,16 @@ jobs:
           $date = (Get-Date).ToString('yyyy-MM-dd')
           .\Tools\New-PackageManifests.ps1 -Version $version -AssetDirectory (Join-Path $root 'dist') -ReleaseDate $date -OutputDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging')
 
+      - name: Generate SPDX SBOM and build provenance
+        shell: pwsh
+        run: |
+          $root = (Get-Location).Path
+          $version = (& .\Tools\Get-LogVerdictVersion.ps1).Trim()
+          .\Tools\New-LogVerdictSupplyChain.ps1 -Version $version -AssetDirectory (Join-Path $root 'dist') -OutputDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain') -SourceDirectory $root
+
       - name: Validate package hashes and version provenance
         shell: pwsh
-        run: .\Tools\Test-LogVerdictRelease.ps1 -ManifestDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging') -AssetDirectory (Join-Path (Get-Location).Path 'dist')
+        run: .\Tools\Test-LogVerdictRelease.ps1 -ManifestDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging') -AssetDirectory (Join-Path (Get-Location).Path 'dist') -SupplyChainDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain')
 
       - name: Launch packaged GUI smoke matrix
         shell: pwsh
@@ -145,4 +153,5 @@ jobs:
             ${{ runner.temp }}/logverdict-gui-normal.json
             ${{ runner.temp }}/logverdict-gui-high-contrast.json
             ${{ runner.temp }}/logverdict-gui-coverage.json
+            ${{ runner.temp }}/logverdict-supply-chain/**
           if-no-files-found: warn

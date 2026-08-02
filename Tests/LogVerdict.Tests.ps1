@@ -3226,6 +3226,55 @@ Describe 'Package-manager manifest generation' {
     }
 }
 
+Describe 'Release supply-chain metadata' {
+    BeforeAll {
+        $root = Split-Path $PSScriptRoot -Parent
+        $script:SupplyChainTool = Join-Path $root 'Tools/New-LogVerdictSupplyChain.ps1'
+        $script:SupplyChainVerifier = Join-Path $root 'Tools/Test-LogVerdictSupplyChain.ps1'
+        $script:SupplyChainVersion = (& (Join-Path $root 'Tools/Get-LogVerdictVersion.ps1')).Trim()
+    }
+
+    It 'generates per-asset SPDX and provenance records that verify offline' {
+        $assetDirectory = Join-Path $TestDrive 'supply-assets'
+        $metadataDirectory = Join-Path $TestDrive 'supply-metadata'
+        $null = New-Item -ItemType Directory -Path $assetDirectory
+        [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'LogVerdict.exe'), [byte[]](1, 2, 3, 4))
+        [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'LogVerdict-GUI.exe'), [byte[]](5, 6, 7))
+
+        $generated = & $script:SupplyChainTool -Version $script:SupplyChainVersion -AssetDirectory $assetDirectory -OutputDirectory $metadataDirectory
+        & $script:SupplyChainVerifier -Version $script:SupplyChainVersion -MetadataDirectory $metadataDirectory -AssetDirectory $assetDirectory
+
+        $index = Get-Content -LiteralPath (Join-Path $metadataDirectory 'logverdict-supply-chain.json') -Raw | ConvertFrom-Json
+        @($index.assets).Count | Should -Be 2
+        $index.sourceManifestSha256 | Should -Match '^[0-9a-f]{64}$'
+        $index.dependencyManifestSha256 | Should -Match '^[0-9a-f]{64}$'
+        foreach ($asset in @($index.assets)) {
+            $asset.sha256 | Should -Match '^[0-9a-f]{64}$'
+            (Test-Path -LiteralPath (Join-Path $metadataDirectory $asset.sbom)) | Should -BeTrue
+            (Test-Path -LiteralPath (Join-Path $metadataDirectory $asset.provenance)) | Should -BeTrue
+            $spdx = Get-Content -LiteralPath (Join-Path $metadataDirectory $asset.sbom) -Raw | ConvertFrom-Json
+            $spdx.spdxVersion | Should -BeExactly 'SPDX-2.3'
+            $provenance = Get-Content -LiteralPath (Join-Path $metadataDirectory $asset.provenance) -Raw | ConvertFrom-Json
+            $provenance.subject[0].digest.sha256 | Should -BeExactly $asset.sha256
+            $provenance.build.unsigned | Should -BeTrue
+        }
+        $generated.AssetCount | Should -Be 2
+    }
+
+    It 'rejects a release asset whose bytes no longer match the provenance record' {
+        $assetDirectory = Join-Path $TestDrive 'tampered-assets'
+        $metadataDirectory = Join-Path $TestDrive 'tampered-metadata'
+        $null = New-Item -ItemType Directory -Path $assetDirectory
+        [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'LogVerdict.exe'), [byte[]](8, 9))
+        [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'LogVerdict-GUI.exe'), [byte[]](10, 11))
+        & $script:SupplyChainTool -Version $script:SupplyChainVersion -AssetDirectory $assetDirectory -OutputDirectory $metadataDirectory | Out-Null
+        [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'LogVerdict.exe'), [byte[]](12, 13))
+
+        { & $script:SupplyChainVerifier -Version $script:SupplyChainVersion -MetadataDirectory $metadataDirectory -AssetDirectory $assetDirectory } |
+            Should -Throw '*Release hash LogVerdict.exe*'
+    }
+}
+
 Describe 'GUI row projection' {
     It 'dates an undated signature to DateTime.MinValue rather than to now' {
         # Undated text-log lines must sort to the bottom of a last-seen sort, not to

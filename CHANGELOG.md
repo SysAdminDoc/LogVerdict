@@ -25,6 +25,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   and imports reviewed changes as a diff without mutating the curated database.
 - Added packaged GUI launch smoke coverage for real UI Automation navigation, placement,
   error/empty/cancelled states, normal/high-contrast themes, and uploaded coverage evidence.
+- Added per-asset SPDX 2.3 SBOMs and unsigned, offline-verifiable build provenance with
+  source-tree, pinned-module, runtime, and artifact hashes; CI now validates and uploads
+  the supply-chain records beside packaged GUI evidence.
 
 ## [0.8.1] - 2026-08-02
 

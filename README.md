@@ -174,6 +174,17 @@ Double-clicked, it holds the console window open until you press Enter. Run from
 
 It is **unsigned by design** - this project does not code-sign. SmartScreen will warn on first run: choose **More info** then **Run anyway**.
 
+Release builds publish an SPDX 2.3 SBOM and a companion unsigned provenance record beside
+each executable. The records include the asset SHA-256, source revision and source-tree
+hash, build runtime, and content hashes for the pinned Pester, PSScriptAnalyzer, and
+ps2exe modules. They can be checked without network access:
+
+```powershell
+.\Tools\Test-LogVerdictRelease.ps1 -ManifestDirectory .\Packaging -AssetDirectory .\dist -SupplyChainDirectory .\Packaging\supply-chain
+```
+
+The provenance is evidence about how an artifact was built, not a code signature; the
+executables remain unsigned by design.
 Drop a `verdicts.local.json` beside either .exe to add your own rules; they are merged automatically and win ties against the compiled-in ones. A full `Data\verdicts.json` beside the .exe replaces the compiled-in database entirely.
 
 Rule updates are opt-in. `Update-LogVerdictDatabase` fetches `verdicts.json` from a
