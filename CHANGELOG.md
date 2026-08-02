@@ -14,6 +14,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Extended deterministic redaction to generated credentials, bearer/JWT/cloud/GitHub tokens,
   IP and MAC addresses, and token-bearing URLs, with adversarial checks across text, JSON,
   CSV, HTML, evidence manifests, and privacy-audit output.
+- Added versioned `LogVerdict.Report` and `LogVerdict.Evidence` JSON contracts and schemas with
+  explicit redaction/raw state, live/offline mode, compatibility metadata, source coverage,
+  included-file hashes, legacy migration markers, and future-schema rejection in report export.
 
 ## [0.8.1] - 2026-08-02
 

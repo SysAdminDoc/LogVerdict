@@ -818,6 +818,7 @@ function Invoke-LVOfflineScan {
         return [pscustomobject]@{
             Tool           = 'LogVerdict'
             Version        = $script:LVVersion
+            Contract       = New-LVReportContract -Result ([pscustomobject]@{ ScanTime = $started; Offline = $true })
             MachineName    = $machineName
             ScanTime       = $started
             Duration       = ((Get-Date) - $started)

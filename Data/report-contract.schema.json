@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/SysAdminDoc/LogVerdict/blob/main/Data/report-contract.schema.json",
+  "title": "LogVerdict versioned report contract",
+  "type": "object",
+  "required": ["Contract", "Tool", "Version", "ScanTime", "DaysBack", "Coverage", "Findings", "WorstVerdict", "ExitCode"],
+  "properties": {
+    "Contract": {
+      "type": "object",
+      "required": ["schemaVersion", "name", "mode", "generatedAt", "privacy", "compatibility"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "name": { "const": "LogVerdict.Report" },
+        "mode": { "enum": ["live", "offline"] },
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "privacy": {
+          "type": "object",
+          "required": ["redacted", "rawEvidence", "statement"],
+          "properties": {
+            "redacted": { "type": "boolean" },
+            "rawEvidence": { "type": "boolean" },
+            "statement": { "type": "string" }
+          }
+        },
+        "compatibility": {
+          "type": "object",
+          "required": ["readerMajor", "migration"],
+          "properties": {
+            "readerMajor": { "const": 1 },
+            "migration": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "Tool": { "const": "LogVerdict" },
+    "Version": { "type": "string" },
+    "ScanTime": { "type": "string", "format": "date-time" },
+    "DaysBack": { "type": "integer", "minimum": 1, "maximum": 3650 },
+    "Coverage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["Source", "Kind", "Name", "Status", "ObservedRecords", "SkippedRecords"],
+        "properties": {
+          "Source": { "type": "string" },
+          "Kind": { "type": "string" },
+          "Name": { "type": "string" },
+          "Status": { "type": "string" },
+          "ObservedRecords": { "type": "integer", "minimum": 0 },
+          "SkippedRecords": { "type": "integer", "minimum": 0 },
+          "Reason": { "type": ["string", "null"] },
+          "ParserError": { "type": ["string", "null"] },
+          "SHA256": { "type": ["string", "null"] },
+          "CollectionBudget": { "type": ["object", "null"] }
+        }
+      }
+    },
+    "Findings": { "type": "array" },
+    "Performance": { "type": "array" },
+    "WorstVerdict": { "type": "string" },
+    "ExitCode": { "type": "integer", "minimum": 0, "maximum": 4 }
+  }
+}

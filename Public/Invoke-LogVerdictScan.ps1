@@ -535,6 +535,7 @@ function Invoke-LogVerdictScan {
     return [pscustomobject]@{
         Tool           = 'LogVerdict'
         Version        = $script:LVVersion
+        Contract       = New-LVReportContract -Result ([pscustomobject]@{ ScanTime = $started; Offline = $false })
         MachineName    = $env:COMPUTERNAME
         ScanTime       = $started
         Duration       = ((Get-Date) - $started)

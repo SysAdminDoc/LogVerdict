@@ -311,6 +311,14 @@ function New-LVEvidenceBundle {
     Write-LVTextFile -Path $auditPath -Content ($privacyAudit | ConvertTo-Json -Depth 8)
     $content.Add($auditPath) | Out-Null
 
+    # Keep the evidence artifact self-describing. The file list uses names, sizes,
+    # and hashes rather than staging paths, so it remains useful after extraction.
+    $contractPath = Join-Path $staging 'EVIDENCE-CONTRACT.json'
+    $evidenceContract = New-LVEvidenceContract -Result $Result -Content @($content.ToArray()) `
+        -Omission @($omission.ToArray()) -Redacted:$Redact -AllowRawEvidence:$AllowRawEvidence -PrivacyAudit $privacyAudit
+    Write-LVTextFile -Path $contractPath -Content ($evidenceContract | ConvertTo-Json -Depth 12)
+    $content.Add($contractPath) | Out-Null
+
     $manifestPath = Join-Path $staging 'MANIFEST.txt'
     Write-LVTextFile -Path $manifestPath `
         -Content (Format-LVEvidenceManifest -Result $Result -Content @($content.ToArray()) `

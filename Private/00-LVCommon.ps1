@@ -727,6 +727,7 @@ function ConvertTo-LVRedactedResult {
     }
     $copy.MachineName = '<MACHINE>'
     $copy | Add-Member -NotePropertyName 'Redacted' -NotePropertyValue $true -Force
+    $copy = ConvertTo-LVReportContract -Result $copy -Redacted
 
     return $copy
 }

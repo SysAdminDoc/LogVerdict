@@ -67,6 +67,10 @@ $advisorySchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/advisories
 if ([int]$advisorySchema.properties.schemaVersion.const -ne 1) { throw 'Offline advisory schema is not pinned at version 1.' }
 $caseSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/case-profile.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$caseSchema.properties.schemaVersion.const -ne 1) { throw 'Case profile schema is not pinned at version 1.' }
+$reportSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/report-contract.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([int]$reportSchema.properties.Contract.properties.schemaVersion.const -ne 1) { throw 'Report contract schema is not pinned at version 1.' }
+$evidenceSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/evidence-contract.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([int]$evidenceSchema.properties.Contract.properties.schemaVersion.const -ne 1) { throw 'Evidence contract schema is not pinned at version 1.' }
 
 $scoopPath = Join-Path $ManifestDirectory 'scoop/logverdict.json'
 $wingetPath = Join-Path $ManifestDirectory 'winget/SysAdminDoc.LogVerdict.yaml'

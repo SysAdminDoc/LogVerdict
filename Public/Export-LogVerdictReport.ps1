@@ -55,6 +55,10 @@ function Export-LogVerdictReport {
             throw 'Raw evidence packaging requires -AllowRawEvidence, or use -Redact for a shareable bundle.'
         }
 
+        # Normalize legacy results and fail closed when a future writer's contract
+        # cannot be understood by this reader.
+        $Result = ConvertFrom-LVReportContract -InputObject $Result
+
         # Captured before redacting. The folder name keeps the real machine name because
         # the person running the scan has to find it on their own desktop - redaction is
         # about what leaves the machine, not about hiding the output from its author.
@@ -64,6 +68,7 @@ function Export-LogVerdictReport {
             $Result = ConvertTo-LVRedactedResult -Result $Result
             Write-LVLog -Level info -Message 'Redacting account, machine and path identifiers from the written reports.'
         }
+        $Result = ConvertTo-LVReportContract -Result $Result -Redacted:$Redact
 
         if (-not $OutputDir) {
             $desktop = [Environment]::GetFolderPath('Desktop')

@@ -4510,6 +4510,60 @@ Describe 'Report redaction' {
         (Get-Content (Join-Path $dir 'LogVerdict-Report.html') -Raw) | Should -Match '<strong>Redacted\.</strong>'
     }
 
+    It 'writes and validates the versioned report contract' {
+        $result = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
+        $dir = Join-Path $TestDrive 'contract-v1'
+        Export-LogVerdictReport -Result $result -OutputDir $dir -Format Json 6>$null | Out-Null
+        $document = Get-Content (Join-Path $dir 'LogVerdict-Report.json') -Raw | ConvertFrom-Json
+
+        $document.Contract.schemaVersion | Should -Be 1
+        $document.Contract.name | Should -BeExactly 'LogVerdict.Report'
+        $document.Contract.mode | Should -BeExactly 'live'
+        $document.Contract.privacy.redacted | Should -BeFalse
+        InModuleScope LogVerdict -Parameters @{ document = $document } {
+            param($document)
+            Test-LVReportContract -InputObject $document -Quiet | Should -BeTrue
+        }
+
+        $schemaPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data/report-contract.schema.json'
+        $schema = Get-Content $schemaPath -Raw | ConvertFrom-Json
+        $schema.properties.Contract.properties.schemaVersion.const | Should -Be 1
+
+        $evidenceDir = Join-Path $TestDrive 'contract-evidence'
+        $evidenceExport = Export-LogVerdictReport -Result $result -OutputDir $evidenceDir -Format Json -Redact -IncludeEvidence 6>$null
+        $evidenceExport.EvidenceBundle | Should -Not -BeNullOrEmpty
+        $zip = [IO.Compression.ZipFile]::OpenRead($evidenceExport.EvidenceBundle)
+        try {
+            $entry = @($zip.Entries | Where-Object { $_.FullName -eq 'EVIDENCE-CONTRACT.json' })
+            $entry.Count | Should -Be 1
+            $reader = New-Object IO.StreamReader($entry[0].Open())
+            try { $evidenceDocument = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+        } finally { $zip.Dispose() }
+        InModuleScope LogVerdict -Parameters @{ evidence = $evidenceDocument } {
+            param($evidence)
+            Test-LVEvidenceContract -InputObject $evidence -Quiet | Should -BeTrue
+        }
+        $evidenceDocument.Contract.name | Should -BeExactly 'LogVerdict.Evidence'
+        $evidenceDocument.Privacy.redacted | Should -BeTrue
+        $evidenceDocument.Privacy.rawEvidence | Should -BeFalse
+        $evidenceSchemaPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data/evidence-contract.schema.json'
+        (Get-Content $evidenceSchemaPath -Raw | ConvertFrom-Json).properties.Contract.properties.schemaVersion.const | Should -Be 1
+    }
+
+    It 'marks unversioned reports as migrated and rejects future contracts' {
+        InModuleScope LogVerdict {
+            $legacy = [pscustomobject]@{
+                Tool = 'LogVerdict'; Version = '0.8.0'; ScanTime = Get-Date
+                DaysBack = 1; Coverage = @(); Findings = @(); WorstVerdict = 'benign'; ExitCode = 0
+            }
+            $migrated = ConvertFrom-LVReportContract -InputObject $legacy
+            $migrated.Contract.compatibility.migration | Should -BeExactly 'legacy-unversioned-to-v1'
+
+            $future = [pscustomobject]@{ Contract = [pscustomobject]@{ schemaVersion = 2 } }
+            { ConvertFrom-LVReportContract -InputObject $future } | Should -Throw '*newer*'
+        }
+    }
+
     It 'keeps the machine name out of the written reports but not out of the folder name' {
         $result = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
         $dir = Join-Path $TestDrive 'redacted2'

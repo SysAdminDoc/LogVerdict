@@ -57,6 +57,9 @@ Windows Setup and Windows Update records also retain invariant result and extend
 4. **Correlate** - signatures that occurred within minutes of each other are reported together, above the flat list, with the window of time to look at. Corrected hardware errors and an unexpected restart are each easy to dismiss alone; together they name a cause. Correlations are curated, never inferred - on one machine the loudest signature co-occurs with everything, so a discovered correlation is mostly an artefact of volume.
 5. **Report** - console, plain text, JSON, and a self-contained dark HTML page that opens anywhere with no network access. The HTML report filters by verdict or text entirely offline, still shows every finding when scripting is disabled, and prints as a light document suitable for a ticket or PDF.
 
+JSON reports include the versioned `Contract` envelope (`LogVerdict.Report`, schema version 1) with live/offline mode, generation time, redaction state, and reader compatibility metadata. Readers should reject a newer schema rather than guessing at fields; unversioned legacy objects are explicitly marked when normalized.
+Evidence bundles add `EVIDENCE-CONTRACT.json`, which records the report contract, source coverage, performance metadata, privacy/raw-evidence state, omissions, and SHA-256 hashes for the included files. A redacted bundle omits raw event channels and declares that state explicitly.
+
 **No language model is involved by default.** Every ruling and remediation is a curated rule written by a human. A signature with no matching rule is reported as `unknown` with its raw evidence and no guess at a cause. An explicit `-ExplainUnknown` opt-in can ask a local Ollama model for a separately labelled candidate explanation; it never changes the verdict and output containing remediation language is discarded.
 
 ## Usage

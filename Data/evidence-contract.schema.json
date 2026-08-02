@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/SysAdminDoc/LogVerdict/blob/main/Data/evidence-contract.schema.json",
+  "title": "LogVerdict versioned evidence contract",
+  "type": "object",
+  "required": ["Contract", "ReportContract", "Privacy", "Coverage", "Performance", "Files", "Omissions"],
+  "properties": {
+    "Contract": {
+      "type": "object",
+      "required": ["schemaVersion", "name", "generatedAt", "compatibility"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "name": { "const": "LogVerdict.Evidence" },
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "compatibility": {
+          "type": "object",
+          "required": ["readerMajor", "migration"],
+          "properties": {
+            "readerMajor": { "const": 1 },
+            "migration": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "ReportContract": { "type": "object" },
+    "Privacy": {
+      "type": "object",
+      "required": ["redacted", "rawEvidence", "statement", "auditStatus"],
+      "properties": {
+        "redacted": { "type": "boolean" },
+        "rawEvidence": { "type": "boolean" },
+        "statement": { "type": "string" },
+        "auditStatus": { "type": ["string", "null"] }
+      }
+    },
+    "Coverage": { "type": "array" },
+    "Performance": { "type": "array" },
+    "Files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "sizeBytes", "sha256"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "sizeBytes": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }
+        }
+      }
+    },
+    "Omissions": { "type": "array", "items": { "type": "string" } }
+  }
+}
