@@ -1,6 +1,6 @@
 @{
     RootModule        = 'LogVerdict.psm1'
-    ModuleVersion     = '0.8.1'
+    ModuleVersion     = '0.8.2'
     GUID              = '54d8b998-b5ce-40ec-8981-5525e95d4216'
     Author            = 'SysAdminDoc'
     CompanyName       = 'SysAdminDoc'

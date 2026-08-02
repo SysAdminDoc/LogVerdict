@@ -4,7 +4,7 @@ All notable changes to LogVerdict are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.8.2] - 2026-08-02
 
 - Added an explicit, versioned provider extension contract with hash-pinned entrypoints and fixtures, mandatory redaction, shared collection budgets, provider coverage, report projections, and an `-AllowUntrustedProvider` execution gate.
 - Added bounded JSONL timeline exports for standard and case handoffs, with UTC timestamps, event/finding/correlation/coverage/provider records, source record IDs, rule provenance, and explicit raw/redacted state.
@@ -316,6 +316,7 @@ Initial release. The deterministic core: collect, reduce, resolve, report. No la
 
 [0.7.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.7.0
 [0.8.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.8.0
+[0.8.2]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.8.2
 [0.8.1]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.8.1
 [0.6.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.6.0
 [0.5.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.5.0
