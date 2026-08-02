@@ -38,6 +38,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added the opt-in `Watch-LogVerdict` module command for bounded local event tails with atomic
   per-channel bookmark resume, reconnect/drop/latency coverage, clean stop limits, and optional
   advisory WEF `wecutil` configuration/runtime intake.
+- Added committed cross-version and locale fixtures, explicit malformed-EVTX/elevation/theme
+  coverage records, and Windows PowerShell 5.1/PowerShell 7 STA CI runs with uploaded reports.
 
 ## [0.8.0] - 2026-08-01
 

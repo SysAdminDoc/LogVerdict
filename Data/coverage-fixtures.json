@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "name": "cross-version-locale-fixtures",
+  "fixtures": [
+    {
+      "id": "event-provider-schema-legacy",
+      "kind": "event",
+      "channel": "LogVerdict-Fixture/Legacy",
+      "locale": "en-US",
+      "record": {
+        "ProviderName": "LogVerdict-Fixture",
+        "ProviderId": "11111111-1111-1111-1111-111111111111",
+        "Id": 100,
+        "Version": 0,
+        "Task": 1,
+        "Opcode": 0,
+        "Level": 2,
+        "LevelDisplayName": "Error",
+        "TimeCreated": "2026-08-02T10:00:00.0000000Z",
+        "MachineName": "FIXTURE-HOST",
+        "RecordId": 10,
+        "Message": "The fixture provider reported a legacy schema event."
+      }
+    },
+    {
+      "id": "event-provider-schema-modern",
+      "kind": "event",
+      "channel": "LogVerdict-Fixture/Modern",
+      "locale": "de-DE",
+      "record": {
+        "ProviderName": "LogVerdict-Fixture",
+        "ProviderId": "11111111-1111-1111-1111-111111111111",
+        "Id": 100,
+        "Version": 2,
+        "Task": 7,
+        "Opcode": 2,
+        "Level": 2,
+        "LevelDisplayName": "Fehler",
+        "TimeCreated": "2026-08-02T10:00:01.0000000Z",
+        "MachineName": "FIXTURE-HOST",
+        "RecordId": 11,
+        "Message": "Der Fixtureanbieter hat ein Ereignis im modernen Schema gemeldet."
+      }
+    },
+    {
+      "id": "text-log-locale-neutral",
+      "kind": "textlog",
+      "locale": "ja-JP",
+      "target": {
+        "Name": "Fixture text log",
+        "Pattern": "fixture-error\\s+id=\\d+",
+        "Area": "coverage",
+        "Hint": "fixture parser coverage",
+        "Line": "fixture-error id=42"
+      }
+    },
+    {
+      "id": "offline-evtx-malformed",
+      "kind": "offline-evtx",
+      "name": "malformed.evtx",
+      "expectedStatus": "unreadable",
+      "reason": "The parser must retain a malformed source as an explicit unreadable coverage entry."
+    },
+    {
+      "id": "elevation-runtime-observation",
+      "kind": "elevation",
+      "osDependent": true,
+      "expected": "report-current-token-without-asserting-elevated"
+    },
+    {
+      "id": "gui-high-contrast",
+      "kind": "gui",
+      "highContrastOverride": "1",
+      "requiredNames": [
+        "TxtDays",
+        "TxtSearch",
+        "LvFindings",
+        "TxtSample",
+        "TxtLog"
+      ]
+    },
+    {
+      "id": "gui-isolated-display",
+      "kind": "display",
+      "osDependent": true,
+      "expected": "not-observed-without-explicit-isolated-display-runner"
+    }
+  ]
+}

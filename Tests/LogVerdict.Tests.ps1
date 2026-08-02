@@ -1391,6 +1391,112 @@ Describe 'Event collection failure handling' {
     }
 }
 
+Describe 'Cross-version, locale, and fixture coverage' {
+    BeforeAll {
+        $script:CoverageFixturePath = Join-Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'Data') 'coverage-fixtures.json'
+        $script:CoverageFixtures = Get-Content -LiteralPath $script:CoverageFixturePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+
+    It 'ships a versioned manifest with every required coverage kind' {
+        $script:CoverageFixtures.schemaVersion | Should -Be 1
+        $fixtures = @($script:CoverageFixtures.fixtures)
+        @($fixtures | Group-Object id | Where-Object Count -gt 1).Count | Should -Be 0
+        foreach ($kind in @('event', 'textlog', 'offline-evtx', 'elevation', 'gui', 'display')) {
+            @($fixtures | Where-Object kind -eq $kind).Count | Should -BeGreaterThan 0
+        }
+    }
+
+    It 'normalizes old and new provider schemas without discarding structured metadata' {
+        $eventFixtures = @($script:CoverageFixtures.fixtures | Where-Object kind -eq 'event')
+        InModuleScope LogVerdict -Parameters @{ Fixtures = $eventFixtures } {
+            param($Fixtures)
+            $script:CoverageEventsByChannel = @{}
+            foreach ($fixture in $Fixtures) { $script:CoverageEventsByChannel[[string]$fixture.channel] = $fixture.record }
+            Mock Get-WinEvent {
+                param($FilterHashtable)
+                return $script:CoverageEventsByChannel[[string]$FilterHashtable.LogName]
+            }
+
+            try {
+                $records = @(Get-LVEventRecord -Channel @($Fixtures | ForEach-Object channel) -DaysBack 1 -MaxPerChannel 10)
+                $records.Count | Should -Be $Fixtures.Count
+                $versions = @($records | ForEach-Object Version | Sort-Object -Unique)
+                $versions | Should -Contain 0
+                $versions | Should -Contain 2
+                foreach ($record in $records) {
+                    $record.ProviderId | Should -BeExactly '11111111-1111-1111-1111-111111111111'
+                    $record.Task | Should -Not -BeNullOrEmpty
+                    $record.Opcode | Should -Not -BeNullOrEmpty
+                }
+            } finally {
+                Remove-Variable CoverageEventsByChannel -Scope Script -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    It 'preserves a non-English provider message as evidence rather than matching rendered prose' {
+        $fixture = $script:CoverageFixtures.fixtures | Where-Object id -eq 'event-provider-schema-modern'
+        InModuleScope LogVerdict -Parameters @{ Fixture = $fixture } {
+            param($Fixture)
+            Mock Get-WinEvent { $Fixture.record }
+            $record = @(Get-LVEventRecord -Channel $Fixture.channel -DaysBack 1 -MaxPerChannel 10)[0]
+            $record.Message | Should -BeExactly ([string]$Fixture.record.Message)
+            $record.Provider | Should -BeExactly 'LogVerdict-Fixture'
+            $record.Version | Should -Be 2
+            $record.Task | Should -Be 7
+            $record.Opcode | Should -Be 2
+        }
+    }
+
+    It 'exercises a text-log fixture through the real collector shape' {
+        $fixture = $script:CoverageFixtures.fixtures | Where-Object kind -eq 'textlog' | Select-Object -First 1
+        $path = Join-Path $TestDrive 'coverage-fixture.log'
+        Set-Content -LiteralPath $path -Value $fixture.target.Line -Encoding UTF8
+        InModuleScope LogVerdict -Parameters @{ Fixture = $fixture; Path = $path } {
+            param($Fixture, $Path)
+            $target = [pscustomobject]@{
+                Name = $Fixture.target.Name
+                Path = $Path
+                Pattern = $Fixture.target.Pattern
+                Area = $Fixture.target.Area
+                Hint = $Fixture.target.Hint
+            }
+            $records = @(Get-LVTextLogRecord -DaysBack 1 -Target @($target))
+            $records.Count | Should -Be 1
+            $records[0].Message | Should -BeExactly $Fixture.target.Line
+            $script:LVTextLogCoverage[0].Status | Should -BeExactly 'readable'
+        }
+    }
+
+    It 'reports the current elevation state without requiring elevation' {
+        if ($env:OS -ne 'Windows_NT') {
+            Set-ItResult -Skipped -Because 'Windows token elevation is OS-dependent'
+            return
+        }
+        InModuleScope LogVerdict {
+            $elevated = Test-LVElevated
+            $elevated | Should -BeOfType [bool]
+        }
+    }
+
+    It 'exercises the high-contrast path through a non-global test override' {
+        if ($env:OS -ne 'Windows_NT') {
+            Set-ItResult -Skipped -Because 'WPF theme inspection is OS-dependent'
+            return
+        }
+        InModuleScope LogVerdict {
+            $previous = $env:LOGVERDICT_TEST_HIGH_CONTRAST
+            try {
+                $env:LOGVERDICT_TEST_HIGH_CONTRAST = '1'
+                Test-LVGuiHighContrast | Should -BeTrue
+            } finally {
+                if ($null -eq $previous) { Remove-Item Env:LOGVERDICT_TEST_HIGH_CONTRAST -ErrorAction SilentlyContinue }
+                else { $env:LOGVERDICT_TEST_HIGH_CONTRAST = $previous }
+            }
+        }
+    }
+}
+
 Describe 'Provider and configuration health profiles' {
     It 'retains provider GUID, channel, EventID, and version metadata' {
         InModuleScope LogVerdict {
