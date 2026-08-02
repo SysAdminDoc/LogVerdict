@@ -4,12 +4,12 @@ function Get-LogVerdictErrorCatalog {
         Query the bundled Microsoft Windows error and stop-code catalog.
 
         .DESCRIPTION
-        Returns reference entries for Win32 GetLastError values, common HRESULTs,
-        and Microsoft kernel bug-check codes. The catalog is local and does not
-        make network calls.
+        Returns typed reference entries for Win32, HRESULT/facility, NTSTATUS,
+        Setup/servicing, Windows Update, and Microsoft kernel bug-check codes.
+        The catalog is local and does not make network calls.
 
         .PARAMETER Kind
-        Restrict results to win32, hresult, or bugcheck entries.
+        Restrict results to a typed catalog family.
 
         .PARAMETER Name
         Match a symbolic error or stop-code name.
@@ -19,22 +19,38 @@ function Get-LogVerdictErrorCatalog {
     #>
     [CmdletBinding()]
     param(
-        [ValidateSet('win32', 'hresult', 'bugcheck')][string]$Kind,
+        [ValidateSet('win32', 'hresult', 'bugcheck', 'ntstatus', 'setup', 'windowsupdate')][string]$Kind,
         [string]$Name,
         [string]$Hex,
         [string]$Path
     )
 
-    $entries = @((Get-LVErrorCatalog -Path $Path).entries)
+    $catalog = Get-LVErrorCatalog -Path $Path
+    $entries = @($catalog.entries)
     if ($Kind) { $entries = @($entries | Where-Object { $_.kind -eq $Kind }) }
-    if ($Name) { $entries = @($entries | Where-Object { $_.name -like $Name }) }
-    if ($Hex) {
-        $normalized = $Hex.ToUpperInvariant()
-        if ($normalized -notmatch '^0X') { $normalized = '0X' + $normalized }
-        if ($normalized -match '^0X[0-9A-F]+$') {
-            $normalized = '0X{0:X8}' -f [Convert]::ToUInt32($normalized.Substring(2), 16)
+    if ($Name -and $Name -notmatch '[*?]') {
+        $nameKey = $Name.ToUpperInvariant()
+        if ($catalog.LVIndexes.ByName.ContainsKey($nameKey)) {
+            $entries = @($catalog.LVIndexes.ByName[$nameKey])
+        } else {
+            $entries = @()
         }
-        $entries = @($entries | Where-Object { $_.hex.ToUpperInvariant() -eq $normalized })
+        if ($Kind) { $entries = @($entries | Where-Object { $_.kind -eq $Kind }) }
+    } elseif ($Name) {
+        $entries = @($entries | Where-Object { $_.name -like $Name })
+    }
+    if ($Hex) {
+        $normalized = ConvertTo-LVErrorHex -Value $Hex
+        if (-not $normalized) { return ConvertTo-LVArrayOutput -Value @() }
+        $normalized = $normalized.ToUpperInvariant()
+        if ($Kind -and $catalog.LVIndexes.ByKindHex.ContainsKey(('{0}|{1}' -f $Kind, $normalized))) {
+            $entries = @($catalog.LVIndexes.ByKindHex[('{0}|{1}' -f $Kind, $normalized)])
+        } elseif (-not $Kind -and $catalog.LVIndexes.ByHex.ContainsKey($normalized)) {
+            $entries = @($catalog.LVIndexes.ByHex[$normalized])
+        } else {
+            $entries = @($entries | Where-Object { $_.normalized.hex.ToUpperInvariant() -eq $normalized })
+        }
+        if ($Name) { $entries = @($entries | Where-Object { $_.name -like $Name }) }
     }
     return ConvertTo-LVArrayOutput -Value $entries
 }

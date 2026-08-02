@@ -10,6 +10,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   take precedence over broad channel switches while rejecting contradictory broad modes.
 - Added fail-closed trust validation for active rule and correlation provenance, correlation
   references, supported fields, timespans, and implemented correlation types at database load.
+- Expanded the error catalog to typed NTSTATUS, facility-aware HRESULT, Setup, and Windows
+  Update families with canonical fields, provenance hashes, indexed lookup, and fail-closed
+  family/ID validation.
 
 ## [0.8.0] - 2026-08-01
 

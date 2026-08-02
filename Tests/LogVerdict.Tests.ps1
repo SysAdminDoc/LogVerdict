@@ -272,15 +272,23 @@ Describe 'Bundled Microsoft error catalog' {
     It 'ships the current catalog families with provenance' {
         $catalog = Get-LogVerdictErrorCatalog
         @($catalog).Count | Should -BeGreaterThan 3000
-        @($catalog | Where-Object kind -eq 'win32').Count | Should -BeGreaterOrEqual 2745
-        @($catalog | Where-Object kind -eq 'bugcheck').Count | Should -BeGreaterOrEqual 378
-        @($catalog | Where-Object kind -eq 'hresult').Count | Should -BeGreaterOrEqual 13
-        @($catalog.id | Select-Object -Unique).Count | Should -Be @($catalog).Count
-        foreach ($entry in @($catalog | Select-Object -First 20)) {
-            $entry.reference | Should -Match '^https://learn\.microsoft\.com/'
-            $entry.description | Should -Not -BeNullOrEmpty
-            $entry.explanation | Should -Not -BeNullOrEmpty
-        }
+          @($catalog | Where-Object kind -eq 'win32').Count | Should -BeGreaterOrEqual 2745
+          @($catalog | Where-Object kind -eq 'bugcheck').Count | Should -BeGreaterOrEqual 378
+          @($catalog | Where-Object kind -eq 'hresult').Count | Should -BeGreaterOrEqual 13
+          @($catalog | Where-Object kind -eq 'ntstatus').Count | Should -BeGreaterOrEqual 9
+          @($catalog | Where-Object kind -eq 'setup').Count | Should -BeGreaterOrEqual 7
+          @($catalog | Where-Object kind -eq 'windowsupdate').Count | Should -BeGreaterOrEqual 5
+          @($catalog.id | Select-Object -Unique).Count | Should -Be @($catalog).Count
+          $catalog[0].sourceHash | Should -Match '^[0-9a-f]{64}$'
+          foreach ($entry in @($catalog | Select-Object -First 20)) {
+              $entry.reference | Should -Match '^https://learn\.microsoft\.com/'
+              $entry.description | Should -Not -BeNullOrEmpty
+              $entry.explanation | Should -Not -BeNullOrEmpty
+              $entry.normalized.family | Should -BeExactly $entry.kind
+              $entry.normalized.hex | Should -Match '^0x[0-9A-F]{8}$'
+              $entry.sourceHash | Should -Match '^[0-9a-f]{64}$'
+              $entry.applicability | Should -Not -BeNullOrEmpty
+          }
     }
 
     It 'resolves common Win32 and HRESULT lookups locally' {
@@ -290,9 +298,19 @@ Describe 'Bundled Microsoft error catalog' {
         $hresult = @(Get-LogVerdictErrorCatalog -Kind hresult -Hex '0x80070005')
         $hresult.Count | Should -Be 1
         $hresult[0].name | Should -BeExactly 'E_ACCESSDENIED'
-        $bugcheck = @(Get-LogVerdictErrorCatalog -Kind bugcheck -Hex '0x124')
-        $bugcheck.Count | Should -Be 1
-        $bugcheck[0].name | Should -BeExactly 'WHEA_UNCORRECTABLE_ERROR'
+          $bugcheck = @(Get-LogVerdictErrorCatalog -Kind bugcheck -Hex '0x124')
+          $bugcheck.Count | Should -Be 1
+          $bugcheck[0].name | Should -BeExactly 'WHEA_UNCORRECTABLE_ERROR'
+          $ntstatus = @(Get-LogVerdictErrorCatalog -Kind ntstatus -Hex '0xC0000022')
+          $ntstatus.Count | Should -Be 1
+          $ntstatus[0].name | Should -BeExactly 'STATUS_ACCESS_DENIED'
+          $ntstatus[0].normalized.severity | Should -BeExactly 'error'
+          $setup = @(Get-LogVerdictErrorCatalog -Kind setup -Hex '0xC1900101')
+          $setup.Count | Should -Be 1
+          $setup[0].operation | Should -BeExactly 'process'
+          $update = @(Get-LogVerdictErrorCatalog -Kind windowsupdate -Hex '0x80240017')
+          $update.Count | Should -Be 1
+          $update[0].name | Should -BeExactly 'WU_E_NOT_APPLICABLE'
     }
 
     It 'enriches unknown signatures without changing their unknown verdict' {
@@ -304,19 +322,57 @@ Describe 'Bundled Microsoft error catalog' {
             $resolved = @(Resolve-LVVerdict -Signature @($hresultSignature) -Database ([pscustomobject]@{ rules=@() }))
             $resolved[0].Verdict | Should -BeExactly 'unknown'
             $resolved[0].ErrorName | Should -BeExactly 'E_ACCESSDENIED'
-            $resolved[0].ErrorCode | Should -BeExactly '0X80070005'
-            $resolved[0].Plain | Should -Match 'General access denied error'
-            $resolved[0].Action | Should -Match 'provider and operation'
+              $resolved[0].ErrorCode | Should -BeExactly '0x80070005'
+              $resolved[0].Plain | Should -Match 'General access denied error'
+              $resolved[0].Action | Should -Match 'provider and operation'
+
+              $fromWin32Signature = [pscustomobject]@{
+                  Key='CBS/win32-fallback'; Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0
+                  SampleMessage='Error code: 0x8007000A'; Count=1; PerDay=0.03
+              }
+              $fromWin32 = @(Resolve-LVVerdict -Signature @($fromWin32Signature) -Database ([pscustomobject]@{ rules=@() }))
+              $fromWin32[0].ErrorName | Should -BeExactly 'ERROR_BAD_ENVIRONMENT'
+              $fromWin32[0].ErrorCatalogKind | Should -BeExactly 'win32'
 
             $bugcheckSignature = [pscustomobject]@{
                 Key='Minidump/0x00000124'; Source='textlog'; Channel='Minidump'; Provider='Crash artifact'; Id=0
                 SampleMessage='Kernel minidump bug check 0x00000124; parameters 0x0'; Count=1; PerDay=0.03
             }
             $bugcheck = @(Resolve-LVVerdict -Signature @($bugcheckSignature) -Database ([pscustomobject]@{ rules=@() }))
-            $bugcheck[0].ErrorName | Should -BeExactly 'WHEA_UNCORRECTABLE_ERROR'
-            $bugcheck[0].Action | Should -Match 'WinDbg'
-        }
-    }
+              $bugcheck[0].ErrorName | Should -BeExactly 'WHEA_UNCORRECTABLE_ERROR'
+              $bugcheck[0].Action | Should -Match 'WinDbg'
+
+              $ntstatusSignature = [pscustomobject]@{
+                  Key='Native/unknown'; Source='textlog'; Channel='CBS'; Provider='Native'; Id=0
+                  SampleMessage='Native status: 0xC0000022'; Count=1; PerDay=0.03
+              }
+              $ntstatus = @(Resolve-LVVerdict -Signature @($ntstatusSignature) -Database ([pscustomobject]@{ rules=@() }))
+              $ntstatus[0].ErrorName | Should -BeExactly 'STATUS_ACCESS_DENIED'
+              $ntstatus[0].ErrorCatalogKind | Should -BeExactly 'ntstatus'
+
+              $setupSignature = [pscustomobject]@{
+                  Key='Setup/unknown'; Source='textlog'; Channel='SetupDiag'; Provider='Setup'; Id=0
+                  SampleMessage='Setup result 0xC1900101; extend code 0x00000000'; Count=1; PerDay=0.03
+              }
+              $setup = @(Resolve-LVVerdict -Signature @($setupSignature) -Database ([pscustomobject]@{ rules=@() }))
+              $setup[0].ErrorName | Should -BeExactly 'MOSETUP_E_PROCESS_CRASH'
+
+              $unknownSignature = [pscustomobject]@{
+                  Key='Native/unknown-code'; Source='textlog'; Channel='CBS'; Provider='Native'; Id=0
+                  SampleMessage='Native status: 0xC0DECAFE'; Count=1; PerDay=0.03
+              }
+              $unknown = @(Resolve-LVVerdict -Signature @($unknownSignature) -Database ([pscustomobject]@{ rules=@() }))
+              $unknown[0].ErrorName | Should -BeNullOrEmpty
+          }
+      }
+
+      It 'rejects a catalog entry whose family and id disagree' {
+          $path = Join-Path $TestDrive 'bad-error-catalog.json'
+          $catalog = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Data/error-codes.json') -Raw | ConvertFrom-Json
+          $catalog.entries[0].id = 'hresult:0x00000001'
+          $catalog | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path -Encoding UTF8
+          { Get-LogVerdictErrorCatalog -Path $path } | Should -Throw '*id/family mismatch*'
+      }
 
     It 'keeps the default scan path free of network calls' {
         $module = Get-Module LogVerdict
