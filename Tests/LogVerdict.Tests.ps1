@@ -2747,11 +2747,17 @@ Describe 'GUI markup' {
 
     It 'gives every verdict a palette entry with dark ink on a light fill' {
         InModuleScope LogVerdict {
-            foreach ($v in $script:LVVerdictRank.Keys) {
-                $style = Get-LVVerdictStyle -Verdict $v
-                $style.Label | Should -Not -BeNullOrEmpty
-                $style.Fill  | Should -Match '^#[0-9a-f]{6}$'
-                $style.Ink   | Should -Match '^#[0-9a-f]{6}$'
+            $before = $env:LOGVERDICT_TEST_HIGH_CONTRAST
+            try {
+                $env:LOGVERDICT_TEST_HIGH_CONTRAST = '0'
+                foreach ($v in $script:LVVerdictRank.Keys) {
+                    $style = Get-LVVerdictStyle -Verdict $v
+                    $style.Label | Should -Not -BeNullOrEmpty
+                    $style.Fill  | Should -Match '^#[0-9a-f]{6}$'
+                    $style.Ink   | Should -Match '^#[0-9a-f]{6}$'
+                }
+            } finally {
+                $env:LOGVERDICT_TEST_HIGH_CONTRAST = $before
             }
         }
     }
@@ -3260,6 +3266,60 @@ Describe 'GUI accessibility' {
                 $peer | Should -Not -BeNullOrEmpty -Because "$name must expose an automation peer"
                 $peer.GetName() | Should -Not -BeNullOrEmpty -Because "$name announces as an unlabelled control without a name"
             }
+        }
+    }
+
+    It 'keeps keyboard targets and long error states usable at the requested scale' {
+        if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
+            Set-ItResult -Skipped -Because 'WPF layout and keyboard navigation need a single-threaded apartment'
+            return
+        }
+        InModuleScope LogVerdict {
+            Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml, UIAutomationTypes
+            $xaml = Get-LVGuiXaml
+            $xml = [xml]$xaml
+            $scale = 1.25
+            if ($env:LOGVERDICT_TEST_DPI_SCALE) {
+                $parsedScale = 0.0
+                if ([double]::TryParse($env:LOGVERDICT_TEST_DPI_SCALE,
+                        [Globalization.NumberStyles]::Float,
+                        [Globalization.CultureInfo]::InvariantCulture,
+                        [ref]$parsedScale) -and $parsedScale -gt 0) {
+                    $scale = $parsedScale
+                }
+            }
+
+            # The default window is deliberately sized in device-independent units.
+            # Check its real footprint before layout so 125% scaling stays inside a
+            # 1920x1080 work area instead of hiding the status bar behind the taskbar.
+            ([double]$xml.Window.Width * $scale) | Should -BeLessOrEqual 1920
+            ([double]$xml.Window.Height * $scale) | Should -BeLessOrEqual 1080
+
+            $window = [Windows.Markup.XamlReader]::Parse($xaml)
+            $snapshot = Get-LVGuiThemeSnapshot -Window $window
+            Sync-LVGuiTheme -Window $window -Snapshot $snapshot -HighContrast (Test-LVGuiHighContrast) | Out-Null
+            $window.Measure([System.Windows.Size]::new(1340, 760))
+            $window.Arrange((New-Object System.Windows.Rect(0, 0, 1340, 760)))
+            $window.UpdateLayout()
+
+            foreach ($name in @('TxtOverviewDays', 'TxtOverviewChannels', 'TxtSearch', 'BtnOverviewScan', 'LvFindings')) {
+                $element = $window.FindName($name)
+                $element | Should -Not -BeNullOrEmpty -Because "$name must remain present at the scaled layout"
+                $element.Focusable | Should -BeTrue -Because "$name must be reachable by keyboard focus"
+                [System.Windows.Input.KeyboardNavigation]::GetTabIndex($element) | Should -BeGreaterOrEqual 0
+            }
+
+            $long = 'The scan did not finish. ' + ('diagnostic detail ' * 400)
+            $window.FindName('TxtEmptyTitle').Text = 'The scan did not finish'
+            $window.FindName('TxtEmptyBody').Text = $long
+            $window.FindName('TxtSample').Text = $long
+            $window.FindName('PnlEmpty').Visibility = 'Visible'
+            $window.UpdateLayout()
+            $window.FindName('TxtEmptyBody').TextWrapping | Should -Be ([System.Windows.TextWrapping]::Wrap)
+            $window.FindName('TxtSample').TextWrapping | Should -Be ([System.Windows.TextWrapping]::Wrap)
+            $window.FindName('TxtEmptyBody').Text.Length | Should -Be $long.Length
+            $window.FindName('TxtSample').Text.Length | Should -Be $long.Length
+            $window.Close()
         }
     }
 

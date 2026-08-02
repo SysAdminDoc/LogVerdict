@@ -42,6 +42,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   standard exports; added German and Japanese non-English fixtures.
 - Virtualized and recycled GUI findings lists and resolved selected detail by index so large
   captures do not retain a second full finding object graph for every row.
+- Added an STA GUI smoke runner covering UI Automation names, keyboard targets, normal and
+  high-contrast resources, long/error text, and 125% layout bounds without changing display
+  or accessibility settings.
 - Added the versioned `Export-LogVerdictStandard` command with ECS, OCSF, OpenTelemetry Logs,
   and STIX 2.1 JSON adapters. All projections preserve normalized findings, source/provider/
   event fields, confidence, references, timestamps, coverage, health context, and explicit
