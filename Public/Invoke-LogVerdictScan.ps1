@@ -54,6 +54,13 @@ function Invoke-LogVerdictScan {
         Override the local draft-rule destination. The default is Data\verdicts.local.json
         from source and verdicts.local.json beside a compiled executable.
 
+        .PARAMETER HistoryPath
+        Opt-in local JSON history for bounded per-signature trend analysis. History is
+        never read for offline evidence scans and never changes a curated verdict.
+
+        .PARAMETER HistoryWindowDays
+        Number of days of prior local history eligible for comparison. Default 30.
+
         .EXAMPLE
         Invoke-LogVerdictScan -DaysBack 7
 
@@ -78,7 +85,9 @@ function Invoke-LogVerdictScan {
         [string]$OllamaModel = 'llama3.2',
         [string]$OllamaEndpoint = 'http://127.0.0.1:11434',
         [switch]$PromoteToRule,
-        [string]$LocalRulePath
+        [string]$LocalRulePath,
+        [string]$HistoryPath,
+        [ValidateRange(1, 3650)][int]$HistoryWindowDays = 30
     )
 
     if ($EvidencePath) {
@@ -246,6 +255,19 @@ function Invoke-LogVerdictScan {
         }
     }
 
+    # Local history is deliberately updated after curated resolution, benign
+    # suppression, and optional model annotation. It reports change around the
+    # current result; it is never an input to verdicts, correlations, or exit codes.
+    $history = Update-LVScanHistory -Path $HistoryPath -Finding @($findings) -ScanTime $started `
+        -DaysBack $DaysBack -RecordCount $all.Count -SignatureCount $signatures.Count -WindowDays $HistoryWindowDays
+    if ($history.Status -eq 'unreadable') {
+        Write-LVLog -Level warn -Message 'Local history was unreadable and was not overwritten; trend status is advisory only.'
+    } elseif ($history.Persistence -eq 'write-failed') {
+        Write-LVLog -Level warn -Message 'Local history could not be saved; scan findings and verdicts are unchanged.'
+    } elseif (@($history.Signals).Count -gt 0) {
+        Write-LVLog -Level info -Message ('{0} advisory local trend signal(s); no verdict was escalated.' -f @($history.Signals).Count)
+    }
+
     # Coverage honesty: an in-place upgrade or a cleared log resets a channel, which
     # makes a scan look clean for the wrong reason. Say so rather than imply health.
     $horizon = @{}
@@ -390,6 +412,7 @@ function Invoke-LogVerdictScan {
         ModelExplanationsEnabled = $modelRequested
         ModelExplanationCount = @($findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation }).Count
         PromotedDraftRules = @($promotedDrafts)
+        History        = $history
         WorstVerdict   = $worst
         ExitCode       = $exitCode
     }

@@ -92,6 +92,20 @@ function Write-LVConsoleReport {
     }
     if (@($Result.CoverageNotes).Count -gt 0) { Write-Host '' }
 
+    if ($Result.PSObject.Properties['History'] -and $Result.History) {
+        $history = $Result.History
+        Write-Host '  BASELINE (ADVISORY ONLY)' -ForegroundColor Cyan
+        Write-Host ('    Status        : {0}; persistence {1}' -f $history.Status, $history.Persistence) -ForegroundColor DarkGray
+        Write-Host ('    Baseline      : {0} prior scan(s), window {1} day(s)' -f $history.Baseline.SampleCount, $history.WindowDays) -ForegroundColor DarkGray
+        Write-Host ('    Threshold     : {0}' -f $history.Threshold.Description) -ForegroundColor DarkGray
+        foreach ($signal in @($history.Signals | Where-Object { $_ })) {
+            Write-Host ('    Signal        : [{0}] {1} - {2}' -f $signal.Type, $signal.Key, $signal.Reason) -ForegroundColor Yellow
+        }
+        Write-Host ('    Caveat        : {0}' -f $history.FalsePositiveCaveat) -ForegroundColor DarkGray
+        Write-Host '    Trend signals never change curated verdicts, WorstVerdict, or ExitCode.' -ForegroundColor DarkGray
+        Write-Host ''
+    }
+
     $tally = $Result.Findings | Group-Object -Property Verdict
     foreach ($name in @('critical', 'actionable', 'investigate', 'unknown', 'informational', 'benign')) {
         $g = $tally | Where-Object { $_.Name -eq $name }
@@ -374,6 +388,20 @@ function ConvertTo-LVTextReport {
     Add-LVLine $sb ('Worst verdict : {0}' -f $Result.WorstVerdict)
     Add-LVLine $sb
 
+    if ($Result.PSObject.Properties['History'] -and $Result.History) {
+        $history = $Result.History
+        Add-LVLine $sb 'BASELINE (ADVISORY ONLY)'
+        Add-LVLine $sb ('Status        : {0}; persistence {1}' -f $history.Status, $history.Persistence)
+        Add-LVLine $sb ('Baseline      : {0} prior scan(s), window {1} day(s); {2}' -f $history.Baseline.SampleCount, $history.WindowDays, $history.Baseline.Method)
+        Add-LVLine $sb ('Threshold     : {0}' -f $history.Threshold.Description)
+        foreach ($signal in @($history.Signals | Where-Object { $_ })) {
+            Add-LVLine $sb ('Signal        : [{0}] {1} - {2}' -f $signal.Type, $signal.Key, $signal.Reason)
+        }
+        Add-LVLine $sb ('Caveat        : {0}' -f $history.FalsePositiveCaveat)
+        Add-LVLine $sb 'Trend signals never change curated verdicts, WorstVerdict, or ExitCode.'
+        Add-LVLine $sb
+    }
+
     if (@($Result.CoverageNotes).Count -gt 0) {
         Add-LVLine $sb 'COVERAGE - what this scan could NOT see:'
         foreach ($note in @($Result.CoverageNotes)) {
@@ -646,6 +674,20 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             Add-LVLine $sb ('<li>{0}</li>' -f (ConvertTo-LVHtmlEncoded $note))
         }
         Add-LVLine $sb '</ul></div>'
+    }
+    if ($Result.PSObject.Properties['History'] -and $Result.History) {
+        $history = $Result.History
+        Add-LVLine $sb '<div class="warn"><strong>BASELINE (ADVISORY ONLY).</strong>'
+        Add-LVLine $sb ('<div>Status: {0}; persistence: {1}; {2} prior scan(s) in a {3}-day window.</div>' -f `
+            (ConvertTo-LVHtmlEncoded $history.Status), (ConvertTo-LVHtmlEncoded $history.Persistence),
+            $history.Baseline.SampleCount, $history.WindowDays)
+        Add-LVLine $sb ('<div>Threshold: {0}</div>' -f (ConvertTo-LVHtmlEncoded $history.Threshold.Description))
+        foreach ($signal in @($history.Signals | Where-Object { $_ })) {
+            Add-LVLine $sb ('<div>Signal [{0}] {1}: {2}</div>' -f (ConvertTo-LVHtmlEncoded $signal.Type),
+                (ConvertTo-LVHtmlEncoded $signal.Key), (ConvertTo-LVHtmlEncoded $signal.Reason))
+        }
+        Add-LVLine $sb ('<div>{0}</div><div>Trend signals never change curated verdicts, WorstVerdict, or ExitCode.</div></div>' -f `
+            (ConvertTo-LVHtmlEncoded $history.FalsePositiveCaveat))
     }
     if (@($Result.Coverage).Count -gt 0) {
         Add-LVLine $sb '<h2>Coverage detail</h2><div class="sub">Every source is classified separately: empty means observed with no matching event; other statuses describe evidence that was not observed or could not be read.</div>'

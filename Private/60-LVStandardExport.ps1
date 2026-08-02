@@ -143,6 +143,42 @@ function ConvertTo-LVStandardFinding {
     }
 }
 
+function ConvertTo-LVStandardHistory {
+    param([AllowNull()]$History)
+
+    if ($null -eq $History) { return $null }
+    return [pscustomobject][ordered]@{
+        enabled             = if ($History.PSObject.Properties['Enabled']) { [bool]$History.Enabled } else { $false }
+        status              = $History.Status
+        persistence         = $History.Persistence
+        entriesStored       = $History.EntriesStored
+        advisoryOnly        = [bool]$History.AdvisoryOnly
+        windowDays          = $History.WindowDays
+        baseline            = [pscustomobject][ordered]@{
+            method      = $History.Baseline.Method
+            sampleCount = $History.Baseline.SampleCount
+            scanTimes   = @($History.Baseline.ScanTimes)
+        }
+        threshold           = [pscustomobject][ordered]@{
+            relativeIncrease = $History.Threshold.RelativeIncrease
+            absolutePerDay   = $History.Threshold.AbsolutePerDay
+            description      = $History.Threshold.Description
+        }
+        signals             = @($History.Signals | Where-Object { $_ } | ForEach-Object {
+            [pscustomobject][ordered]@{
+                type          = $_.Type
+                key           = $_.Key
+                beforeRate    = $_.BeforeRate
+                afterRate     = $_.AfterRate
+                beforeVerdict = $_.BeforeVerdict
+                afterVerdict  = $_.AfterVerdict
+                reason        = $_.Reason
+            }
+        })
+        falsePositiveCaveat = $History.FalsePositiveCaveat
+    }
+}
+
 function Get-LVStandardContext {
     param([Parameter(Mandatory)]$Result)
 
@@ -175,6 +211,7 @@ function Get-LVStandardContext {
         }
         coverage = @(ConvertTo-LVStandardCoverage -Coverage @($Result.Coverage))
         healthProfiles = @(ConvertTo-LVStandardHealth -HealthProfiles @($Result.HealthProfiles))
+        history = ConvertTo-LVStandardHistory -History $(if ($Result.PSObject.Properties['History']) { $Result.History } else { $null })
     }
 }
 

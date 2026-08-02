@@ -39,6 +39,13 @@
     .PARAMETER LocalRulePath
     Override the local draft-rule destination.
 
+    .PARAMETER HistoryPath
+    Opt-in local JSON history for bounded per-signature trend analysis. It never changes
+    a curated verdict and is not written during offline evidence analysis.
+
+    .PARAMETER HistoryWindowDays
+    Number of days of prior local history eligible for comparison. Default 30.
+
     .PARAMETER NoReport
     Console only; write nothing to disk.
 
@@ -83,6 +90,8 @@ param(
     [string]$OllamaEndpoint = 'http://127.0.0.1:11434',
     [switch]$PromoteToRule,
     [string]$LocalRulePath,
+    [string]$HistoryPath,
+    [ValidateRange(1, 3650)][int]$HistoryWindowDays = 30,
     [switch]$Pause,
     [switch]$NoPause
 )
@@ -136,6 +145,8 @@ try {
         OllamaEndpoint  = $OllamaEndpoint
         PromoteToRule   = $PromoteToRule
         LocalRulePath   = $LocalRulePath
+        HistoryPath     = $HistoryPath
+        HistoryWindowDays = $HistoryWindowDays
     }
     if (-not $EvidencePath -or $PSBoundParameters.ContainsKey('DaysBack')) { $scanArgs['DaysBack'] = $DaysBack }
     if ($EvidencePath) { $scanArgs['EvidencePath'] = $EvidencePath }

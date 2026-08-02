@@ -28,6 +28,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   channel retention and clock context, PowerShell logging, advanced audit policy, Defender,
   Sysmon filtering, and WEF subscription state. Health context is available in JSON, text,
   HTML, CSV, GUI coverage, and bundle manifests and is never promoted to a malicious verdict.
+- Added opt-in, bounded local scan history with median-rate trend signals. Reports state the
+  baseline, comparison window, thresholds, missing-history state, and false-positive caveat;
+  history is advisory only and can never escalate a curated verdict or exit code.
 - Added the versioned `Export-LogVerdictStandard` command with ECS, OCSF, OpenTelemetry Logs,
   and STIX 2.1 JSON adapters. All projections preserve normalized findings, source/provider/
   event fields, confidence, references, timestamps, coverage, health context, and explicit

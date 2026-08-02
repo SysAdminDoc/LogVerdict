@@ -97,6 +97,93 @@ Describe 'Scan comparison' {
     }
 }
 
+Describe 'Local baseline history' {
+    It 'creates bounded local state without raw event content' {
+        $path = Join-Path $TestDrive 'history.json'
+        $finding = [pscustomobject]@{
+            Key='Acme/1'; Verdict='unknown'; Count=1; PerDay=0.5; RuleId=$null
+            SampleMessage='password=super-secret'; MachineName='SECRET-PC'
+        }
+        $history = InModuleScope LogVerdict -Parameters @{ p = $path; f = $finding } {
+            param($p, $f)
+            Update-LVScanHistory -Path $p -Finding @($f) -ScanTime ([datetime]'2026-08-01 10:00:00') `
+                -DaysBack 2 -RecordCount 12 -SignatureCount 1 -WindowDays 30
+        }
+
+        $history.Status | Should -BeExactly 'missing-history'
+        $history.Persistence | Should -BeExactly 'created'
+        $history.AdvisoryOnly | Should -BeTrue
+        Test-Path -LiteralPath $path | Should -BeTrue
+        $raw = Get-Content -LiteralPath $path -Raw
+        $raw | Should -Not -Match 'super-secret|SECRET-PC|SampleMessage|MachineName'
+        @((ConvertFrom-Json $raw).entries).Count | Should -Be 1
+    }
+
+    It 'signals a rate increase while preserving the finding verdict' {
+        $path = Join-Path $TestDrive 'rate-history.json'
+        $first = [pscustomobject]@{ Key='Acme/2'; Verdict='unknown'; Count=1; PerDay=0.5; RuleId=$null }
+        $second = [pscustomobject]@{ Key='Acme/2'; Verdict='unknown'; Count=4; PerDay=2.0; RuleId=$null }
+        InModuleScope LogVerdict -Parameters @{ p = $path; f = $first } {
+            param($p, $f)
+            Update-LVScanHistory -Path $p -Finding @($f) -ScanTime ([datetime]'2026-08-01 10:00:00') `
+                -DaysBack 1 -RecordCount 1 -SignatureCount 1 -WindowDays 30 | Out-Null
+        }
+        $history = InModuleScope LogVerdict -Parameters @{ p = $path; f = $second } {
+            param($p, $f)
+            Update-LVScanHistory -Path $p -Finding @($f) -ScanTime ([datetime]'2026-08-02 10:00:00') `
+                -DaysBack 1 -RecordCount 4 -SignatureCount 1 -WindowDays 30
+        }
+
+        $history.Status | Should -BeExactly 'signals'
+        @($history.Signals | Where-Object Type -eq 'rate-increase').Count | Should -Be 1
+        $history.Signals[0].Reason | Should -Match 'baseline|threshold'
+        $history.FalsePositiveCaveat | Should -Match 'Advisory only|never changes'
+        $second.Verdict | Should -BeExactly 'unknown'
+        $history.AdvisoryOnly | Should -BeTrue
+    }
+
+    It 'keeps at most thirty entries' {
+        $path = Join-Path $TestDrive 'bounded-history.json'
+        InModuleScope LogVerdict -Parameters @{ p = $path } {
+            param($p)
+            for ($index = 0; $index -lt 40; $index++) {
+                $finding = [pscustomobject]@{ Key=('Acme/{0}' -f $index); Verdict='unknown'; Count=1; PerDay=0.1; RuleId=$null }
+                Update-LVScanHistory -Path $p -Finding @($finding) -ScanTime ([datetime]'2026-07-01 10:00:00').AddDays($index) `
+                    -DaysBack 1 -RecordCount 1 -SignatureCount 1 -WindowDays 30 | Out-Null
+            }
+        }
+
+        @((Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).entries).Count | Should -Be 30
+    }
+
+    It 'does not overwrite malformed history' {
+        $path = Join-Path $TestDrive 'malformed-history.json'
+        $original = '{ not-json'
+        Set-Content -LiteralPath $path -Value $original -Encoding UTF8
+        $history = InModuleScope LogVerdict -Parameters @{ p = $path } {
+            param($p)
+            $finding = [pscustomobject]@{ Key='Acme/3'; Verdict='unknown'; Count=1; PerDay=0.1; RuleId=$null }
+            Update-LVScanHistory -Path $p -Finding @($finding) -ScanTime ([datetime]'2026-08-02 10:00:00') `
+                -DaysBack 1 -RecordCount 1 -SignatureCount 1 -WindowDays 30
+        }
+
+        $history.Status | Should -BeExactly 'unreadable'
+        $history.Persistence | Should -BeExactly 'not-written'
+        (Get-Content -LiteralPath $path -Raw).Trim() | Should -BeExactly $original
+    }
+
+    It 'reports disabled state when no history path is supplied' {
+        InModuleScope LogVerdict {
+            $finding = [pscustomobject]@{ Key='Acme/4'; Verdict='unknown'; Count=1; PerDay=0.1; RuleId=$null }
+            $history = Update-LVScanHistory -Path $null -Finding @($finding) -ScanTime (Get-Date) `
+                -DaysBack 1 -RecordCount 1 -SignatureCount 1
+            $history.Status | Should -BeExactly 'disabled'
+            $history.Enabled | Should -BeFalse
+            $history.AdvisoryOnly | Should -BeTrue
+        }
+    }
+}
+
 Describe 'Entry script launch behaviour' {
     It 'never blocks for input when output is redirected' {
         # The interactive pause exists so a double-clicked .exe does not vanish before
@@ -149,6 +236,17 @@ Describe 'Entry script launch behaviour' {
         $text = Get-Content -LiteralPath $entry -Raw
         $text | Should -Match '\[switch\]\$DiagnosticChannels'
         $text | Should -Match 'DiagnosticChannels\s*=\s*\$DiagnosticChannels'
+    }
+
+    It 'exposes and forwards opt-in history settings' {
+        $entry = Join-Path (Split-Path $PSScriptRoot -Parent) 'Invoke-LogVerdict.ps1'
+        $text = Get-Content -LiteralPath $entry -Raw
+        $text | Should -Match '\[string\]\$HistoryPath'
+        $text | Should -Match 'HistoryPath\s*=\s*\$HistoryPath'
+        $text | Should -Match '\[ValidateRange\(1, 3650\)\]\[int\]\$HistoryWindowDays'
+        $scan = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $scan | Should -Match 'HistoryWindowDays\s*=\s*30'
+        $scan | Should -Match 'Update-LVScanHistory'
     }
 
     It 'bounds the public scan window consistently' {
@@ -2090,6 +2188,26 @@ Describe 'Report rendering' {
             $text | Should -Match 'Template pass : 68 masked \(27\.3:1\) -> 71 after low-cardinality promotion'
             $text | Should -Match 'Occurrences : 12 \(0\.4/day\)'
             $text | Should -Match 'Rule        : T-1 \(confidence: high\)'
+        }
+    }
+
+    It 'renders the advisory baseline and caveat in text and HTML reports' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $result | Add-Member -NotePropertyName History -NotePropertyValue ([pscustomobject]@{
+                Enabled=$true; Status='signals'; Persistence='saved'; EntriesStored=2; AdvisoryOnly=$true; WindowDays=30
+                Baseline=[pscustomobject]@{ Method='Median per-day rate across prior bounded scans'; SampleCount=1; ScanTimes=@('2026-08-01T10:00:00Z') }
+                Threshold=[pscustomobject]@{ RelativeIncrease=0.25; AbsolutePerDay=0.1; Description='Signal when the current rate is at least 25% above baseline and at least 0.10/day higher.' }
+                Signals=@([pscustomobject]@{ Type='rate-increase'; Key='Acme/99'; Reason='Rate rose from a 0.50/day median baseline to 2.00/day in the current window.' })
+                FalsePositiveCaveat='Advisory only; retention and missing history can create apparent changes.'
+            })
+            $text = ConvertTo-LVTextReport -Result $result
+            $html = ConvertTo-LVHtmlReport -Result $result
+            $text | Should -Match 'BASELINE \(ADVISORY ONLY\)'
+            $text | Should -Match 'missing history can create apparent changes'
+            $html | Should -Match 'BASELINE \(ADVISORY ONLY\)'
+            $html | Should -Match 'curated verdicts'
         }
     }
 
