@@ -116,6 +116,20 @@ It is **unsigned by design** - this project does not code-sign. SmartScreen will
 
 Drop a `verdicts.local.json` beside either .exe to add your own rules; they are merged automatically and win ties against the compiled-in ones. A full `Data\verdicts.json` beside the .exe replaces the compiled-in database entirely.
 
+Rule updates are opt-in. `Update-LogVerdictDatabase` fetches `verdicts.json` from a
+published GitHub release, verifies the release SHA-256 digest, validates the schema,
+and installs it as the local override without changing the shipped database. The
+previous override is retained as `verdicts.local.json.previous.json`; restore it with
+`Update-LogVerdictDatabase -Rollback`. A normal scan, module import, or executable
+launch never contacts the network.
+
+```powershell
+Import-Module .\LogVerdict.psd1
+Update-LogVerdictDatabase                 # latest stable release
+Update-LogVerdictDatabase -ReleaseTag v0.8.0
+Update-LogVerdictDatabase -Rollback       # restore the previous local copy
+```
+
 Build them yourself:
 
 ```powershell

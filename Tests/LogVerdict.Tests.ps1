@@ -16,7 +16,8 @@ Describe 'Module surface' {
             'Invoke-LogVerdictScan',
             'Show-LogVerdictGui',
             'Show-LogVerdictReport',
-            'Test-LogVerdictDatabase'
+            'Test-LogVerdictDatabase',
+            'Update-LogVerdictDatabase'
         )
     }
 
@@ -307,6 +308,64 @@ Describe 'Bundled Microsoft error catalog' {
         $loader + $resolver | Should -Not -Match 'Invoke-(WebRequest|RestMethod)'
         $catalogPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data/error-codes.json'
         ([IO.File]::ReadAllBytes($catalogPath) | Where-Object { $_ -gt 127 }).Count | Should -Be 0
+    }
+}
+
+Describe 'Opt-in verdict database updates' {
+    It 'hash-verifies and installs a staged database while retaining a rollback copy' {
+        $source = Join-Path $TestDrive 'release-verdicts.json'
+        $target = Join-Path $TestDrive 'Data/verdicts.local.json'
+        $sourceDir = Split-Path -Parent $source
+        New-Item -ItemType Directory -Path $sourceDir -Force | Out-Null
+        $db = Get-LogVerdictDatabase
+        $db.updated = '2026-08-02'
+        ($db | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $source -Encoding UTF8
+        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+
+        $result = Update-LogVerdictDatabase -SourcePath $source -ExpectedSha256 $hash -TargetPath $target
+        $result.Action | Should -BeExactly 'update'
+        $result.RuleCount | Should -BeGreaterThan 150
+        (Get-Content -LiteralPath $target -Raw | ConvertFrom-Json).updated | Should -BeExactly '2026-08-02'
+        Test-Path -LiteralPath ($target + '.previous.json') | Should -BeFalse
+    }
+
+    It 'keeps the installed copy and restores the previous version on rollback' {
+        $source = Join-Path $TestDrive 'release-verdicts-2.json'
+        $target = Join-Path $TestDrive 'rollback/verdicts.local.json'
+        New-Item -ItemType Directory -Path (Split-Path -Parent $source) -Force | Out-Null
+        $db = Get-LogVerdictDatabase
+        $db.updated = '2026-08-03'
+        ($db | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $source -Encoding UTF8
+        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        Update-LogVerdictDatabase -SourcePath $source -ExpectedSha256 $hash -TargetPath $target | Out-Null
+
+        $db.updated = '2026-08-04'
+        ($db | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $source -Encoding UTF8
+        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        Update-LogVerdictDatabase -SourcePath $source -ExpectedSha256 $hash -TargetPath $target | Out-Null
+        (Get-Content -LiteralPath ($target + '.previous.json') -Raw | ConvertFrom-Json).updated | Should -BeExactly '2026-08-03'
+
+        $rollback = Update-LogVerdictDatabase -TargetPath $target -Rollback
+        $rollback.Action | Should -BeExactly 'rollback'
+        (Get-Content -LiteralPath $target -Raw | ConvertFrom-Json).updated | Should -BeExactly '2026-08-03'
+    }
+
+    It 'refuses an incorrect digest before touching the target' {
+        $source = Join-Path $TestDrive 'bad-verdicts.json'
+        $target = Join-Path $TestDrive 'bad-target/verdicts.local.json'
+        $db = Get-LogVerdictDatabase
+        ($db | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $source -Encoding UTF8
+        { Update-LogVerdictDatabase -SourcePath $source -ExpectedSha256 ('0' * 64) -TargetPath $target } |
+            Should -Throw -ExpectedMessage '*SHA-256 mismatch*'
+        Test-Path -LiteralPath $target | Should -BeFalse
+    }
+
+    It 'does not contact the network during a normal module import or scan' {
+        $source = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Update-LogVerdictDatabase.ps1'
+        (Get-Content -LiteralPath $source -Raw) | Should -Match 'Invoke-RestMethod'
+        (Get-Content -LiteralPath $source -Raw) | Should -Match 'Invoke-WebRequest'
+        (Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Private/30-LVResolve.ps1') -Raw) |
+            Should -Not -Match 'Invoke-(RestMethod|WebRequest)'
     }
 }
 

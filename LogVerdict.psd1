@@ -13,6 +13,7 @@
         'Invoke-LogVerdictScan',
         'Get-LogVerdictDatabase',
         'Get-LogVerdictErrorCatalog',
+        'Update-LogVerdictDatabase',
         'Test-LogVerdictDatabase',
         'Export-LogVerdictReport',
         'Show-LogVerdictReport',
