@@ -20,7 +20,8 @@ function Get-LogVerdictDatabase {
     [CmdletBinding()]
     param(
         [string]$Path,
-        [string[]]$AdditionalPath
+        [string[]]$AdditionalPath,
+        [switch]$SkipValidation
     )
 
     $basePath = $Path
@@ -91,11 +92,13 @@ function Get-LogVerdictDatabase {
     }
     foreach ($c in @($db.correlations | Where-Object { $_ })) { $correlations.Add($c) | Out-Null }
 
-    return [pscustomobject]@{
+    $result = [pscustomobject]@{
         schemaVersion = $db.schemaVersion
         name          = $db.name
         updated       = $db.updated
         rules         = @($rules.ToArray())
         correlations  = @($correlations.ToArray())
     }
+    if (-not $SkipValidation) { Assert-LVDatabaseTrust -Database $result -Path $sourceLabel }
+    return $result
 }

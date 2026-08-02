@@ -267,6 +267,12 @@ Put site-specific rules in `Data/verdicts.local.json` - it is merged automatical
 Test-LogVerdictDatabase
 ```
 
+Active rules and correlations must carry a reference, source record, or explicit
+`provenance: "internal-observation"`. Database loading also rejects duplicate IDs, missing or
+inactive correlation references, unsupported correlation fields, unreadable timespans, and
+correlation types the resolver does not implement; malformed local additions fail before a scan
+can produce a verdict.
+
 Every shipped rule also carries a regression fixture in [`Data/fixtures.json`](Data/fixtures.json): a minimal signature the rule must still claim, resolved through the real resolver. A rule that quietly stops matching is otherwise invisible - it produces no error, just an `unknown` signature that looks like a gap in coverage rather than a broken rule. The fixtures also catch the opposite mistake, a new rule that is broader than it looks and shadows an existing one, and the failure names which rule stole the match. Local databases need no fixtures; the checks are skipped when there is no fixture file.
 
 The Microsoft support corpus has a guarded import path. `Tools\Import-MsDocsEvent.ps1` reads a local `MicrosoftDocs/SupportArticles-docs` checkout, verifies its CC-BY-4.0 licence, discovers event-ID articles, and turns only reviewed, paraphrased prose into attributed rule objects. It refuses copied prose and never edits the database on discovery alone.

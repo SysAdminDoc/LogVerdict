@@ -2480,17 +2480,28 @@ Describe 'Rule provenance' {
         }
     }
 
-    It 'reports an unsourced rule as a warning, not as invalid' {
-        # A documentation gap must not fail the same check as a broken regex, or the
-        # shipped database refuses to load over missing citations.
+    It 'rejects an active rule without provenance' {
+        # A live ruling must be checkable by a reader. Internal observations are valid
+        # when they are declared explicitly; an omitted citation is not.
         $bare = Join-Path $TestDrive 'bare.json'
         '{ "schemaVersion": 3, "name": "bare", "updated": "2026-07-31", "rules": [ { "id":"B-1","status":"stable","verified":"2026-07-31","match":{"source":"event"},"verdict":"benign","title":"t","plain":"p","why":"w","action":"a","confidence":"high" } ] }' |
             Set-Content -LiteralPath $bare -Encoding UTF8
 
-        Test-LogVerdictDatabase -Path $bare -Quiet | Should -BeTrue
-        @(Test-LogVerdictDatabase -Path $bare).Count | Should -Be 0
+        Test-LogVerdictDatabase -Path $bare -Quiet | Should -BeFalse
+        @(Test-LogVerdictDatabase -Path $bare).Count | Should -Be 1
         $all = @(Test-LogVerdictDatabase -Path $bare -IncludeWarnings)
-        @($all | Where-Object { $_.Severity -eq 'warning' }).Count | Should -Be 1
+        @($all | Where-Object { $_.Problem -like '*active rule requires*' }).Count | Should -Be 1
+
+        $observed = [pscustomobject]@{
+            schemaVersion = 5; name = 'observed'; updated = '2026-07-31'
+            rules = @([pscustomobject]@{
+                id='B-1'; status='stable'; verified='2026-07-31'; provenance='internal-observation'
+                match=[pscustomobject]@{ source='event' }; verdict='benign'; title='t'; plain='p'; why='w'; action='a'; confidence='high'
+            })
+        }
+        $observedPath = Join-Path $TestDrive 'observed.json'
+        $observed | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $observedPath -Encoding UTF8
+        Test-LogVerdictDatabase -Path $observedPath -Quiet | Should -BeTrue
     }
 
     It 'does not invent a phantom source for a rule that has none' {
@@ -3127,6 +3138,47 @@ Describe 'Correlation' {
         }
     }
 
+    It 'rejects correlation fields and references the resolver cannot honor' {
+        $path = Join-Path $TestDrive 'bad-correlation.json'
+        $db = [pscustomobject]@{
+            schemaVersion = 5; name = 'bad correlation'; updated = '2026-08-01'
+            rules = @(
+                [pscustomobject]@{ id='R-1'; status='stable'; verified='2026-08-01'; provenance='internal-observation'; match=[pscustomobject]@{ source='event' }; verdict='investigate'; title='r1'; plain='p'; why='w'; action='a'; confidence='high' }
+                [pscustomobject]@{ id='R-2'; status='stable'; verified='2026-08-01'; provenance='internal-observation'; match=[pscustomobject]@{ source='event' }; verdict='investigate'; title='r2'; plain='p'; why='w'; action='a'; confidence='high' }
+            )
+            correlations = @([pscustomobject]@{
+                id='C-BAD'; status='stable'; verified='2026-08-01'
+                correlation=[pscustomobject]@{ type='temporal'; rules=@('R-1','MISSING'); timespan='5m'; 'group-by'=@('ProcessGuid') }
+                verdict='actionable'; title='bad'; plain='p'; why='w'; action='a'; confidence='medium'
+            })
+        }
+        $db | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding UTF8
+        Test-LogVerdictDatabase -Path $path -SkipFixture -Quiet | Should -BeFalse
+        { Get-LogVerdictDatabase -Path $path } | Should -Throw '*failed trust validation*'
+        $problems = @(Test-LogVerdictDatabase -Path $path -SkipFixture)
+        @($problems | Where-Object Problem -like '*active correlation requires*').Count | Should -Be 1
+        @($problems | Where-Object Problem -like '*missing rule*').Count | Should -Be 1
+        @($problems | Where-Object Problem -like '*group-by*').Count | Should -Be 1
+    }
+
+    It 'rejects event-count correlations until their semantics are implemented' {
+        $path = Join-Path $TestDrive 'event-count.json'
+        $db = [pscustomobject]@{
+            schemaVersion = 5; name = 'event count'; updated = '2026-08-01'
+            rules = @(
+                [pscustomobject]@{ id='R-1'; status='stable'; verified='2026-08-01'; provenance='internal-observation'; match=[pscustomobject]@{ source='event' }; verdict='investigate'; title='r1'; plain='p'; why='w'; action='a'; confidence='high' }
+                [pscustomobject]@{ id='R-2'; status='stable'; verified='2026-08-01'; provenance='internal-observation'; match=[pscustomobject]@{ source='event' }; verdict='investigate'; title='r2'; plain='p'; why='w'; action='a'; confidence='high' }
+            )
+            correlations = @([pscustomobject]@{
+                id='C-COUNT'; status='stable'; verified='2026-08-01'; provenance='internal-observation'
+                correlation=[pscustomobject]@{ type='event_count'; rules=@('R-1','R-2'); timespan='5m' }
+                verdict='actionable'; title='count'; plain='p'; why='w'; action='a'; confidence='medium'
+            })
+        }
+        $db | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding UTF8
+        { Get-LogVerdictDatabase -Path $path } | Should -Throw '*event_count*not implemented*'
+    }
+
     It 'correlates before benign suppression, so a benign signature still counts as evidence' {
         # A benign signature is perfectly good evidence of WHEN something happened.
         # Dropping it first would silently stop any pairing involving one from firing,
@@ -3692,6 +3744,7 @@ Describe 'Rule regression fixtures' {
             schemaVersion = 3; name = 'solo'; updated = '2026-07-31'
             rules = @(@{
                 id = 'X-1'; status = 'stable'; verified = '2026-07-31'
+                provenance = 'internal-observation'
                 match = @{ source = 'event'; provider = 'P'; eventId = 1 }
                 verdict = 'benign'; title = 't'; plain = 'p'; why = 'w'; action = 'a'; confidence = 'low'
             })

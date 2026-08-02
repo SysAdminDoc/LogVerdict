@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Bound all scan entry points to a 1-3650 day look-back window, and made named channels
   take precedence over broad channel switches while rejecting contradictory broad modes.
+- Added fail-closed trust validation for active rule and correlation provenance, correlation
+  references, supported fields, timespans, and implemented correlation types at database load.
 
 ## [0.8.0] - 2026-08-01
 

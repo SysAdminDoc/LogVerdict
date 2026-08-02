@@ -104,6 +104,10 @@
               "modified": { "type": "boolean" }
             }
           }
+        },
+        "provenance": {
+          "enum": ["internal-observation"],
+          "description": "Explicit provenance for a curated correlation derived from repeatable in-repository observation rather than a published source."
         }
       }
     },
@@ -306,6 +310,10 @@
               }
             }
           }
+        },
+        "provenance": {
+          "enum": ["internal-observation"],
+          "description": "Explicit provenance for a curated rule derived from repeatable in-repository observation rather than a published source."
         }
       }
     },

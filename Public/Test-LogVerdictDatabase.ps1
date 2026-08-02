@@ -6,17 +6,18 @@ function Test-LogVerdictDatabase {
         .DESCRIPTION
         Checks that every rule has the fields the reporter renders, that ids are
         unique, that verdicts use the known vocabulary, and that every regex in a
-        messagePattern actually compiles. A malformed rule that only fails at scan
-        time would fail in front of whoever is troubleshooting a broken machine.
+        messagePattern actually compiles. Correlations are also checked against the
+        resolver's supported vocabulary and live rule ids. A malformed rule that only
+        fails at scan time would fail in front of whoever is troubleshooting a broken
+        machine.
 
         .PARAMETER Quiet
         Return $true/$false instead of the problem list.
 
         .PARAMETER IncludeWarnings
-        Also return quality warnings - a rule with no source, for instance. Warnings are
-        excluded by default because they describe a database that could be better, not
-        one that is malformed, and mixing the two would mean a documentation gap failed
-        the same check as a broken regex.
+        Also return quality warnings, such as a rule without a regression fixture. Warnings
+        are excluded by default because they describe a database that could be better, not
+        one that is malformed.
 
         .PARAMETER FixturePath
         Regression fixtures to resolve against this database. Defaults to fixtures.json
@@ -42,7 +43,7 @@ function Test-LogVerdictDatabase {
         [switch]$SkipFixture
     )
 
-    $db = Get-LogVerdictDatabase -Path $Path
+    $db = Get-LogVerdictDatabase -Path $Path -SkipValidation
     $problems = New-Object System.Collections.Generic.List[object]
     $seenIds = @{}
 
@@ -125,11 +126,10 @@ function Test-LogVerdictDatabase {
         # rule with no sources would otherwise iterate once over a phantom entry and be
         # reported as having a source with no uri.
         $ruleSources = @($rule.sources | Where-Object { $_ })
-        if ($ruleSources.Count -eq 0 -and @($rule.references | Where-Object { $_ }).Count -eq 0) {
-            # A warning, not an error. An unsourced ruling is weaker than a sourced one
-            # but it is still structurally sound and still loads; treating it as invalid
-            # would make the shipped database refuse to load over a documentation gap.
-            $problems.Add([pscustomobject]@{ RuleId = $id; Severity = 'warning'; Problem = 'no sources[] and no references; the ruling cannot be checked' }) | Out-Null
+        if ($rule.provenance -and $rule.provenance -ne 'internal-observation') {
+            $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("unknown provenance '{0}'; valid: internal-observation" -f $rule.provenance) }) | Out-Null
+        } elseif ((Test-LVRuleActive -Rule $rule) -and -not (Test-LVDatabaseProvenance -Item $rule)) {
+            $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'active rule requires references[], sources[], or provenance=internal-observation' }) | Out-Null
         }
         foreach ($source in $ruleSources) {
             if (-not $source.uri) {
@@ -165,6 +165,10 @@ function Test-LogVerdictDatabase {
         }
     }
 
+    foreach ($p in @(Get-LVDatabaseTrustProblem -Database $db -Path $Path -SkipRuleProvenance)) {
+        $problems.Add($p) | Out-Null
+    }
+
     # Structure is only half the question. A database can be perfectly well formed and
     # still have a rule that no longer matches anything it was written for, which is
     # invisible in the report - an unmatched signature reads as a coverage gap, not as
@@ -197,10 +201,6 @@ function Test-LogVerdictDatabase {
     # it cannot be trusted to load.
     if ($Quiet) { return ($errors.Count -eq 0) }
 
-    $unsourced = @($warnings | Where-Object { $_.Problem -like 'no sources*' })
-    if ($unsourced.Count -gt 0) {
-        Write-LVLog -Level warn -Message ("{0} rule(s) carry no source; their rulings cannot be checked by a reader." -f $unsourced.Count)
-    }
     $unfixtured = @($warnings | Where-Object { $_.Problem -like 'no regression fixture*' })
     if ($unfixtured.Count -gt 0) {
         Write-LVLog -Level warn -Message ("{0} rule(s) carry no regression fixture; nothing would notice if they stopped matching." -f $unfixtured.Count)

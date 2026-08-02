@@ -48,7 +48,8 @@
       "references": [],
       "falsepositives": [
         "Slow storage or heavy startup load delays a COM server past the timeout with no functional impact."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0003",
@@ -95,7 +96,8 @@
       "references": [],
       "falsepositives": [
         "A low steady trickle of corrected errors is normal on much server-class and ECC hardware."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0011",
@@ -113,7 +115,8 @@
       "action": "Treat as a hardware fault. Test memory, check CPU and board temperatures and power delivery, remove any overclock, and plan replacement of the reporting component.",
       "confidence": "high",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0012",
@@ -185,7 +188,8 @@
       "action": "Read the bug check code from the event detail. Pair it with the matching minidump under C:\\Windows\\Minidump for the faulting driver.",
       "confidence": "high",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0022",
@@ -205,7 +209,8 @@
       "references": [],
       "falsepositives": [
         "Follows any unclean shutdown including intentional ones."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0030",
@@ -223,7 +228,8 @@
       "action": "Check the drive's SMART data, verify cabling and power, and back up before further troubleshooting.",
       "confidence": "high",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0031",
@@ -244,7 +250,8 @@
       "falsepositives": [
         "External, removable, virtual and mounted-image disks produce this routinely on eject.",
         "Hyper-V and WSL virtual disks detach normally at shutdown."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0032",
@@ -262,7 +269,8 @@
       "action": "Run chkdsk on the named volume. If it recurs after a clean pass, suspect the drive rather than the file system.",
       "confidence": "high",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0033",
@@ -319,7 +327,8 @@
       "references": [],
       "falsepositives": [
         "A single occurrence around an update or install is normal service churn."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0041",
@@ -337,7 +346,8 @@
       "action": "Identify the named service and whether the feature it backs is still working.",
       "confidence": "high",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0042",
@@ -357,7 +367,8 @@
       "references": [],
       "falsepositives": [
         "Orphaned service registrations left behind by uninstalled software fail to start by design."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0043",
@@ -377,7 +388,8 @@
       "references": [],
       "falsepositives": [
         "Common and harmless on slow-booting or spinning-disk machines."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0044",
@@ -421,7 +433,8 @@
       "action": "Read the faulting module name from the event detail. Recurring crashes in the same module across different applications point at that component, not the applications.",
       "confidence": "high",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0051",
@@ -441,7 +454,8 @@
       "references": [],
       "falsepositives": [
         "A long-running modal dialog or a slow network share makes a healthy app look hung."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0052",
@@ -459,7 +473,8 @@
       "action": "Read the exception type and top stack frame from the event detail.",
       "confidence": "high",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0053",
@@ -507,7 +522,8 @@
       "references": [],
       "falsepositives": [
         "Logged whenever a trace session is already running."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0061",
@@ -527,7 +543,8 @@
       "references": [],
       "falsepositives": [
         "Diagnostics plumbing only; no user-visible component depends on it."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0062",
@@ -546,7 +563,8 @@
       "references": [],
       "falsepositives": [
         "Appears in bulk around any normal install or update."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0063",
@@ -565,7 +583,8 @@
       "references": [],
       "falsepositives": [
         "Legacy line-of-business software and older installers use VBScript legitimately."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0064",
@@ -585,7 +604,8 @@
       "references": [],
       "falsepositives": [
         "Files locked by a running program are skipped routinely on roaming or synced profiles."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0070",
@@ -605,7 +625,8 @@
       "references": [],
       "falsepositives": [
         "Clearing a log during deliberate troubleshooting is legitimate and common."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0071",
@@ -623,7 +644,8 @@
       "action": "Find the device in Device Manager. Cross-check the SetupAPI findings in this report for the matching install failure.",
       "confidence": "high",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0072",
@@ -648,7 +670,8 @@
       "references": [],
       "falsepositives": [
         "A single transient failure often succeeds on the next attempt."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0073",
@@ -668,7 +691,8 @@
       "references": [],
       "falsepositives": [
         "Normal at boot on laptops that reach the domain only after VPN or Wi-Fi connects."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0074",
@@ -686,7 +710,8 @@
       "action": "Verify SYSVOL access and DFS replication health from this machine.",
       "confidence": "high",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0075",
@@ -706,7 +731,8 @@
       "references": [],
       "falsepositives": [
         "A recently rejoined machine can log this once while tickets age out."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0080",
@@ -726,7 +752,8 @@
       "references": [],
       "falsepositives": [
         "Routine on any machine that changes networks, sleeps, or uses a VPN."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0081",
@@ -745,7 +772,8 @@
       "references": [],
       "falsepositives": [
         "Harmless while the clock is accurate; only matters once skew approaches five minutes."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0082",
@@ -765,7 +793,8 @@
       "references": [],
       "falsepositives": [
         "Emitted on every boot regardless of health."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0083",
@@ -836,7 +865,8 @@
       "references": [],
       "falsepositives": [
         "Windows Update, Search and the Start menu generate these routinely on a perfectly healthy machine."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0086",
@@ -951,7 +981,8 @@
       "references": [],
       "falsepositives": [
         "Usually the downstream symptom of a CBS problem rather than an independent fault."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0094",
@@ -968,7 +999,8 @@
       "action": "Read the operation and error code from the line.",
       "confidence": "high",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0100",
@@ -988,7 +1020,8 @@
       "references": [],
       "falsepositives": [
         "Any machine running WSL2, Docker Desktop, Windows Sandbox or Hyper-V produces these continuously while healthy."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0101",
@@ -1008,7 +1041,8 @@
       "references": [],
       "falsepositives": [
         "Normal on every machine with Hyper-V or WSL2 networking."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0102",
@@ -1028,7 +1062,8 @@
       "references": [],
       "falsepositives": [
         "High counts are normal on machines with many Store apps or frequent app updates."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0103",
@@ -1048,7 +1083,8 @@
       "references": [],
       "falsepositives": [
         "Isolated occurrences with no app symptoms are usually harmless."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0104",
@@ -1068,7 +1104,8 @@
       "references": [],
       "falsepositives": [
         "Emitted constantly on any machine running Store or packaged apps."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0105",
@@ -1088,7 +1125,8 @@
       "references": [],
       "falsepositives": [
         "Common and harmless during first sign-in, profile creation and OneDrive folder moves."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0106",
@@ -1108,7 +1146,8 @@
       "references": [],
       "falsepositives": [
         "Routine for per-app folders under ProgramData that a non-admin process is not allowed to create."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0107",
@@ -1128,7 +1167,8 @@
       "references": [],
       "falsepositives": [
         "Normal after any Store app update or removal."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0108",
@@ -1148,7 +1188,8 @@
       "references": [],
       "falsepositives": [
         "Guaranteed on any machine where telemetry endpoints are blocked by policy, firewall or hosts file."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0109",
@@ -1167,7 +1208,8 @@
       "references": [],
       "falsepositives": [
         "Expected in volume on machines with no Microsoft account or with settings sync disabled."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0110",
@@ -1187,7 +1229,8 @@
       "references": [],
       "falsepositives": [
         "Monitoring agents and inventory tools generate these routinely by probing for optional classes."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0111",
@@ -1207,7 +1250,8 @@
       "references": [],
       "falsepositives": [
         "Every PowerShell-based management tool, including LogVerdict, adds to this count."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0112",
@@ -1227,7 +1271,8 @@
       "references": [],
       "falsepositives": [
         "Encoded commands are routine for scheduled tasks, installers and management tooling."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0113",
@@ -1247,7 +1292,8 @@
       "references": [],
       "falsepositives": [
         "Logged on every normal session close, including deliberate sign-out."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0114",
@@ -1272,7 +1318,8 @@
       "references": [],
       "falsepositives": [
         "Removable drives, card readers and virtual disks produce these routinely."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0115",
@@ -1292,7 +1339,8 @@
       "references": [],
       "falsepositives": [
         "Emitted in volume whenever the Store app is running."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0116",
@@ -1312,7 +1360,8 @@
       "references": [],
       "falsepositives": [
         "Expected after a profile restore, a domain migration, or an administrative password reset."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0117",
@@ -1333,7 +1382,8 @@
       "references": [],
       "falsepositives": [
         "Browsers and games with self-updating components trigger this routinely without any real problem."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0118",
@@ -1352,7 +1402,8 @@
       "references": [],
       "falsepositives": [
         "Browsers, Steam, Electron apps and JIT-based runtimes trigger these during entirely normal operation."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0119",
@@ -1372,7 +1423,8 @@
       "references": [],
       "falsepositives": [
         "Expected on every machine that is not Entra joined or hybrid joined."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0120",
@@ -1391,7 +1443,8 @@
       "references": [],
       "falsepositives": [
         "Guaranteed on offline machines and networks that block Microsoft notification endpoints."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0121",
@@ -1411,7 +1464,8 @@
       "references": [],
       "falsepositives": [
         "Normal steady-state behaviour for long-running trace sessions such as the Defender API logger."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0122",
@@ -1431,7 +1485,8 @@
       "references": [],
       "falsepositives": [
         "Expected on metered, intermittent or captive-portal networks."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0123",
@@ -1451,7 +1506,8 @@
       "references": [],
       "falsepositives": [
         "Expected around shutdown and restart."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0124",
@@ -1470,7 +1526,8 @@
       "references": [],
       "falsepositives": [
         "Common on machines with restricted network access to Microsoft settings endpoints."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0125",
@@ -1490,7 +1547,8 @@
       "references": [],
       "falsepositives": [
         "Normal for USB enclosures, card readers and many consumer NVMe drives."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0126",
@@ -1510,7 +1568,8 @@
       "references": [],
       "falsepositives": [
         "Emitted routinely during normal driver maintenance for working devices."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0127",
@@ -1530,7 +1589,8 @@
       "references": [],
       "falsepositives": [
         "Normal for apps built against older Windows SDKs."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0128",
@@ -1549,7 +1609,8 @@
       "references": [],
       "falsepositives": [
         "Inventory and monitoring agents generate these continuously while healthy."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0129",
@@ -1663,7 +1724,8 @@
       "references": [],
       "falsepositives": [
         "Expected for provisioned apps that were deliberately removed from the image - Windows still tries to stage them for a new user and logs the failure."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0140",
@@ -1787,7 +1849,8 @@
       "references": [],
       "falsepositives": [
         "Present on every patched machine. Volume here is a sign of a maintained machine, not a broken one."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0149",
@@ -1805,7 +1868,8 @@
       "references": [],
       "falsepositives": [
         "Third-party installers and updaters write to Reliability Monitor routinely while working correctly."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0150",
@@ -4354,7 +4418,8 @@
       "action": "Read the volume and process from the event, free or extend space there, then repeat the failed operation. On thin-provisioned storage, check the backing pool as well as the Windows volume.",
       "confidence": "high",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0322",
@@ -4375,7 +4440,8 @@
       "references": [],
       "falsepositives": [
         "A sleeping external disk or a one-time storage snapshot can produce an isolated stall without a failing device."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0323",
@@ -4396,7 +4462,8 @@
       "references": [],
       "falsepositives": [
         "A removed virtual or transient device can leave an old configuration failure after it no longer matters."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0324",
@@ -4417,7 +4484,8 @@
       "references": [],
       "falsepositives": [
         "An app removed immediately after the event can make an old launch failure irrelevant."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0325",
@@ -4438,7 +4506,8 @@
       "references": [],
       "falsepositives": [
         "A deliberately constrained test or short-lived peak can trigger one notification without an ongoing leak."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0326",
@@ -4459,7 +4528,8 @@
       "references": [],
       "falsepositives": [
         "A later boot can apply the value successfully, leaving only this historical failure in the log."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LV-0327",
@@ -4512,7 +4582,8 @@
       "references": [],
       "falsepositives": [
         "A genuine power loss produces the unexpected restart, and a machine that logs corrected errors continuously will have some inside any ten-minute window by chance. Check whether the WHEA rate is steady - if it is the same before and after, the timing may be coincidence."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LVC-0002",
@@ -4535,7 +4606,8 @@
       "references": [],
       "falsepositives": [
         "A machine shutting down crashes applications and stops services within the same window, in that order, entirely normally."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LVC-0003",
@@ -4556,7 +4628,8 @@
       "action": "Read the stop code from the bugcheck entry rather than researching Kernel-Power 41, which will not tell you anything. The minidump the report inventories, if present, names the driver.",
       "confidence": "high",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "provenance": "internal-observation"
     },
     {
       "id": "LVC-0004",
@@ -4579,7 +4652,8 @@
       "references": [],
       "falsepositives": [
         "An external drive unplugged mid-write produces both, in this order, without the drive being faulty."
-      ]
+      ],
+      "provenance": "internal-observation"
     },
     {
       "id": "LVC-0005",
@@ -4600,7 +4674,8 @@
       "action": "Repair the component store before retrying the update: DISM /Online /Cleanup-Image /RestoreHealth, then sfc /scannow, then retry. If DISM cannot repair it, it needs a source - a matching install image - which is the case the CBS finding in this report describes.",
       "confidence": "medium",
       "references": [],
-      "falsepositives": []
+      "falsepositives": [],
+      "provenance": "internal-observation"
     }
   ]
 }

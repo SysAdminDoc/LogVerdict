@@ -29,6 +29,143 @@ function Assert-LVSchemaVersion {
     }
 }
 
+function Test-LVDatabaseProvenance {
+    <#
+        A live rule must be checkable by a reader. References and source records are
+        the normal path; internal-observation is explicit provenance for a ruling
+        derived from repeatable in-repository observation rather than a published
+        document.
+    #>
+    param([Parameter(Mandatory)]$Item)
+
+    if (@($Item.sources | Where-Object { $_ }).Count -gt 0) { return $true }
+    if (@($Item.references | Where-Object { $_ }).Count -gt 0) { return $true }
+    return ($Item.provenance -eq 'internal-observation')
+}
+
+function Get-LVDatabaseTrustProblem {
+    <#
+        Validate fields that the resolver consumes but JSON Schema cannot express:
+        correlation vocabulary, references to live rules, supported fields, unique ids
+        and provenance on active rules. This is deliberately separate from fixture
+        matching so loading a malformed local database fails before a scan starts.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Database,
+        [string]$Path = '(database)',
+        [switch]$SkipRuleProvenance
+    )
+
+    $problems = New-Object System.Collections.Generic.List[object]
+    $ruleById = @{}
+    $allIds = @{}
+
+    foreach ($rule in @($Database.rules | Where-Object { $_ })) {
+        $id = [string]$rule.id
+        if (-not $id) {
+            $problems.Add([pscustomobject]@{ RuleId='(missing id)'; Problem='rule has no id' }) | Out-Null
+            continue
+        }
+        if ($allIds.ContainsKey($id)) {
+            $problems.Add([pscustomobject]@{ RuleId=$id; Problem='duplicate id shared by rules or correlations' }) | Out-Null
+        }
+        $allIds[$id] = $true
+        $ruleById[$id] = $rule
+
+        if (-not $SkipRuleProvenance -and (Test-LVRuleActive -Rule $rule)) {
+            if ($rule.provenance -and $rule.provenance -ne 'internal-observation') {
+                $problems.Add([pscustomobject]@{ RuleId=$id; Problem=("unknown provenance '{0}'; valid: internal-observation" -f $rule.provenance) }) | Out-Null
+            } elseif (-not (Test-LVDatabaseProvenance -Item $rule)) {
+                $problems.Add([pscustomobject]@{ RuleId=$id; Problem='active rule requires references[], sources[], or provenance=internal-observation' }) | Out-Null
+            }
+        }
+    }
+
+    foreach ($correlationRule in @($Database.correlations | Where-Object { $_ })) {
+        $id = [string]$correlationRule.id
+        if (-not $id) {
+            $problems.Add([pscustomobject]@{ RuleId='(missing id)'; Problem='correlation has no id' }) | Out-Null
+            continue
+        }
+        if ($allIds.ContainsKey($id)) {
+            $problems.Add([pscustomobject]@{ RuleId=$id; Problem='duplicate id shared by rules or correlations' }) | Out-Null
+        }
+        $allIds[$id] = $true
+
+        if (Test-LVRuleActive -Rule $correlationRule) {
+            if ($correlationRule.provenance -and $correlationRule.provenance -ne 'internal-observation') {
+                $problems.Add([pscustomobject]@{ RuleId=$id; Problem=("unknown provenance '{0}'; valid: internal-observation" -f $correlationRule.provenance) }) | Out-Null
+            } elseif (-not (Test-LVDatabaseProvenance -Item $correlationRule)) {
+                $problems.Add([pscustomobject]@{ RuleId=$id; Problem='active correlation requires references[], sources[], or provenance=internal-observation' }) | Out-Null
+            }
+        }
+
+        $correlation = $correlationRule.correlation
+        if ($null -eq $correlation) {
+            $problems.Add([pscustomobject]@{ RuleId=$id; Problem='correlation has no correlation block' }) | Out-Null
+            continue
+        }
+
+        foreach ($property in @($correlation.PSObject.Properties.Name)) {
+            if (@('type', 'rules', 'timespan', 'group-by') -notcontains $property) {
+                $problems.Add([pscustomobject]@{ RuleId=$id; Problem=("unsupported correlation field '{0}' would be ignored" -f $property) }) | Out-Null
+            }
+        }
+
+        $type = [string]$correlation.type
+        if ($script:LVCorrelationType -notcontains $type) {
+            $problems.Add([pscustomobject]@{ RuleId=$id; Problem=("unknown correlation type '{0}'; valid: {1}" -f $type, ($script:LVCorrelationType -join ', ')) }) | Out-Null
+        }
+        if ($type -eq 'event_count') {
+            $problems.Add([pscustomobject]@{ RuleId=$id; Problem="correlation type 'event_count' is not implemented and cannot be loaded" }) | Out-Null
+        }
+
+        $rawRules = $correlation.PSObject.Properties['rules']
+        if ($null -eq $rawRules -or $null -eq $rawRules.Value -or $rawRules.Value -is [string]) {
+            $problems.Add([pscustomobject]@{ RuleId=$id; Problem='correlation.rules must be an array of rule ids' }) | Out-Null
+            $refs = @()
+        } else {
+            $refs = @($rawRules.Value | Where-Object { $_ })
+        }
+        if ($type -ne 'event_count' -and $refs.Count -lt 2) {
+            $problems.Add([pscustomobject]@{ RuleId=$id; Problem=("{0} correlation requires at least two rule ids" -f $type) }) | Out-Null
+        }
+        if (@($refs | Select-Object -Unique).Count -ne $refs.Count) {
+            $problems.Add([pscustomobject]@{ RuleId=$id; Problem='correlation.rules contains duplicate rule ids' }) | Out-Null
+        }
+        foreach ($ref in $refs) {
+            $refId = [string]$ref
+            if (-not $ruleById.ContainsKey($refId)) {
+                $problems.Add([pscustomobject]@{ RuleId=$id; Problem=("correlation references missing rule '{0}'" -f $refId) }) | Out-Null
+            } elseif (-not (Test-LVRuleActive -Rule $ruleById[$refId])) {
+                $problems.Add([pscustomobject]@{ RuleId=$id; Problem=("correlation references inactive rule '{0}'" -f $refId) }) | Out-Null
+            }
+        }
+
+        if ($correlation.PSObject.Properties['group-by']) {
+            $problems.Add([pscustomobject]@{ RuleId=$id; Problem="correlation field 'group-by' is not implemented and cannot be loaded" }) | Out-Null
+        }
+        $span = ConvertFrom-LVTimespan -Text ([string]$correlation.timespan)
+        if ($null -eq $span) {
+            $problems.Add([pscustomobject]@{ RuleId=$id; Problem=("correlation timespan '{0}' is unreadable" -f $correlation.timespan) }) | Out-Null
+        }
+    }
+
+    return @($problems.ToArray())
+}
+
+function Assert-LVDatabaseTrust {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Database, [string]$Path = '(database)')
+
+    $problems = @(Get-LVDatabaseTrustProblem -Database $Database -Path $Path)
+    if ($problems.Count -gt 0) {
+        $detail = ($problems | ForEach-Object { '{0}: {1}' -f $_.RuleId, $_.Problem }) -join '; '
+        throw ("Verdict database '{0}' failed trust validation: {1}" -f $Path, $detail)
+    }
+}
+
 function Test-LVRuleActive {
     <#
         .SYNOPSIS
