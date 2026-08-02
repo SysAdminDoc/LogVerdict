@@ -9,7 +9,7 @@ function Invoke-LogVerdictScan {
         Use Export-LogVerdictReport -Format Csv for one stable scalar row per finding.
 
         .PARAMETER DaysBack
-        How far back to look. Default 30.
+        How far back to look, from 1 through 3650 days. Default 30.
 
         .PARAMETER Channel
         Event channels to read. Defaults to System and Application, which carry almost
@@ -65,7 +65,7 @@ function Invoke-LogVerdictScan {
     #>
     [CmdletBinding()]
     param(
-        [int]$DaysBack = 30,
+        [ValidateRange(1, 3650)][int]$DaysBack = 30,
         [string[]]$Channel,
         [switch]$AllChannels,
         [switch]$DiagnosticChannels,
@@ -109,12 +109,18 @@ function Invoke-LogVerdictScan {
         Write-LVLog -Level warn -Message 'Not elevated. The Security channel and some text logs will be skipped; results are incomplete but honest about it.'
     }
 
-    if ($AllChannels) {
+    if ($AllChannels -and $DiagnosticChannels) {
+        throw 'Choose only one broad channel mode: -AllChannels or -DiagnosticChannels.'
+    }
+
+    # A named channel list is the most specific request. Keep it ahead of broad
+    # switches so a wrapper can safely pass its defaults alongside an explicit list.
+    if ($Channel) {
+        $channels = $Channel
+    } elseif ($AllChannels) {
         Write-LVLog -Level info -Message 'Enumerating populated channels...'
         $channels = Get-LVPopulatedChannel
         Write-LVLog -Level ok -Message ('{0} channel(s) hold records' -f $channels.Count)
-    } elseif ($Channel) {
-        $channels = $Channel
     } elseif ($DiagnosticChannels) {
         $channels = Get-LVDiagnosticChannel
     } else {

@@ -78,7 +78,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 
 | Capability | Window control | Console / module equivalent |
 |---|---|---|
-| Look-back | Look back | `-DaysBack` |
+| Look-back | Look back (1-3650 days) | `-DaysBack` |
 | Default, focused, all, or named event channels | Focused/all switches or Named event channels | `-DiagnosticChannels`, `-AllChannels`, `-Channel` |
 | Setup logs, Reliability Monitor, harmless findings | Source switches | `-SkipTextLogs`, `-SkipReliability`, `-IncludeBenign` |
 | Alternate complete rule database | Rules path / picker | `-DatabasePath` |
@@ -87,6 +87,10 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Local-model draft and rule-authoring workflow | Deliberately console-only so model endpoint and local-rule writes remain explicit | `-ExplainUnknown`, `-OllamaModel`, `-OllamaEndpoint`, `-PromoteToRule`, `-LocalRulePath` |
 | Output format selection | The window always saves Text, JSON, CSV, and HTML together | `-Format` (`Text`, `Json`, `Csv`, `Html`, or `All`) |
 | Console lifecycle | Not applicable to a persistent window | `-NoReport`, `-Pause`, `-NoPause` |
+
+Named `-Channel` values take precedence over `-AllChannels` and `-DiagnosticChannels` when
+wrappers pass a broad default alongside an explicit list. Supplying both broad switches is
+rejected; choose one channel tier.
 
 ### The executable
 

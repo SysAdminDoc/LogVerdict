@@ -9,7 +9,7 @@
     Read-only: nothing on the machine is modified beyond the report folder.
 
     .PARAMETER DaysBack
-    How far back to look. Default 30.
+    How far back to look, from 1 through 3650 days. Default 30.
 
     .PARAMETER AllChannels
     Sweep every populated event channel instead of just System and Application.
@@ -59,7 +59,7 @@
 #>
 [CmdletBinding()]
 param(
-    [int]$DaysBack = 30,
+    [ValidateRange(1, 3650)][int]$DaysBack = 30,
     [string[]]$Channel,
     [switch]$AllChannels,
     [switch]$DiagnosticChannels,

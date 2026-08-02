@@ -133,6 +133,23 @@ Describe 'Entry script launch behaviour' {
         $text | Should -Match '\[switch\]\$DiagnosticChannels'
         $text | Should -Match 'DiagnosticChannels\s*=\s*\$DiagnosticChannels'
     }
+
+    It 'bounds the public scan window consistently' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $entry = Get-Content -LiteralPath (Join-Path $root 'Invoke-LogVerdict.ps1') -Raw
+        $scan = Get-Content -LiteralPath (Join-Path $root 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $entry | Should -Match '\[ValidateRange\(1, 3650\)\]\[int\]\$DaysBack'
+        $scan | Should -Match '\[ValidateRange\(1, 3650\)\]\[int\]\$DaysBack'
+        { Invoke-LogVerdictScan -DaysBack 0 } | Should -Throw
+        { Invoke-LogVerdictScan -DaysBack 3651 } | Should -Throw
+    }
+
+    It 'gives named channels precedence and rejects contradictory broad modes' {
+        $scan = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $scan.IndexOf('if ($Channel)') | Should -BeLessThan $scan.IndexOf('} elseif ($AllChannels)')
+        $scan | Should -Match 'if \(\$AllChannels -and \$DiagnosticChannels\)'
+        $scan | Should -Match 'Choose only one broad channel mode'
+    }
 }
 
 Describe 'Verdict database' {

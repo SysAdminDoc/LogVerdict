@@ -4,6 +4,11 @@ All notable changes to LogVerdict are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- Bound all scan entry points to a 1-3650 day look-back window, and made named channels
+  take precedence over broad channel switches while rejecting contradictory broad modes.
+
 ## [0.8.0] - 2026-08-01
 
 ### Added

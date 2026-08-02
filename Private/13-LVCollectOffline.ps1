@@ -256,7 +256,7 @@ function Invoke-LVOfflineScan {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$EvidencePath,
-        [Nullable[int]]$DaysBack,
+        [ValidateRange(1, 3650)][Nullable[int]]$DaysBack,
         [string[]]$Channel,
         [switch]$SkipTextLogs,
         [switch]$SkipReliability,
@@ -286,6 +286,9 @@ function Invoke-LVOfflineScan {
         $effectiveDays = 30
         if ($null -ne $DaysBack) { $effectiveDays = [int]$DaysBack }
         elseif ($sourceReport -and $sourceReport.DaysBack) { $effectiveDays = [int]$sourceReport.DaysBack }
+        if ($effectiveDays -lt 1 -or $effectiveDays -gt 3650) {
+            throw 'DaysBack must be between 1 and 3650 days.'
+        }
 
         $evtx = @()
         if (-not $package.ReportOnly) { $evtx = @(Get-ChildItem -LiteralPath $package.Root -Recurse -File -Filter '*.evtx') }
