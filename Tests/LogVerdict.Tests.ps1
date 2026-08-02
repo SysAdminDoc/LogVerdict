@@ -705,6 +705,30 @@ Describe 'Signature reduction' {
             $stat.LoudestShare | Should -Be 90
         }
     }
+
+    It 'detects a compact unknown burst and records its onset' {
+        InModuleScope LogVerdict {
+            $base = [datetime]'2026-08-01 10:00:00'
+            $sig = [pscustomobject]@{
+                Times = @($base, $base.AddMinutes(2), $base.AddMinutes(4), $base.AddDays(1))
+            }
+            $profile = Get-LVUnknownBurstProfile -Signature $sig
+            $profile.IsBurst | Should -BeTrue
+            $profile.Onset | Should -Be $base
+            $profile.ClusterCount | Should -Be 3
+            $profile.WindowMinutes | Should -Be 4
+        }
+    }
+
+    It 'does not call a regular hourly trickle a burst' {
+        InModuleScope LogVerdict {
+            $base = [datetime]'2026-08-01 10:00:00'
+            $sig = [pscustomobject]@{
+                Times = 0..5 | ForEach-Object { $base.AddHours($_) }
+            }
+            Get-LVUnknownBurstProfile -Signature $sig | Should -BeNullOrEmpty
+        }
+    }
 }
 
 Describe 'Text-log timestamps' {
@@ -1365,6 +1389,41 @@ Describe 'Verdict resolution' {
         }
     }
 
+    It 'marks an unmatched compact cluster as a burst without changing unknown' {
+        InModuleScope LogVerdict -Parameters @{ db = $script:TestDb } {
+            param($db)
+            $base = [datetime]'2026-08-01 10:00:00'
+            $sig = [pscustomobject]@{
+                Key='Nobody/8'; Source='event'; Channel='System'; Provider='Nobody'; Id=8
+                Count=4; PerDay=0.2; SampleMessage='raw burst evidence'; FirstSeen=$base; LastSeen=$base.AddDays(1)
+                Times=@($base, $base.AddMinutes(1), $base.AddMinutes(3), $base.AddDays(1))
+            }
+            $finding = (Resolve-LVVerdict -Signature @($sig) -Database $db)[0]
+            $finding.Verdict | Should -BeExactly 'unknown'
+            $finding.Burst | Should -BeTrue
+            $finding.BurstOnset | Should -Be $base
+            $finding.BurstCount | Should -Be 3
+            $finding.Plain | Should -Match 'burst indicator'
+            $finding.Action | Should -Match '2026-08-01 10:00:00'
+        }
+    }
+
+    It 'adds stable non-burst fields to an unmatched trickle' {
+        InModuleScope LogVerdict -Parameters @{ db = $script:TestDb } {
+            param($db)
+            $base = [datetime]'2026-08-01 10:00:00'
+            $sig = [pscustomobject]@{
+                Key='Nobody/9'; Source='event'; Channel='System'; Provider='Nobody'; Id=9
+                Count=6; PerDay=0.2; SampleMessage='regular evidence'; FirstSeen=$base; LastSeen=$base.AddHours(5)
+                Times=0..5 | ForEach-Object { $base.AddHours($_) }
+            }
+            $finding = (Resolve-LVVerdict -Signature @($sig) -Database $db)[0]
+            $finding.Verdict | Should -BeExactly 'unknown'
+            $finding.Burst | Should -BeFalse
+            $finding.BurstOnset | Should -BeNullOrEmpty
+        }
+    }
+
     It 'escalates a signature that crosses its rate threshold' {
         InModuleScope LogVerdict -Parameters @{ db = $script:TestDb } {
             param($db)
@@ -1680,6 +1739,26 @@ Describe 'Report rendering' {
         }
     }
 
+    It 'renders burst timing in text, HTML and CSV reports' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $finding = $r.Findings[0] | Select-Object *
+            $finding | Add-Member -NotePropertyName Burst -NotePropertyValue $true
+            $finding | Add-Member -NotePropertyName BurstOnset -NotePropertyValue ([datetime]'2026-08-01 10:00:00')
+            $finding | Add-Member -NotePropertyName BurstCount -NotePropertyValue 3
+            $finding | Add-Member -NotePropertyName BurstWindowMinutes -NotePropertyValue 4
+            $result.Findings = @($finding)
+
+            $text = ConvertTo-LVTextReport -Result $result
+            $html = ConvertTo-LVHtmlReport -Result $result
+            $csv = ConvertTo-LVCsvReport -Result $result
+            $text | Should -Match 'Burst\s+: began 2026-08-01 10:00; 3 occurrence\(s\) in 4 minute\(s\)'
+            $html | Should -Match 'Burst</div><div>2026-08-01 10:00'
+            $csv | Should -Match '"True".*"2026-08-01T10:00:00.*".*"3".*"4"'
+        }
+    }
+
     It 'escapes HTML so a log line cannot inject markup into the report' {
         InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
             param($r)
@@ -1752,6 +1831,7 @@ Describe 'Report rendering' {
         $rows[0].Title | Should -BeExactly 'Something broke'
         $rows[0].PSObject.Properties.Name | Should -Contain 'ErrorCatalogKind'
         $rows[0].PSObject.Properties.Name | Should -Contain 'Reference'
+        $rows[0].PSObject.Properties.Name | Should -Contain 'Burst'
     }
 
     It 'emits the CSV header even when no findings exist' {

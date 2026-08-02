@@ -200,6 +200,7 @@ function Resolve-LVVerdict {
                 $sig.Reference = $entry.reference
                 $sig.References = @($entry.reference)
             }
+            Add-LVUnknownBurstContext -Signature $sig
             $results.Add($sig) | Out-Null
             continue
         }
@@ -239,6 +240,7 @@ function Resolve-LVVerdict {
         $sig | Add-Member -NotePropertyName 'Verified'   -NotePropertyValue $hit.verified -Force
         $sig | Add-Member -NotePropertyName 'FalsePositives' -NotePropertyValue @($hit.falsepositives) -Force
         Add-LVErrorCatalogContext -Signature $sig -Match (Get-LVErrorCatalogMatch -Signature $sig)
+        Add-LVUnknownBurstContext -Signature $sig
         $results.Add($sig) | Out-Null
     }
 

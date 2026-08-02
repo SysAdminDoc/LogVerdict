@@ -212,6 +212,96 @@ function Get-LVSignatureReduction {
     }
 }
 
+function Get-LVUnknownBurstProfile {
+    <#
+        .SYNOPSIS
+        Find a compact cluster inside a signature's observed timestamps.
+
+        .DESCRIPTION
+        This is deliberately a small, dependency-free timing signal rather than a
+        verdict. Three events close together can be the start of a new failure, while
+        a regular hourly trickle should remain an ordinary unknown. The profile is
+        returned only when the closest three-event window is compact enough to call a
+        burst; callers keep the verdict unknown and explain that timing is not cause.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Signature)
+
+    $times = @(
+        foreach ($value in @($Signature.Times)) {
+            if ($null -eq $value) { continue }
+            try { [datetime]$value } catch { continue }
+        }
+    ) | Sort-Object
+    if ($times.Count -lt 3) { return $null }
+
+    $bestStart = 0
+    $bestSeconds = [double]::PositiveInfinity
+    for ($i = 0; $i -le ($times.Count - 3); $i++) {
+        $seconds = [Math]::Max(0, ($times[$i + 2] - $times[$i]).TotalSeconds)
+        if ($seconds -lt $bestSeconds) {
+            $bestSeconds = $seconds
+            $bestStart = $i
+        }
+    }
+
+    $spanMinutes = [Math]::Max(0, ($times[-1] - $times[0]).TotalMinutes)
+    $windowMinutes = [Math]::Round($bestSeconds / 60, 2)
+
+    # A compact three-event window is the primary signal. The second condition lets
+    # a five-or-more-event ramp inside two hours show up even when its three-event
+    # window is a little wider; hourly (or slower) trickles do not meet either test.
+    $compactBurst = ($windowMinutes -le 15)
+    $shortRamp = ($times.Count -ge 5 -and $windowMinutes -le 30 -and $spanMinutes -le 120)
+    if (-not ($compactBurst -or $shortRamp)) { return $null }
+
+    $reason = if ($shortRamp -and -not $compactBurst) {
+        'multiple occurrences ramped inside a two-hour window'
+    } else {
+        'three occurrences clustered inside a fifteen-minute window'
+    }
+
+    return [pscustomobject]@{
+        IsBurst       = $true
+        Onset         = $times[$bestStart]
+        ClusterCount  = 3
+        WindowMinutes = $windowMinutes
+        TotalCount    = $times.Count
+        Reason        = $reason
+    }
+}
+
+function Add-LVUnknownBurstContext {
+    <#
+        .SYNOPSIS
+        Attach burst timing context without changing a signature's verdict.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Signature)
+
+    $Signature | Add-Member -NotePropertyName 'Burst' -NotePropertyValue $false -Force
+    $Signature | Add-Member -NotePropertyName 'BurstOnset' -NotePropertyValue $null -Force
+    $Signature | Add-Member -NotePropertyName 'BurstCount' -NotePropertyValue $null -Force
+    $Signature | Add-Member -NotePropertyName 'BurstWindowMinutes' -NotePropertyValue $null -Force
+    $Signature | Add-Member -NotePropertyName 'BurstReason' -NotePropertyValue $null -Force
+
+    if ($Signature.Verdict -ne 'unknown') { return }
+    $burstProfile = Get-LVUnknownBurstProfile -Signature $Signature
+    if ($null -eq $burstProfile) { return }
+
+    $onset = $burstProfile.Onset.ToString('yyyy-MM-dd HH:mm:ss')
+    $summary = 'Timing signal: {0} began around {1}, with {2} occurrences in {3} minute(s). This is a burst indicator, not a root-cause diagnosis.' -f `
+        $burstProfile.Reason, $onset, $burstProfile.ClusterCount, $burstProfile.WindowMinutes
+    $Signature | Add-Member -NotePropertyName 'Burst' -NotePropertyValue $true -Force
+    $Signature | Add-Member -NotePropertyName 'BurstOnset' -NotePropertyValue $burstProfile.Onset -Force
+    $Signature | Add-Member -NotePropertyName 'BurstCount' -NotePropertyValue $burstProfile.ClusterCount -Force
+    $Signature | Add-Member -NotePropertyName 'BurstWindowMinutes' -NotePropertyValue $burstProfile.WindowMinutes -Force
+    $Signature | Add-Member -NotePropertyName 'BurstReason' -NotePropertyValue $burstProfile.Reason -Force
+    $Signature.Plain = '{0} {1}' -f $Signature.Plain, $summary
+    $Signature.Why = '{0} The compact timing cluster means this unknown signature deserves attention even though its cause is not established.' -f $Signature.Why
+    $Signature.Action = 'Start triage with evidence around {0}; preserve the surrounding event window and add a reviewed rule only after identifying the provider operation.' -f $onset
+}
+
 function Group-LVSignature {
     <#
         .SYNOPSIS

@@ -133,6 +133,9 @@ function Write-LVConsoleReport {
         Write-Host ''
         Write-Host ('  [{0}] {1}' -f $f.Verdict.ToUpper(), $f.Title) -ForegroundColor $color
         Write-Host ('    {0}  x{1}  ({2}/day, last seen {3})' -f $f.Key, $f.Count, $f.PerDay, (Format-LVWhen $f.LastSeen)) -ForegroundColor DarkGray
+        if ($f.PSObject.Properties['Burst'] -and $f.Burst) {
+            Write-Host ('    Burst         : began {0}; {1} occurrence(s) in {2} minute(s)' -f (Format-LVWhen $f.BurstOnset), $f.BurstCount, $f.BurstWindowMinutes) -ForegroundColor Yellow
+        }
         Write-Host ('    What it means : {0}' -f $f.Plain)
         Write-Host ('    Why it matters: {0}' -f $f.Why)
         Write-Host ('    Do this       : {0}' -f $f.Action) -ForegroundColor White
@@ -191,6 +194,10 @@ function ConvertTo-LVFlatFindingRow {
             ErrorCatalogKind  = $finding.ErrorCatalogKind
             ErrorName         = $finding.ErrorName
             Reference         = $finding.Reference
+            Burst             = if ($finding.PSObject.Properties['Burst']) { $finding.Burst } else { $false }
+            BurstOnset        = if ($finding.PSObject.Properties['BurstOnset'] -and $finding.BurstOnset) { ([datetime]$finding.BurstOnset).ToString('o') } else { $null }
+            BurstCount        = if ($finding.PSObject.Properties['BurstCount']) { $finding.BurstCount } else { $null }
+            BurstWindowMinutes = if ($finding.PSObject.Properties['BurstWindowMinutes']) { $finding.BurstWindowMinutes } else { $null }
         }
     }
 }
@@ -213,6 +220,7 @@ function ConvertTo-LVCsvReport {
         Verdict = $null; Title = $null; RuleId = $null; Confidence = $null
         Plain = $null; Why = $null; Action = $null; SampleMessage = $null
         ErrorCode = $null; ErrorCatalogKind = $null; ErrorName = $null; Reference = $null
+        Burst = $null; BurstOnset = $null; BurstCount = $null; BurstWindowMinutes = $null
     }
     $headerLine = @($header | ConvertTo-Csv -NoTypeInformation)[0]
     return ([string]$headerLine) + [Environment]::NewLine
@@ -307,6 +315,9 @@ function ConvertTo-LVTextReport {
         Add-LVLine $sb ('[{0}] {1}' -f $f.Verdict.ToUpper(), $f.Title)
         Add-LVLine $sb ('  Signature   : {0}' -f $f.Key)
         Add-LVLine $sb ('  Occurrences : {0} ({1}/day) between {2} and {3}' -f $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen))
+        if ($f.PSObject.Properties['Burst'] -and $f.Burst) {
+            Add-LVLine $sb ('  Burst       : began {0}; {1} occurrence(s) in {2} minute(s)' -f (Format-LVWhen $f.BurstOnset), $f.BurstCount, $f.BurstWindowMinutes)
+        }
         Add-LVLine $sb ('  Rule        : {0} (confidence: {1}{2})' -f $f.RuleId, $f.Confidence, $(if ($f.Verified) { ', verified ' + $f.Verified } else { '' }))
         foreach ($fp in @($f.FalsePositives)) {
             Add-LVLine $sb ('  Not this if : {0}' -f $fp)
@@ -549,6 +560,9 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             (ConvertTo-LVHtmlEncoded $f.Verdict), $hex)
         Add-LVLine $sb ('<h2><span class="badge" style="color:{0}">{1}</span>{2}</h2>' -f $hex, $f.Verdict, (ConvertTo-LVHtmlEncoded $f.Title))
         Add-LVLine $sb ('<div class="meta">{0} &middot; {1} occurrence(s) &middot; {2}/day &middot; {3} to {4} &middot; rule {5} ({6}{7})</div>' -f (ConvertTo-LVHtmlEncoded $f.Key), $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen), $f.RuleId, $f.Confidence, $(if ($f.Verified) { ', verified ' + $f.Verified } else { '' }))
+        if ($f.PSObject.Properties['Burst'] -and $f.Burst) {
+            Add-LVLine $sb ('<div class="row"><div class="lbl">Burst</div><div>{0} &middot; {1} occurrence(s) in {2} minute(s)</div></div>' -f (Format-LVWhen $f.BurstOnset), $f.BurstCount, $f.BurstWindowMinutes)
+        }
         Add-LVLine $sb ('<div class="row"><div class="lbl">Means</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.Plain))
         Add-LVLine $sb ('<div class="row"><div class="lbl">Matters</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.Why))
         Add-LVLine $sb ('<div class="row"><div class="lbl">Do this</div><div class="act">{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.Action))

@@ -288,6 +288,10 @@ timestamp that runs backwards in record order is named with its channel and rang
 concurrent writers, and log clearing can all create a gap, so this is a coverage warning to inspect rather than a
 claim that tampering occurred.
 
+Unknown signatures also inspect the timestamps retained inside each signature. A compact cluster is labelled as a
+burst with its onset and window in the console, text, HTML, JSON, and CSV outputs; the verdict remains `unknown`
+because timing is evidence to triage, not proof of a cause. A regular trickle is left unlabelled.
+
 Tests need [Pester](https://pester.dev/) 5+:
 
 ```powershell
