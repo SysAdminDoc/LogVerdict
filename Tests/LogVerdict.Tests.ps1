@@ -7,7 +7,7 @@ BeforeAll {
 Describe 'Case profiles and responder handoffs' {
     BeforeAll {
         $script:CaseResult = [pscustomobject]@{
-            Tool = 'LogVerdict'; Version = '0.8.0'; MachineName = 'HOST-9'
+            Tool = 'LogVerdict'; Version = '0.8.1'; MachineName = 'HOST-9'
             ScanTime = [datetime]'2026-08-02 12:00:00'; Duration = [timespan]::FromSeconds(2)
             DaysBack = 7; Channels = @('System'); Elevated = $true
             Reduction = [pscustomobject]@{ RecordCount=1; SignatureCount=1; Ratio=1 }
@@ -3727,7 +3727,7 @@ Describe 'Evidence bundle' {
             $report = Join-Path $dir 'dirty-report.txt'
             Set-Content -LiteralPath $report -Value 'access_token=not-safe-to-share' -Encoding UTF8
             $result = [pscustomobject]@{
-                Version='0.8.0'; MachineName='HOST-9'; ScanTime=(Get-Date); DaysBack=1; Elevated=$false
+                Version='0.8.1'; MachineName='HOST-9'; ScanTime=(Get-Date); DaysBack=1; Elevated=$false
                 Channels=@(); Reduction=[pscustomobject]@{ RecordCount=0; SignatureCount=0; Ratio=0 }
                 DatabaseName='fixture'; RuleCount=0; DatabaseDate='2026-08-02'; WorstVerdict='benign'
                 Findings=@(); Correlations=@(); Coverage=@(); HealthProfiles=@(); CoverageNotes=@()

@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## Unreleased
 
+## [0.8.1] - 2026-08-02
+
 - Bound all scan entry points to a 1-3650 day look-back window, and made named channels
   take precedence over broad channel switches while rejecting contradictory broad modes.
 - Added fail-closed trust validation for active rule and correlation provenance, correlation
@@ -269,6 +271,7 @@ Initial release. The deterministic core: collect, reduce, resolve, report. No la
 
 [0.7.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.7.0
 [0.8.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.8.0
+[0.8.1]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.8.1
 [0.6.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.6.0
 [0.5.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.5.0
 [0.4.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.4.0

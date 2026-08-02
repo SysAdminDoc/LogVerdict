@@ -609,7 +609,7 @@ function Get-LVGuiXaml {
               <TextBlock Text="LogVerdict" Foreground="{DynamicResource Text}" FontSize="17"
                          FontWeight="SemiBold"/>
               <TextBlock x:Name="TxtVersion" Foreground="{DynamicResource TextMuted}" FontSize="11"
-                         Margin="8,0,0,0" VerticalAlignment="Bottom" Text="v0.0.0"/>
+                         Margin="8,0,0,0" VerticalAlignment="Bottom" Text="v0.8.1"/>
             </StackPanel>
             <TextBlock Text="What your logs actually say, in plain English"
                        Foreground="{DynamicResource TextMuted}" FontSize="11.5" Margin="0,1,0,0"/>

@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.singleton.1.12.0.schema.json
 PackageIdentifier: SysAdminDoc.LogVerdict
-PackageVersion: 0.8.0
+PackageVersion: 0.8.1
 PackageLocale: en-US
 Publisher: SysAdminDoc
 PublisherUrl: https://github.com/SysAdminDoc
@@ -26,7 +26,7 @@ Commands:
 ReleaseDate: 2026-08-02
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/SysAdminDoc/LogVerdict/releases/download/v0.8.0/LogVerdict.exe
-    InstallerSha256: 8A567978C8E2FAB676696E56E79DE54D9DD622F613FDAC5116576E07FB38634A
+    InstallerUrl: https://github.com/SysAdminDoc/LogVerdict/releases/download/v0.8.1/LogVerdict.exe
+    InstallerSha256: A168067767BDB53CA4EE54B4108A381C0CE091333739CEE4E07B2E920772EF9C
 ManifestType: singleton
 ManifestVersion: 1.12.0
