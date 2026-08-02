@@ -70,6 +70,7 @@ param(
     [switch]$NoReport,
     [switch]$Redact,
     [switch]$IncludeEvidence,
+    [ValidateSet('Text', 'Json', 'Csv', 'Html', 'All')][string[]]$Format = @('All'),
     [string]$EvidencePath,
     [switch]$ExplainUnknown,
     [string]$OllamaModel = 'llama3.2',
@@ -142,7 +143,7 @@ try {
     Show-LogVerdictReport -Result $result
 
     if (-not $NoReport) {
-        $exportArgs = @{ Result = $result; Redact = $Redact; IncludeEvidence = $IncludeEvidence }
+        $exportArgs = @{ Result = $result; Redact = $Redact; IncludeEvidence = $IncludeEvidence; Format = $Format }
         if ($OutputDir) { $exportArgs['OutputDir'] = $OutputDir }
         $out = Export-LogVerdictReport @exportArgs
         Write-Host ''

@@ -1706,6 +1706,32 @@ Describe 'Report rendering' {
         $parsed.Reduction.SignatureCount | Should -Be 71
     }
 
+    It 'writes one stable scalar CSV row per finding' {
+        $out = Join-Path $TestDrive 'reports-csv'
+        Export-LogVerdictReport -Result $script:FakeResult -OutputDir $out -Format Csv | Out-Null
+        $path = Join-Path $out 'LogVerdict-Report.csv'
+        Test-Path -LiteralPath $path | Should -BeTrue
+        $rows = @(Import-Csv -LiteralPath $path)
+        $rows.Count | Should -Be 1
+        $rows[0].Verdict | Should -BeExactly 'actionable'
+        $rows[0].Provider | Should -BeExactly 'Acme'
+        $rows[0].Count | Should -Be '12'
+        $rows[0].Title | Should -BeExactly 'Something broke'
+        $rows[0].PSObject.Properties.Name | Should -Contain 'ErrorCatalogKind'
+        $rows[0].PSObject.Properties.Name | Should -Contain 'Reference'
+    }
+
+    It 'emits the CSV header even when no findings exist' {
+        $out = Join-Path $TestDrive 'reports-csv-empty'
+        $clean = $script:FakeResult | Select-Object *
+        $clean.Findings = @()
+        Export-LogVerdictReport -Result $clean -OutputDir $out -Format Csv | Out-Null
+        $lines = @(Get-Content -LiteralPath (Join-Path $out 'LogVerdict-Report.csv'))
+        $lines.Count | Should -Be 1
+        $lines[0] | Should -Match 'ScanTime'
+        @(Import-Csv -LiteralPath (Join-Path $out 'LogVerdict-Report.csv')).Count | Should -Be 0
+    }
+
     It 'produces a self-contained page with no external requests' {
         InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
             param($r)

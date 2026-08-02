@@ -150,6 +150,74 @@ function Write-LVConsoleReport {
     Write-Host ''
 }
 
+function ConvertTo-LVFlatFindingRow {
+    <#
+        .SYNOPSIS
+        Project findings into the stable, one-row-per-finding CSV contract.
+
+        .DESCRIPTION
+        CSV is for pipelines, not for reproducing the nested JSON report. Keep the
+        columns scalar and predictable so the output can flow directly to Export-Csv,
+        Out-GridView, or a ticket import without knowing the internal signature shape.
+        Correlations remain in the richer reports; each row here is one ordinary finding.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Result)
+
+    foreach ($finding in @($Result.Findings | Where-Object { $_ })) {
+        [pscustomobject][ordered]@{
+            ScanTime          = if ($Result.ScanTime) { ([datetime]$Result.ScanTime).ToString('o') } else { $null }
+            MachineName       = $Result.MachineName
+            DaysBack          = $Result.DaysBack
+            Elevated          = $Result.Elevated
+            Channel           = $finding.Channel
+            Source            = $finding.Source
+            Provider          = $finding.Provider
+            Id                = $finding.Id
+            Key               = $finding.Key
+            Count             = $finding.Count
+            PerDay            = $finding.PerDay
+            FirstSeen         = if ($finding.FirstSeen) { ([datetime]$finding.FirstSeen).ToString('o') } else { $null }
+            LastSeen          = if ($finding.LastSeen) { ([datetime]$finding.LastSeen).ToString('o') } else { $null }
+            Verdict           = $finding.Verdict
+            Title             = $finding.Title
+            RuleId            = $finding.RuleId
+            Confidence        = $finding.Confidence
+            Plain             = $finding.Plain
+            Why               = $finding.Why
+            Action            = $finding.Action
+            SampleMessage     = $finding.SampleMessage
+            ErrorCode         = $finding.ErrorCode
+            ErrorCatalogKind  = $finding.ErrorCatalogKind
+            ErrorName         = $finding.ErrorName
+            Reference         = $finding.Reference
+        }
+    }
+}
+
+function ConvertTo-LVCsvReport {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Result)
+
+    $rows = @(ConvertTo-LVFlatFindingRow -Result $Result)
+    if ($rows.Count -gt 0) {
+        return (($rows | ConvertTo-Csv -NoTypeInformation) -join [Environment]::NewLine) + [Environment]::NewLine
+    }
+
+    # Preserve the header even when a clean scan has no findings, so a downstream
+    # importer can bind columns without a special empty-file branch.
+    $header = [pscustomobject][ordered]@{
+        ScanTime = $null; MachineName = $null; DaysBack = $null; Elevated = $null
+        Channel = $null; Source = $null; Provider = $null; Id = $null; Key = $null
+        Count = $null; PerDay = $null; FirstSeen = $null; LastSeen = $null
+        Verdict = $null; Title = $null; RuleId = $null; Confidence = $null
+        Plain = $null; Why = $null; Action = $null; SampleMessage = $null
+        ErrorCode = $null; ErrorCatalogKind = $null; ErrorName = $null; Reference = $null
+    }
+    $headerLine = @($header | ConvertTo-Csv -NoTypeInformation)[0]
+    return ([string]$headerLine) + [Environment]::NewLine
+}
+
 function ConvertTo-LVTextReport {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Result)

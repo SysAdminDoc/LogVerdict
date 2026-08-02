@@ -1,7 +1,7 @@
 function Export-LogVerdictReport {
     <#
         .SYNOPSIS
-        Render a scan result to disk as text, JSON and a self-contained dark HTML page.
+        Render a scan result to disk as text, JSON, CSV, and a self-contained dark HTML page.
 
         .PARAMETER Result
         The object returned by Invoke-LogVerdictScan.
@@ -11,7 +11,8 @@ function Export-LogVerdictReport {
         even when the script is right-click-elevated and starts in System32.
 
         .PARAMETER Format
-        Any of Text, Json, Html, or All. Default All.
+        Any of Text, Json, Csv, Html, or All. Default All. Csv writes one scalar row per
+        finding with a stable pipeline-friendly column contract.
 
         .PARAMETER Redact
         Mask the account name, machine name, profile paths, SIDs and mail addresses out
@@ -38,7 +39,7 @@ function Export-LogVerdictReport {
     param(
         [Parameter(Mandatory, ValueFromPipeline)]$Result,
         [string]$OutputDir,
-        [ValidateSet('Text', 'Json', 'Html', 'All')][string[]]$Format = @('All'),
+    [ValidateSet('Text', 'Json', 'Csv', 'Html', 'All')][string[]]$Format = @('All'),
         [switch]$Redact,
         [switch]$IncludeEvidence
     )
@@ -78,6 +79,12 @@ function Export-LogVerdictReport {
             $p = Join-Path $OutputDir 'LogVerdict-Report.json'
             # Depth 6 covers signature -> samples[] without dragging in the whole graph.
             Write-LVTextFile -Path $p -Content ($Result | ConvertTo-Json -Depth 6)
+            $written.Add($p) | Out-Null
+        }
+
+        if ($wantAll -or $Format -contains 'Csv') {
+            $p = Join-Path $OutputDir 'LogVerdict-Report.csv'
+            Write-LVTextFile -Path $p -Content (ConvertTo-LVCsvReport -Result $Result)
             $written.Add($p) | Out-Null
         }
 

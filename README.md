@@ -12,13 +12,13 @@ There are two front ends over one engine: a window for reading, and a console to
 
 ## Why
 
-Log tooling splits into three camps, none of which help an admin sitting at one broken machine:
-
-- **Collectors** (Microsoft TSS, `Get-WinEvent`) gather everything and interpret nothing.
-- **Lookup databases** (EventID.Net, Event Log Explorer) explain one event at a time, by hand.
-- **SIEMs** (ManageEngine EventLog Analyzer, Netdata) want a server, an agent, a fleet, and a budget.
-
-LogVerdict is the missing middle: local, whole-machine, multi-source, deduplicated, prioritized triage.
+Microsoft [SetupDiag](https://learn.microsoft.com/en-us/windows/deployment/upgrade/setupdiag) already explains
+Windows upgrade failures from Panther logs, and [cmtraceopen](https://github.com/adamgell/cmtraceopen) reads
+servicing and setup text logs with a findings-oriented interface. LogVerdict's narrower claim is deliberately
+testable: it is an offline, local triage pass that rules both Windows event channels and servicing/diagnostic text
+logs, deduplicates them into signatures, and returns a plain-English explanation plus a concrete remediation from a
+curated non-LLM rule database. SetupDiag remains useful for upgrade-specific cases; cmtraceopen remains useful as a
+viewer and text-log specialist.
 
 ## What it reads
 
@@ -85,7 +85,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Report destination, identifier masking, evidence bundle | Report controls | `-OutputDir`, `-Redact`, `-IncludeEvidence` |
 | Offline evidence re-evaluation | Console-only batch/review workflow | `-EvidencePath` |
 | Local-model draft and rule-authoring workflow | Deliberately console-only so model endpoint and local-rule writes remain explicit | `-ExplainUnknown`, `-OllamaModel`, `-OllamaEndpoint`, `-PromoteToRule`, `-LocalRulePath` |
-| Output format selection | The window always saves Text, JSON, and HTML together | `-Format` |
+| Output format selection | The window always saves Text, JSON, CSV, and HTML together | `-Format` (`Text`, `Json`, `Csv`, `Html`, or `All`) |
 | Console lifecycle | Not applicable to a persistent window | `-NoReport`, `-Pause`, `-NoPause` |
 
 ### The executable
@@ -102,6 +102,7 @@ LogVerdict.exe -OutputDir C:\Temp\lv             choose where reports land
 LogVerdict.exe -Redact                          mask identifiers before writing
 LogVerdict.exe -SkipReliability                 skip Reliability Monitor
 LogVerdict.exe -IncludeEvidence                 also zip the evidence for a ticket
+LogVerdict.exe -Format Csv                      write one flat row per finding for a pipeline
 LogVerdict.exe -ExplainUnknown                  draft explanations for unknowns with local Ollama
 LogVerdict.exe -PromoteToRule                   save safe candidates as inactive local rule drafts
 ```
@@ -109,6 +110,12 @@ LogVerdict.exe -PromoteToRule                   save safe candidates as inactive
 `-IncludeEvidence` writes a zip beside the report holding the reports, the matching text-log lines and the scanned event channels as `.evtx`. The report says what LogVerdict concluded; the bundle carries what it concluded it *from*. Combined with `-Redact` the channel exports are deliberately left out - `.evtx` is binary and carries the identifiers redaction removes from the text, and the manifest says so, so a withheld channel is never mistaken for a clean one.
 
 `-Redact` masks the account name, machine name, profile paths, SIDs and mail addresses out of the captured log messages before they are written. Use it when the report is going to a ticket or a vendor - the default report keeps everything, because locally that is the evidence. The reports say when they were redacted, and say that an identifier Windows wrote in a form this tool does not recognize may still be in there: read before sending.
+
+`-Format Csv` writes `LogVerdict-Report.csv` with one scalar row per ordinary finding. Its stable columns include
+the scan identity, source (`event`, `text`, or `reliability`), provider and event id, occurrence count and rate,
+first and last timestamps, verdict, ruling prose, error-catalog fields, and the official reference. Correlations
+remain in the text, JSON, and HTML reports. The row shape is deliberately suitable for `Import-Csv`,
+`Export-Csv`, `Out-GridView`, or a ticketing-system import without knowing LogVerdict's nested JSON schema.
 
 Double-clicked, it holds the console window open until you press Enter. Run from a script or a scheduled task and it never pauses, so automation cannot hang; `-Pause` and `-NoPause` force the behaviour either way.
 
@@ -185,6 +192,12 @@ Offline analysis never reads the reviewing PC. It inherits the source report's l
 `-ExplainUnknown`, or the stronger `-PromoteToRule` switch that implies it, is the only path that contacts a model endpoint. LogVerdict accepts only plain HTTP on `localhost`, `127.0.0.1`, or `::1`, sends one reduced unknown signature at a time to Ollama's `/api/generate`, and requests structured output with no actions or fixes. Known signatures are never sent. The candidate appears in its own **MODEL-GENERATED CANDIDATE - NOT A CURATED RULING** block; a connection failure, malformed response, unexpected field, or remediation language leaves the deterministic scan intact and produces no candidate.
 
 `-PromoteToRule` is a stronger opt-in and therefore implies `-ExplainUnknown`. Each safe candidate is written atomically to `Data\verdicts.local.json` from source, or `verdicts.local.json` beside the compiled executable. Generated rules are visibly marked, use `confidence: draft` and `status: unsupported`, and remain ineligible to match even if either gate is edited alone. Human review must supply a real verdict and remediation, check the evidence, then replace both fields. Re-running promotion updates the same hashed draft id instead of creating duplicates; a reviewed rule is never overwritten. `-LocalRulePath` selects a different local file when needed.
+
+The executable is intentionally transparent. PS2EXE host code is licensed under the Microsoft Limited Public
+License (MS-LPL), so the compiled file is a combined work even though the project source is MIT. The embedded
+PowerShell is recoverable by design (for example, PS2EXE's `-extract` option); there are no secrets or proprietary
+rules hidden in the binary. Use the PowerShell module for the cleanest source-licence boundary, or extract the
+script when auditing the exact executable contents.
 
 As a module:
 

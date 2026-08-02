@@ -6,6 +6,7 @@ function Invoke-LogVerdictScan {
         .DESCRIPTION
         Runs the full pipeline: collect -> reduce -> resolve. Read-only; nothing on the
         machine is modified. Returns a result object that Export-LogVerdictReport renders.
+        Use Export-LogVerdictReport -Format Csv for one stable scalar row per finding.
 
         .PARAMETER DaysBack
         How far back to look. Default 30.
