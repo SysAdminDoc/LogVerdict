@@ -360,7 +360,8 @@ $script:LVGuiElement = @(
     'TxtRecords', 'TxtSignatures', 'TxtReduction', 'TxtRules',
     'PnlCoverage', 'LstCoverage', 'PnlCrash', 'LstCrash',
     'PnlCorrelation', 'LstCorrelation',
-    'TxtSearch', 'TxtSearchHint', 'TxtShown', 'LvFindings',
+    'TxtSearch', 'TxtSearchHint', 'TxtShown', 'FltSource', 'FltChannel', 'FltProvider',
+    'FltEventId', 'FltCorrelation', 'FltRuleStatus', 'LvFindings',
     'PnlEmpty', 'TxtEmptyTitle', 'TxtEmptyBody',
     'TxtNoSelection', 'ScrDetail', 'PillDetail', 'TxtDetailVerdict', 'TxtDetailTitle',
     'TxtDetailMeta', 'TxtPlain', 'TxtWhy', 'TxtAction',
@@ -442,7 +443,8 @@ function ConvertTo-LVGuiRow {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Finding,
-        [int]$StartIndex = 0
+        [int]$StartIndex = 0,
+        [AllowNull()][hashtable]$CorrelationIdsByKey
     )
 
     $index = 0
@@ -463,6 +465,15 @@ function ConvertTo-LVGuiRow {
         $lastSeenSort = [datetime]::MinValue
         if ($null -ne $f.LastSeen) { $lastSeenSort = $f.LastSeen }
 
+        $correlationIds = @()
+        if ($CorrelationIdsByKey -and $f.Key -and $CorrelationIdsByKey.ContainsKey([string]$f.Key)) {
+            $correlationIds = @($CorrelationIdsByKey[[string]$f.Key] | Select-Object -Unique)
+        }
+        $ruleStatus = 'unruled'
+        if ($f.RuleId) {
+            $ruleStatus = if ($f.Status) { [string]$f.Status } else { 'unknown' }
+        }
+
         # What a screen reader says for this row. Without it WPF falls back to the
         # object's own ToString, which reads out every property including hex colour
         # codes and the whole search haystack. Colour carries meaning in the verdict
@@ -477,6 +488,13 @@ function ConvertTo-LVGuiRow {
             VerdictFill  = $style.Fill
             VerdictInk   = $style.Ink
             VerdictRank  = (Get-LVVerdictRank -Verdict $f.Verdict)
+            Source       = [string]$f.Source
+            Channel      = [string]$f.Channel
+            Provider     = [string]$f.Provider
+            EventId      = if ($f.Source -eq 'event') { [string]$f.Id } else { '' }
+            RuleId       = [string]$f.RuleId
+            RuleStatus   = $ruleStatus
+            CorrelationIds = $correlationIds
             Title        = $f.Title
             Count        = $f.Count
             PerDay       = $f.PerDay
@@ -497,6 +515,54 @@ function ConvertTo-LVGuiRow {
     return ConvertTo-LVArrayOutput -Value @($rows)
 }
 
+function Get-LVGuiFilterOption {
+    <#
+        .SYNOPSIS
+        Build the lightweight option lists for the structured findings filters.
+
+        .DESCRIPTION
+        Options are projected from rows, not from the full finding or correlation
+        graphs. Each option carries only a display label and a scalar filter value,
+        so opening a dropdown never creates a second evidence graph.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Row,
+        [Parameter(Mandatory)][ValidateSet('Source', 'Channel', 'Provider', 'EventId', 'Correlation', 'RuleStatus')][string]$Kind
+    )
+
+    $options = New-Object System.Collections.Generic.List[object]
+    switch ($Kind) {
+        'Source'      { $options.Add([pscustomobject]@{ Label='All sources'; Value='' }) | Out-Null }
+        'Channel'     { $options.Add([pscustomobject]@{ Label='All channels'; Value='' }) | Out-Null }
+        'Provider'    { $options.Add([pscustomobject]@{ Label='All providers'; Value='' }) | Out-Null }
+        'EventId'     { $options.Add([pscustomobject]@{ Label='All event IDs'; Value='' }) | Out-Null }
+        'Correlation' {
+            $options.Add([pscustomobject]@{ Label='All correlations'; Value='' }) | Out-Null
+            $options.Add([pscustomobject]@{ Label='Correlated'; Value='__correlated__' }) | Out-Null
+            $options.Add([pscustomobject]@{ Label='Not correlated'; Value='__uncorrelated__' }) | Out-Null
+        }
+        'RuleStatus' { $options.Add([pscustomobject]@{ Label='All rule states'; Value='' }) | Out-Null }
+    }
+
+    $values = New-Object System.Collections.Generic.List[string]
+    foreach ($rowItem in $Row) {
+        if ($Kind -eq 'Correlation') {
+            foreach ($id in @($rowItem.CorrelationIds)) {
+                if ($id -and -not $values.Contains([string]$id)) { $values.Add([string]$id) | Out-Null }
+            }
+            continue
+        }
+        $value = [string]$rowItem.$Kind
+        if ($Kind -eq 'RuleStatus' -and -not $value) { $value = 'unruled' }
+        if ($value -and -not $values.Contains($value)) { $values.Add($value) | Out-Null }
+    }
+    foreach ($value in @($values.ToArray() | Sort-Object)) {
+        $options.Add([pscustomobject]@{ Label=$value; Value=$value }) | Out-Null
+    }
+    return ConvertTo-LVArrayOutput -Value @($options.ToArray())
+}
+
 function Test-LVGuiFindingVisible {
     <#
         .SYNOPSIS
@@ -511,12 +577,28 @@ function Test-LVGuiFindingVisible {
     param(
         [Parameter(Mandatory)]$Row,
         [Parameter(Mandatory)][hashtable]$EnabledVerdict,
-        [AllowEmptyString()][AllowNull()][string]$Search
+        [AllowEmptyString()][AllowNull()][string]$Search,
+        [AllowNull()][hashtable]$StructuredFilter = @{}
     )
 
     $verdict = [string]$Row.Verdict
     if (-not $EnabledVerdict.ContainsKey($verdict) -or -not [bool]$EnabledVerdict[$verdict]) {
         return $false
+    }
+
+    foreach ($filterName in @('Source', 'Channel', 'Provider', 'EventId', 'RuleStatus', 'Correlation')) {
+        if (-not $StructuredFilter.ContainsKey($filterName)) { continue }
+        $selected = [string]$StructuredFilter[$filterName]
+        if (-not $selected) { continue }
+        if ($filterName -eq 'Correlation') {
+            $correlations = @($Row.CorrelationIds)
+            if ($selected -eq '__correlated__' -and $correlations.Count -eq 0) { return $false }
+            if ($selected -eq '__uncorrelated__' -and $correlations.Count -gt 0) { return $false }
+            if ($selected -notin @('__correlated__', '__uncorrelated__') -and $correlations -notcontains $selected) { return $false }
+            continue
+        }
+        $rowValue = [string]$Row.$filterName
+        if ($rowValue -ine $selected) { return $false }
     }
 
     $needle = [string]$Search

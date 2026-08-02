@@ -82,6 +82,7 @@ The artifact carries stable unknown/candidate IDs, source/provider/event context
 
 - **Overview** holds the scan controls, last-run state, reduction metrics, verdict distribution and the three highest-priority findings.
 - **Findings** is the diagnostic workspace. Verdict chips and the search box filter the list; selecting a row opens its plain-English ruling, concrete action and raw evidence beside it.
+- Structured findings filters narrow the virtualized list by source, channel, provider, event ID, correlation, or rule status. Click `VERDICT`, `TIMES`, `PER DAY`, or `LAST SEEN` to sort on the underlying rank/count/rate/timestamp rather than display text; the selected finding remains resolved by index from the one stored result graph.
 - **Coverage** makes the trust boundary explicit. Readable channels, event horizons, denied sources, crash artifacts and curated correlations have one page rather than being buried in a sidebar.
 - **Activity** shows the live collect, reduce, correlate, resolve and report stages, the full run transcript and a compact run summary.
 - **Save report** writes the same text, JSON and HTML bundle the console tool produces.
@@ -113,6 +114,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Case profile and responder handoff | Bounded collection metadata, redaction policy, source hashes, recipes, and attributed timelines | `New-LogVerdictCaseProfile`, `Export-LogVerdictHandoff` |
 | Bounded live event tail and bookmark resume | Module-only, opt-in workflow with reconnect/drop/latency coverage and optional WEF health intake | `Watch-LogVerdict` |
 | Large finding captures | Virtualized, recycling findings lists with indexed lazy detail resolution | GUI |
+| Structured finding filters and sorting | UI Automation-labelled source/channel/provider/event ID/correlation/rule-state filters plus count/rate/latest sorting over lightweight row projections | GUI |
 | GUI accessibility and scaling smoke | STA UI Automation names, keyboard targets, normal/high-contrast resources, long/error text, and 125% layout checks | `Tools/Test-LogVerdictGui.ps1` |
 | Opt-in diagnostic performance telemetry | Content-free source status, bounded counts, caps, and elapsed timing in JSON, text, HTML, CSV, and standard exports | `-PerformanceTelemetry` |
 | Content-free performance budgets | Temporary small, large, malformed-text, and malformed-EVTX fixtures; aggregate counts/status/timing only, checked on Windows PowerShell 5.1 and PowerShell 7.x | `Tools/Test-LogVerdictPerformance.ps1` |

@@ -3096,6 +3096,46 @@ Describe 'GUI pure presentation logic' {
         }
     }
 
+    It 'filters rows by structured source metadata without copying the finding graph' {
+        InModuleScope LogVerdict {
+            $findings = @(
+                [pscustomobject]@{
+                    Key='Disk/7'; Source='event'; Channel='System'; Provider='Disk'; Id=7
+                    Count=4; PerDay=2; LastSeen=(Get-Date); UndatedCount=0; SampleMessage='bad block'
+                    Verdict='investigate'; Title='Disk failure'; RuleId='LV-TEST'; Status='stable'
+                },
+                [pscustomobject]@{
+                    Key='CBS/test'; Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0
+                    Count=1; PerDay=0.5; LastSeen=(Get-Date).AddDays(-1); UndatedCount=1; SampleMessage='servicing failure'
+                    Verdict='unknown'; Title='Servicing failure'; RuleId=$null; Status=$null
+                }
+            )
+            $rows = @(ConvertTo-LVGuiRow -Finding $findings -CorrelationIdsByKey @{ 'Disk/7' = @('C-1') })
+            $row = $rows[0]
+            $row.PSObject.Properties.Name | Should -Not -Contain 'Finding'
+            $row.Source | Should -BeExactly 'event'
+            $row.Provider | Should -BeExactly 'Disk'
+            $row.EventId | Should -BeExactly '7'
+            $row.RuleStatus | Should -BeExactly 'stable'
+            @($row.CorrelationIds) | Should -Be @('C-1')
+
+            $options = @(Get-LVGuiFilterOption -Row $rows -Kind Correlation)
+            @($options | Where-Object { $_.Value -eq '' -and $_.Label -eq 'All correlations' }).Count | Should -Be 1
+            @($options | Where-Object { $_.Value -eq 'C-1' }).Count | Should -Be 1
+
+            $enabled = @{ investigate=$true; unknown=$true }
+            $filter = @{
+                Source='event'; Channel='System'; Provider='Disk'; EventId='7'
+                Correlation='C-1'; RuleStatus='stable'
+            }
+            Test-LVGuiFindingVisible -Row $row -EnabledVerdict $enabled -Search '' -StructuredFilter $filter | Should -BeTrue
+            $filter.Correlation = '__uncorrelated__'
+            Test-LVGuiFindingVisible -Row $row -EnabledVerdict $enabled -Search '' -StructuredFilter $filter | Should -BeFalse
+            $filter.Correlation = 'C-1'; $filter.Provider = 'CBS'
+            Test-LVGuiFindingVisible -Row $row -EnabledVerdict $enabled -Search '' -StructuredFilter $filter | Should -BeFalse
+        }
+    }
+
     It 'counts every display verdict and maps unexpected values to unknown' {
         InModuleScope LogVerdict {
             $count = Get-LVGuiVerdictCount -Finding @(

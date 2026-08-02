@@ -111,11 +111,24 @@ function Show-LogVerdictGui {
         SortKey    = $null
         SortAsc    = $false
         Chips      = @{}
+        StructuredFilters = @{
+            Source = ''; Channel = ''; Provider = ''; EventId = ''
+            Correlation = ''; RuleStatus = ''
+        }
         Scanning   = $false
         CurrentPage = 'Overview'
         ActivityLines = (New-Object System.Collections.Generic.List[string])
     }
     foreach ($v in $script:LVVerdictDisplayOrder) { $state.Chips[$v] = $true }
+
+    $structuredFilterControl = @{
+        Source = $ui.FltSource
+        Channel = $ui.FltChannel
+        Provider = $ui.FltProvider
+        EventId = $ui.FltEventId
+        Correlation = $ui.FltCorrelation
+        RuleStatus = $ui.FltRuleStatus
+    }
 
     $chipControl = @{
         'critical'      = $ui.FltCritical
@@ -187,7 +200,7 @@ function Show-LogVerdictGui {
 
         if ($shown -eq 0 -and $total -gt 0) {
             $ui.TxtEmptyTitle.Text = 'Nothing matches the filter'
-            $ui.TxtEmptyBody.Text = 'All ' + $total + ' finding(s) are hidden. Clear the search box, or switch a verdict back on in the left panel.'
+            $ui.TxtEmptyBody.Text = 'All ' + $total + ' finding(s) are hidden. Clear the search box, reset a structured filter, or switch a verdict back on in the left panel.'
             $ui.PnlEmpty.Visibility = 'Visible'
         } elseif ($shown -eq 0) {
             $ui.PnlEmpty.Visibility = 'Visible'
@@ -334,16 +347,40 @@ function Show-LogVerdictGui {
 
         $state.Result = $Result
         $state.FindingStore = @($Result.Findings)
-        $rows = ConvertTo-LVGuiRow -Finding $state.FindingStore -StartIndex 0
+        $correlationIdsByKey = @{}
+        foreach ($correlation in @($Result.Correlations | Where-Object { $_ })) {
+            $correlationId = [string]$correlation.Id
+            if (-not $correlationId) { continue }
+            foreach ($key in @($correlation.InvolvedKeys | Where-Object { $_ })) {
+                $keyText = [string]$key
+                if (-not $correlationIdsByKey.ContainsKey($keyText)) { $correlationIdsByKey[$keyText] = @() }
+                $correlationIdsByKey[$keyText] = @($correlationIdsByKey[$keyText] + $correlationId | Select-Object -Unique)
+            }
+        }
+        $rows = ConvertTo-LVGuiRow -Finding $state.FindingStore -StartIndex 0 -CorrelationIdsByKey $correlationIdsByKey
 
         $observable = New-Object 'System.Collections.ObjectModel.ObservableCollection[object]'
         foreach ($r in $rows) { $observable.Add($r) }
         $state.Rows = $observable
 
+        foreach ($kind in $structuredFilterControl.Keys) {
+            $control = $structuredFilterControl[$kind]
+            $options = @(Get-LVGuiFilterOption -Row @($rows) -Kind $kind)
+            $control.ItemsSource = [object[]]$options
+            $selected = [string]$state.StructuredFilters[$kind]
+            $selectedOption = @($options | Where-Object { [string]$_.Value -eq $selected } | Select-Object -First 1)
+            if ($selectedOption.Count -gt 0) {
+                $control.SelectedValue = $selectedOption[0].Value
+            } else {
+                $control.SelectedIndex = 0
+                $state.StructuredFilters[$kind] = ''
+            }
+        }
+
         $view = [System.Windows.Data.CollectionViewSource]::GetDefaultView($observable)
         $view.Filter = [Predicate[object]] {
             param($Item)
-            return Test-LVGuiFindingVisible -Row $Item -EnabledVerdict $state.Chips -Search $state.Search
+            return Test-LVGuiFindingVisible -Row $Item -EnabledVerdict $state.Chips -Search $state.Search -StructuredFilter $state.StructuredFilters
         }
         $state.View = $view
         $ui.LvFindings.ItemsSource = $view
@@ -705,7 +742,7 @@ function Show-LogVerdictGui {
         & $applyFilter
     })
 
-    foreach ($verdict in $script:LVVerdictDisplayOrder) {
+        foreach ($verdict in $script:LVVerdictDisplayOrder) {
         $chip = $chipControl[$verdict]
         # The verdict is stashed on the control so one handler serves all six chips;
         # capturing $verdict in the closure would leave every handler on the last value.
@@ -721,6 +758,19 @@ function Show-LogVerdictGui {
         }
         $chip.Add_Checked($handler)
         $chip.Add_Unchecked($handler)
+    }
+
+    foreach ($filterKind in $structuredFilterControl.Keys) {
+        $control = $structuredFilterControl[$filterKind]
+        $control.Tag = $filterKind
+        $control.Add_SelectionChanged({
+            param($SenderControl, $SelectionArgs)
+            $kind = [string]$SenderControl.Tag
+            $value = $SenderControl.SelectedValue
+            if ($null -eq $value) { $value = '' }
+            $state.StructuredFilters[$kind] = [string]$value
+            & $applyFilter
+        })
     }
 
     $ui.LvFindings.Add_SelectionChanged({

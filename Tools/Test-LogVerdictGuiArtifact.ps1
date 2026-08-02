@@ -220,6 +220,18 @@ try {
     Wait-SmokeElement -Description 'empty result state' -Getter { Find-SmokeText -Root $rootElement -Text 'Nothing to report' } | Out-Null
     Add-SmokeCheck -Id 'empty-state' -Passed $true -Details 'A source with no matching records reaches the visible empty state'
 
+    foreach ($filterName in @(
+        'Filter findings by source', 'Filter findings by channel',
+        'Filter findings by provider', 'Filter findings by event ID',
+        'Filter findings by correlation', 'Filter findings by rule status'
+    )) {
+        Wait-SmokeElement -Description "structured filter '$filterName'" -Getter {
+            Find-SmokeElement -Root $rootElement -Name $filterName -ControlType ([System.Windows.Automation.ControlType]::ComboBox)
+        } | Out-Null
+        Add-SmokeCheck -Id ('filter-' + $filterName.ToLowerInvariant().Replace(' ', '-')) -Passed $true `
+            -Details ("$filterName is keyboard-accessible through UI Automation")
+    }
+
     Invoke-SmokeButton -Root $rootElement -Name 'Overview' | Out-Null
     Set-SmokeText -Root $rootElement -Name 'Named event channels' -Value 'System'
     Invoke-SmokeButton -Root $rootElement -Name 'Run scan' | Out-Null

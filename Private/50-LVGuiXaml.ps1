@@ -328,6 +328,23 @@ function Get-LVGuiXaml {
       </Setter>
     </Style>
 
+    <Style x:Key="FilterCombo" TargetType="ComboBox">
+      <Setter Property="FocusVisualStyle" Value="{DynamicResource LVFocusVisual}"/>
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+      <Setter Property="Background" Value="{DynamicResource Crust}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Surface1}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="7,4"/>
+      <Setter Property="MinHeight" Value="30"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+
+    <Style TargetType="ComboBoxItem">
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+      <Setter Property="Background" Value="{DynamicResource Crust}"/>
+      <Setter Property="Padding" Value="7,5"/>
+    </Style>
+
     <!-- Section heading inside the detail pane -->
     <Style x:Key="SectionLabel" TargetType="TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
@@ -1020,6 +1037,7 @@ function Get-LVGuiXaml {
           <RowDefinition Height="Auto"/>
           <RowDefinition Height="Auto"/>
           <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
           <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -1066,7 +1084,40 @@ function Get-LVGuiXaml {
           <ToggleButton x:Name="FltBenign" Style="{StaticResource ChipToggle}" Tag="{DynamicResource Green}" IsChecked="True" Margin="0" FontSize="10.5"/>
         </UniformGrid>
 
-        <ListView x:Name="LvFindings" Grid.Row="3" Background="Transparent" BorderThickness="0"
+        <UniformGrid Grid.Row="3" Columns="6" Margin="22,0,16,10">
+          <StackPanel Margin="0,0,6,0">
+            <TextBlock Text="SOURCE" Style="{StaticResource PanelLabel}" Margin="0,0,0,4"/>
+            <ComboBox x:Name="FltSource" Style="{StaticResource FilterCombo}" DisplayMemberPath="Label"
+                      SelectedValuePath="Value" AutomationProperties.Name="Filter findings by source"/>
+          </StackPanel>
+          <StackPanel Margin="0,0,6,0">
+            <TextBlock Text="CHANNEL" Style="{StaticResource PanelLabel}" Margin="0,0,0,4"/>
+            <ComboBox x:Name="FltChannel" Style="{StaticResource FilterCombo}" DisplayMemberPath="Label"
+                      SelectedValuePath="Value" AutomationProperties.Name="Filter findings by channel"/>
+          </StackPanel>
+          <StackPanel Margin="0,0,6,0">
+            <TextBlock Text="PROVIDER" Style="{StaticResource PanelLabel}" Margin="0,0,0,4"/>
+            <ComboBox x:Name="FltProvider" Style="{StaticResource FilterCombo}" DisplayMemberPath="Label"
+                      SelectedValuePath="Value" AutomationProperties.Name="Filter findings by provider"/>
+          </StackPanel>
+          <StackPanel Margin="0,0,6,0">
+            <TextBlock Text="EVENT ID" Style="{StaticResource PanelLabel}" Margin="0,0,0,4"/>
+            <ComboBox x:Name="FltEventId" Style="{StaticResource FilterCombo}" DisplayMemberPath="Label"
+                      SelectedValuePath="Value" AutomationProperties.Name="Filter findings by event ID"/>
+          </StackPanel>
+          <StackPanel Margin="0,0,6,0">
+            <TextBlock Text="CORRELATION" Style="{StaticResource PanelLabel}" Margin="0,0,0,4"/>
+            <ComboBox x:Name="FltCorrelation" Style="{StaticResource FilterCombo}" DisplayMemberPath="Label"
+                      SelectedValuePath="Value" AutomationProperties.Name="Filter findings by correlation"/>
+          </StackPanel>
+          <StackPanel>
+            <TextBlock Text="RULE STATE" Style="{StaticResource PanelLabel}" Margin="0,0,0,4"/>
+            <ComboBox x:Name="FltRuleStatus" Style="{StaticResource FilterCombo}" DisplayMemberPath="Label"
+                      SelectedValuePath="Value" AutomationProperties.Name="Filter findings by rule status"/>
+          </StackPanel>
+        </UniformGrid>
+
+        <ListView x:Name="LvFindings" Grid.Row="4" Background="Transparent" BorderThickness="0"
                   Margin="22,0,16,14"
                   AutomationProperties.Name="Findings, worst first"
                   ItemContainerStyle="{StaticResource FindingRow}"
@@ -1123,7 +1174,7 @@ function Get-LVGuiXaml {
         </ListView>
 
         <!-- Shown before the first scan and whenever the filter empties the list. -->
-        <StackPanel x:Name="PnlEmpty" Grid.Row="3" VerticalAlignment="Center"
+        <StackPanel x:Name="PnlEmpty" Grid.Row="4" VerticalAlignment="Center"
                     HorizontalAlignment="Center" Margin="30">
           <TextBlock x:Name="TxtEmptyTitle" HorizontalAlignment="Center" FontSize="15"
                      Foreground="{DynamicResource Subtext0}" Text="Nothing scanned yet"/>

@@ -35,6 +35,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added content-free performance budgets for small, large, malformed-text, and malformed-EVTX
   fixtures. CI runs the aggregate-only benchmark on Windows PowerShell 5.1 and PowerShell 7.x
   and uploads timing reports without retaining fixture content.
+- Added structured Findings filters for source, channel, provider, event ID, correlation,
+  and rule status, with UI Automation names and empty-state guidance. Lightweight row
+  projections retain only filter/sort metadata and resolve detail from the single stored
+  finding graph; count, rate, and latest columns remain sortable by their raw values.
 
 ## [0.8.1] - 2026-08-02
 
