@@ -166,6 +166,17 @@ function Format-LVEvidenceManifest {
         }
         Add-LVLine $sb
     }
+    if ($Result.PSObject.Properties['Coverage'] -and @($Result.Coverage).Count -gt 0) {
+        Add-LVLine $sb 'COVERAGE SOURCES'
+        foreach ($source in @($Result.Coverage | Where-Object { $_ })) {
+            $detail = '{0}/{1} {2}: {3}' -f $source.Source, $source.Kind, $source.Name, $source.Status
+            if ($source.Reason) { $detail += ('; ' + $source.Reason) }
+            if ($source.RecordGap) { $detail += ('; gap: ' + $source.RecordGap) }
+            if ($source.ParserError) { $detail += ('; parser: ' + $source.ParserError) }
+            Add-LVLine $sb ('  - ' + $detail)
+        }
+        Add-LVLine $sb
+    }
 
     Add-LVLine $sb 'WHAT IS DELIBERATELY NOT HERE'
     if ($Redact) {

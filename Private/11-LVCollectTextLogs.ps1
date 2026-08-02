@@ -129,19 +129,29 @@ function Get-LVTextLogRecord {
     )
 
     $cutoff = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
+    $windowEnd = Get-Date
     $records = New-Object System.Collections.Generic.List[object]
+    $coverage = New-Object System.Collections.Generic.List[object]
 
     foreach ($target in $Target) {
         $path = $target.Path
         if (-not (Test-Path -LiteralPath $path)) {
             Write-LVLog -Level info -Message ("{0}: not present on this machine" -f $target.Name)
+            $coverage.Add((New-LVCoverageRecord -Source 'textlog' -Kind 'file' -Name $target.Name -Status 'not-observed' `
+                -Reason 'The file is not present on this machine.' -Path $path -WindowStart $cutoff -WindowEnd $windowEnd -Cap $MaxMatchesPerFile -Origin 'live')) | Out-Null
             continue
         }
 
         $file = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
-        if ($null -eq $file) { continue }
+        if ($null -eq $file) {
+            $coverage.Add((New-LVCoverageRecord -Source 'textlog' -Kind 'file' -Name $target.Name -Status 'unreadable' `
+                -Reason 'The file could not be opened for metadata.' -Path $path -WindowStart $cutoff -WindowEnd $windowEnd -Cap $MaxMatchesPerFile -Origin 'live')) | Out-Null
+            continue
+        }
         if ($file.LastWriteTime -lt $cutoff) {
             Write-LVLog -Level info -Message ("{0}: last written {1:yyyy-MM-dd}, outside the {2}-day window" -f $target.Name, $file.LastWriteTime, $DaysBack)
+            $coverage.Add((New-LVCoverageRecord -Source 'textlog' -Kind 'file' -Name $target.Name -Status 'not-observed' `
+                -Reason ('The file was last written {0:yyyy-MM-dd}, outside the requested window.' -f $file.LastWriteTime) -Path $path -WindowStart $cutoff -WindowEnd $windowEnd -Cap $MaxMatchesPerFile -SizeBytes $file.Length -Origin 'live')) | Out-Null
             continue
         }
 
@@ -150,6 +160,7 @@ function Get-LVTextLogRecord {
         $undated = 0
         $sectionTime = $null
         $reader = $null
+        $parserError = $null
 
         try {
             $stream = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
@@ -204,7 +215,11 @@ function Get-LVTextLogRecord {
                 }) | Out-Null
             }
         } catch {
+            $parserError = $_.Exception.Message
             Write-LVLog -Level warn -Message ("{0}: unreadable ({1})" -f $target.Name, $_.Exception.Message)
+            $coverage.Add((New-LVCoverageRecord -Source 'textlog' -Kind 'file' -Name $target.Name -Status 'unreadable' `
+                -Reason 'The text-log parser failed before the file was fully observed.' -Path $path -WindowStart $cutoff -WindowEnd $windowEnd `
+                -Cap $MaxMatchesPerFile -ParserError $parserError -SizeBytes $file.Length -Origin 'live')) | Out-Null
             continue
         } finally {
             if ($reader) { $reader.Dispose() }
@@ -219,8 +234,22 @@ function Get-LVTextLogRecord {
             if ($undated -gt 0)    { $detail += (' ({0} undated line(s))' -f $undated) }
             Write-LVLog -Level ok -Message ("{0}: {1} error line(s){2}" -f $target.Name, $matched, $detail)
         }
+        $status = if ($matched -ge $MaxMatchesPerFile) { 'truncated' } elseif ($matched -gt 0) { 'readable' } else { 'empty' }
+        $reason = if ($status -eq 'truncated') {
+            ('The per-file match cap of {0} was reached; observed lines are a lower bound.' -f $MaxMatchesPerFile)
+        } elseif ($matched -eq 0 -and $skippedOld -gt 0) {
+            ('No matching error line was observed in the requested window; {0} older line(s) were skipped.' -f $skippedOld)
+        } elseif ($matched -eq 0) {
+            'No matching error-shaped line was observed in the requested window.'
+        } elseif ($undated -gt 0) {
+            ('Observed {0} matching line(s); {1} had no parseable timestamp.' -f $matched, $undated)
+        } else { $null }
+        $coverage.Add((New-LVCoverageRecord -Source 'textlog' -Kind 'file' -Name $target.Name -Status $status `
+            -Reason $reason -Path $path -WindowStart $cutoff -WindowEnd $windowEnd -Cap $MaxMatchesPerFile `
+            -ObservedRecords $matched -SkippedRecords $skippedOld -SizeBytes $file.Length -ParserError $parserError -Origin 'live')) | Out-Null
     }
 
+    $script:LVTextLogCoverage = @($coverage.ToArray())
     return ConvertTo-LVArrayOutput -Value @($records.ToArray())
 }
 

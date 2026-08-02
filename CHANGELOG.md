@@ -20,6 +20,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Offline analysis now accepts a direct EVTX file or directory with bounded file/byte/event
   limits, streaming source hashes, parser timing, malformed-file status, and a per-source
   evidence manifest.
+- Added normalized per-source coverage to live and offline results and to JSON, HTML, CSV,
+  and evidence-manifest output, distinguishing empty sources from missing, denied, unreadable,
+  and truncated sources while retaining caps, windows, parser errors, record gaps, timing, and
+  source metadata through redaction.
 
 ## [0.8.0] - 2026-08-01
 

@@ -37,6 +37,8 @@ viewer and text-log specialist.
 
 SetupDiag is never downloaded or trusted by filename alone. Normal discovery accepts only an existing executable with a valid Authenticode signature from Microsoft Corporation or Microsoft Windows. An unsigned, invalid, or differently signed candidate is reported as a coverage gap and the built-in Panther rules continue without executing it.
 
+Every scan also emits normalized per-source coverage in JSON, HTML, CSV, and evidence manifests. Each event channel, text log, and offline EVTX source records whether it was readable, empty, not observed, unreadable, or truncated, along with its reason, cap, time window, parser error, record gap, timing, and source metadata. `empty` means the source was observed but had no matching event; a missing, denied, or failed source remains explicitly distinct.
+
 ## How it works
 
 ```

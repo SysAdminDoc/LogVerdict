@@ -169,6 +169,7 @@ function ConvertTo-LVFlatFindingRow {
 
     foreach ($finding in @($Result.Findings | Where-Object { $_ })) {
         [pscustomobject][ordered]@{
+            RowType           = 'finding'
             ScanTime          = if ($Result.ScanTime) { ([datetime]$Result.ScanTime).ToString('o') } else { $null }
             MachineName       = $Result.MachineName
             DaysBack          = $Result.DaysBack
@@ -198,7 +199,39 @@ function ConvertTo-LVFlatFindingRow {
             BurstOnset        = if ($finding.PSObject.Properties['BurstOnset'] -and $finding.BurstOnset) { ([datetime]$finding.BurstOnset).ToString('o') } else { $null }
             BurstCount        = if ($finding.PSObject.Properties['BurstCount']) { $finding.BurstCount } else { $null }
             BurstWindowMinutes = if ($finding.PSObject.Properties['BurstWindowMinutes']) { $finding.BurstWindowMinutes } else { $null }
+            CoverageSource    = $null; CoverageKind = $null; CoverageName = $null; CoverageStatus = $null
+            CoverageReason    = $null; CoveragePath = $null; CoverageWindowStart = $null; CoverageWindowEnd = $null
+            CoverageCap       = $null; CoverageObservedRecords = $null; CoverageSkippedRecords = $null
+            CoverageRecordGap = $null; CoverageParserError = $null; CoverageSizeBytes = $null
+            CoverageParseMilliseconds = $null; CoverageSHA256 = $null; CoverageOrigin = $null
         }
+    }
+}
+
+function ConvertTo-LVCoverageCsvRow {
+    param([Parameter(Mandatory)]$Result, [Parameter(Mandatory)]$Coverage)
+
+    return [pscustomobject][ordered]@{
+        RowType           = 'coverage'
+        ScanTime          = if ($Result.ScanTime) { ([datetime]$Result.ScanTime).ToString('o') } else { $null }
+        MachineName       = $Result.MachineName
+        DaysBack          = $Result.DaysBack
+        Elevated          = $Result.Elevated
+        Channel           = $null; Source = $null; Provider = $null; Id = $null; Key = $null
+        Count             = $null; PerDay = $null; FirstSeen = $null; LastSeen = $null
+        Verdict           = $null; Title = $null; RuleId = $null; Confidence = $null
+        Plain             = $null; Why = $null; Action = $null; SampleMessage = $null
+        ErrorCode         = $null; ErrorCatalogKind = $null; ErrorName = $null; Reference = $null
+        Burst             = $null; BurstOnset = $null; BurstCount = $null; BurstWindowMinutes = $null
+        CoverageSource    = $Coverage.Source; CoverageKind = $Coverage.Kind; CoverageName = $Coverage.Name
+        CoverageStatus    = $Coverage.Status; CoverageReason = $Coverage.Reason; CoveragePath = $Coverage.Path
+        CoverageWindowStart = if ($Coverage.WindowStart) { ([datetime]$Coverage.WindowStart).ToString('o') } else { $null }
+        CoverageWindowEnd = if ($Coverage.WindowEnd) { ([datetime]$Coverage.WindowEnd).ToString('o') } else { $null }
+        CoverageCap       = $Coverage.Cap; CoverageObservedRecords = $Coverage.ObservedRecords
+        CoverageSkippedRecords = $Coverage.SkippedRecords; CoverageRecordGap = $Coverage.RecordGap
+        CoverageParserError = $Coverage.ParserError; CoverageSizeBytes = $Coverage.SizeBytes
+        CoverageParseMilliseconds = $Coverage.ParseMilliseconds; CoverageSHA256 = $Coverage.SHA256
+        CoverageOrigin    = $Coverage.Origin
     }
 }
 
@@ -207,6 +240,9 @@ function ConvertTo-LVCsvReport {
     param([Parameter(Mandatory)]$Result)
 
     $rows = @(ConvertTo-LVFlatFindingRow -Result $Result)
+    foreach ($coverage in @($Result.Coverage | Where-Object { $_ })) {
+        $rows += ConvertTo-LVCoverageCsvRow -Result $Result -Coverage $coverage
+    }
     if ($rows.Count -gt 0) {
         return (($rows | ConvertTo-Csv -NoTypeInformation) -join [Environment]::NewLine) + [Environment]::NewLine
     }
@@ -214,6 +250,7 @@ function ConvertTo-LVCsvReport {
     # Preserve the header even when a clean scan has no findings, so a downstream
     # importer can bind columns without a special empty-file branch.
     $header = [pscustomobject][ordered]@{
+        RowType = $null
         ScanTime = $null; MachineName = $null; DaysBack = $null; Elevated = $null
         Channel = $null; Source = $null; Provider = $null; Id = $null; Key = $null
         Count = $null; PerDay = $null; FirstSeen = $null; LastSeen = $null
@@ -221,6 +258,11 @@ function ConvertTo-LVCsvReport {
         Plain = $null; Why = $null; Action = $null; SampleMessage = $null
         ErrorCode = $null; ErrorCatalogKind = $null; ErrorName = $null; Reference = $null
         Burst = $null; BurstOnset = $null; BurstCount = $null; BurstWindowMinutes = $null
+        CoverageSource = $null; CoverageKind = $null; CoverageName = $null; CoverageStatus = $null
+        CoverageReason = $null; CoveragePath = $null; CoverageWindowStart = $null; CoverageWindowEnd = $null
+        CoverageCap = $null; CoverageObservedRecords = $null; CoverageSkippedRecords = $null
+        CoverageRecordGap = $null; CoverageParserError = $null; CoverageSizeBytes = $null
+        CoverageParseMilliseconds = $null; CoverageSHA256 = $null; CoverageOrigin = $null
     }
     $headerLine = @($header | ConvertTo-Csv -NoTypeInformation)[0]
     return ([string]$headerLine) + [Environment]::NewLine
@@ -267,6 +309,19 @@ function ConvertTo-LVTextReport {
         Add-LVLine $sb 'COVERAGE - what this scan could NOT see:'
         foreach ($note in @($Result.CoverageNotes)) {
             Add-LVLine $sb ('  - {0}' -f $note)
+        }
+        Add-LVLine $sb
+    }
+    if (@($Result.Coverage).Count -gt 0) {
+        Add-LVLine $sb 'COVERAGE DETAIL - per-source status:'
+        foreach ($source in @($Result.Coverage | Where-Object { $_ })) {
+            $detail = '{0}/{1} {2} - {3}' -f $source.Source, $source.Kind, $source.Name, $source.Status
+            if ($source.Reason) { $detail += ('; ' + $source.Reason) }
+            if ($null -ne $source.ObservedRecords) { $detail += ('; {0} observed' -f $source.ObservedRecords) }
+            if ($null -ne $source.Cap) { $detail += ('; cap {0}' -f $source.Cap) }
+            if ($source.RecordGap) { $detail += ('; gap: ' + $source.RecordGap) }
+            if ($source.ParserError) { $detail += ('; parser: ' + $source.ParserError) }
+            Add-LVLine $sb ('  - ' + $detail)
         }
         Add-LVLine $sb
     }
@@ -507,6 +562,19 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             Add-LVLine $sb ('<li>{0}</li>' -f (ConvertTo-LVHtmlEncoded $note))
         }
         Add-LVLine $sb '</ul></div>'
+    }
+    if (@($Result.Coverage).Count -gt 0) {
+        Add-LVLine $sb '<h2>Coverage detail</h2><div class="sub">Every source is classified separately: empty means observed with no matching event; other statuses describe evidence that was not observed or could not be read.</div>'
+        foreach ($source in @($Result.Coverage | Where-Object { $_ })) {
+            $label = '{0}/{1} - {2}' -f $source.Source, $source.Kind, $source.Name
+            $detail = New-Object 'System.Collections.Generic.List[string]'
+            $detail.Add([string]$source.Status) | Out-Null
+            if ($source.Reason) { $detail.Add([string]$source.Reason) | Out-Null }
+            if ($null -ne $source.ObservedRecords) { $detail.Add(('{0} observed' -f $source.ObservedRecords)) | Out-Null }
+            if ($source.RecordGap) { $detail.Add(('gap: ' + [string]$source.RecordGap)) | Out-Null }
+            if ($source.ParserError) { $detail.Add(('parser: ' + [string]$source.ParserError)) | Out-Null }
+            Add-LVLine $sb ('<div class="row"><div class="lbl">{0}</div><div>{1}</div></div>' -f (ConvertTo-LVHtmlEncoded $label), (ConvertTo-LVHtmlEncoded ($detail -join '; ')))
+        }
     }
 
     $correlated = @($Result.Correlations | Where-Object { $_ })

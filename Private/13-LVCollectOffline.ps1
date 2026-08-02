@@ -663,6 +663,17 @@ function Invoke-LVOfflineScan {
             $reliabilityAvailable = [bool]$sourceReport.ReliabilityAvailable
         }
 
+        $coverageSources = New-Object System.Collections.Generic.List[object]
+        foreach ($source in @($evtxPlan.Manifest)) {
+            $coverageSources.Add((New-LVCoverageRecord -Source 'offline-evtx' -Kind 'file' -Name $source.Name -Status $source.Status `
+                -Reason $source.Reason -Path $source.Path -WindowStart ($started.AddDays(-1 * [Math]::Abs($effectiveDays))) -WindowEnd $started `
+                -Cap $MaxPerChannel -ObservedRecords $source.RecordCount -RecordGap $null -ParserError $(if ($source.Status -eq 'unreadable') { $source.Reason } else { $null }) `
+                -SizeBytes $source.SizeBytes -ParseMilliseconds $source.ParseMilliseconds -SHA256 $source.SHA256 -Origin 'offline')) | Out-Null
+        }
+        if ($sourceReport -and $sourceReport.PSObject.Properties['Coverage']) {
+            foreach ($source in @($sourceReport.Coverage | Where-Object { $_ })) { $coverageSources.Add($source) | Out-Null }
+        }
+
         return [pscustomobject]@{
             Tool           = 'LogVerdict'
             Version        = $script:LVVersion
@@ -682,6 +693,7 @@ function Invoke-LVOfflineScan {
             Correlations   = @($correlations)
             CrashArtifacts = @($crash)
             EvidenceManifest = @($evtxPlan.Manifest)
+            Coverage       = @($coverageSources.ToArray())
             Horizon        = $horizon
             HorizonWarning = $horizonWarning
             Stability      = $stability

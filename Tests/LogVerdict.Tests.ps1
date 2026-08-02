@@ -996,6 +996,8 @@ Describe 'Text-log collection against fixtures' {
             $target = @(@{ Name='HUGE'; Path=$p; Pattern='^\s*!!!'; Area='t'; Hint='t' })
             $rec = @(Get-LVTextLogRecord -DaysBack 30 -MaxMatchesPerFile 10 -Target $target)
             $rec.Count | Should -Be 10 -Because 'the cap must bound the result'
+            $script:LVTextLogCoverage[0].Status | Should -BeExactly 'truncated'
+            $script:LVTextLogCoverage[0].Cap | Should -Be 10
         }
     }
 
@@ -1005,6 +1007,7 @@ Describe 'Text-log collection against fixtures' {
             $target = @(@{ Name='GONE'; Path=(Join-Path $dir 'does-not-exist.log'); Pattern='.'; Area='t'; Hint='t' })
             $rec = @(Get-LVTextLogRecord -DaysBack 30 -Target $target)
             $rec.Count | Should -Be 0
+            $script:LVTextLogCoverage[0].Status | Should -BeExactly 'not-observed'
         }
     }
 }
@@ -1332,6 +1335,8 @@ Describe 'Event collection failure handling' {
             $rec = @(Get-LVEventRecord -Channel @('Fake') -DaysBack 30)
             $rec.Count | Should -Be 0
             $script:LVDeniedChannel.Count | Should -Be 0
+            $script:LVEventCoverage[0].Status | Should -BeExactly 'empty'
+            $script:LVEventCoverage[0].Reason | Should -Match 'No matching'
         }
     }
 
@@ -1347,6 +1352,8 @@ Describe 'Event collection failure handling' {
             $rec = @(Get-LVEventRecord -Channel @('Fake') -DaysBack 30)
             $rec.Count | Should -Be 0
             $script:LVDeniedChannel | Should -Contain 'Fake'
+            $script:LVEventCoverage[0].Status | Should -BeExactly 'not-observed'
+            $script:LVEventCoverage[0].ParserError | Should -Match 'localized: denied'
         }
     }
 
@@ -1363,6 +1370,8 @@ Describe 'Event collection failure handling' {
             $rec = @(Get-LVEventRecord -Channel @('Fake') -DaysBack 30 -MaxPerChannel 5)
             $rec.Count | Should -Be 5
             $script:LVTruncatedChannel | Should -Contain 'Fake'
+            $script:LVEventCoverage[0].Status | Should -BeExactly 'truncated'
+            $script:LVEventCoverage[0].Cap | Should -Be 5
         }
     }
 
@@ -1968,6 +1977,30 @@ Describe 'Report rendering' {
         $lines.Count | Should -Be 1
         $lines[0] | Should -Match 'ScanTime'
         @(Import-Csv -LiteralPath (Join-Path $out 'LogVerdict-Report.csv')).Count | Should -Be 0
+    }
+
+    It 'renders normalized source coverage in text, HTML, CSV, and the bundle manifest' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $result | Add-Member -NotePropertyName Coverage -NotePropertyValue @([pscustomobject]@{
+                Source='event'; Kind='channel'; Name='System'; Status='empty'
+                Reason='No matching event was observed'; Path=$null
+                WindowStart=(Get-Date).AddDays(-1); WindowEnd=(Get-Date); Cap=20000
+                ObservedRecords=0; SkippedRecords=0; RecordGap=$null; ParserError=$null
+                SizeBytes=$null; ParseMilliseconds=12; SHA256=$null; Origin='live'
+            })
+            $text = ConvertTo-LVTextReport -Result $result
+            $html = ConvertTo-LVHtmlReport -Result $result
+            $csv = ConvertTo-LVCsvReport -Result $result
+            $manifest = Format-LVEvidenceManifest -Result $result -Content @()
+            $text | Should -Match 'COVERAGE DETAIL.*per-source status'
+            $html | Should -Match 'Coverage detail'
+            @($csv | ConvertFrom-Csv | Where-Object RowType -eq 'coverage').Count | Should -Be 1
+            $csv | Should -Match 'CoverageStatus'
+            $manifest | Should -Match 'COVERAGE SOURCES'
+            $manifest | Should -Match 'System: empty'
+        }
     }
 
     It 'produces a self-contained page with no external requests' {
@@ -3535,12 +3568,22 @@ Describe 'Report redaction' {
                     SHA256='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
                     Status='parsed'; Reason=$null; ParseMilliseconds=12; RecordCount=1
                 })
+                Coverage = @([pscustomobject]@{
+                    Source='offline-evtx'; Kind='file'; Name='System.evtx'
+                    Status='readable'; Path='C:\Users\bob\captures\System.evtx'
+                    Reason='captured from HOST-9 workstation'; RecordGap=$null; ParserError=$null
+                    SHA256='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+                })
                 Findings = @(); CrashArtifacts = @(); CoverageNotes = @()
             }
             $redacted = ConvertTo-LVRedactedResult -Result $result
             $redacted.EvidencePath | Should -Not -Match 'bob|HOST-9'
             $redacted.EvidenceManifest[0].Path | Should -Not -Match 'bob|HOST-9'
             $redacted.EvidenceManifest[0].SHA256 | Should -BeExactly $result.EvidenceManifest[0].SHA256
+            $redacted.Coverage[0].Path | Should -Not -Match 'bob|HOST-9'
+            $redacted.Coverage[0].Reason | Should -Not -Match 'bob|HOST-9'
+            $redacted.Coverage[0].Status | Should -BeExactly 'readable'
+            $redacted.Coverage[0].SHA256 | Should -BeExactly $result.Coverage[0].SHA256
         }
     }
 

@@ -96,6 +96,7 @@ function Get-LVChannelStatus {
             Channel = $ch
             Access  = 'readable'
             Oldest  = $null
+            Reason  = $null
         }
         try {
             $oldest = Get-WinEvent -LogName $ch -Oldest -MaxEvents 1 -ErrorAction Stop
@@ -108,6 +109,7 @@ function Get-LVChannelStatus {
             } else {
                 $entry.Access = $kind
             }
+            $entry.Reason = $_.Exception.Message
         }
         $status[$ch] = $entry
     }
@@ -136,15 +138,18 @@ function Get-LVPopulatedChannel {
 
     $listErrors = $null
     $logs = @()
+    $script:LVChannelMetadataFailures = @()
     try {
         $logs = Get-WinEvent -ListLog * -ErrorAction SilentlyContinue -ErrorVariable listErrors |
             Where-Object { $_.RecordCount -ge $MinimumRecords }
     } catch {
         Write-LVLog -Level warn -Message ("Channel enumeration failed: {0}" -f $_.Exception.Message)
+        $script:LVChannelMetadataFailures = @($_.Exception.Message)
         return @()
     }
 
     $script:LVChannelMetadataErrorCount = @($listErrors).Count
+    $script:LVChannelMetadataFailures = @($listErrors | ForEach-Object { $_.Exception.Message })
     if ($script:LVChannelMetadataErrorCount -gt 0) {
         Write-LVLog -Level warn -Message ("{0} channel(s) would not report their metadata and were not enumerated; elevation may reveal more." -f $script:LVChannelMetadataErrorCount)
     }
@@ -183,6 +188,9 @@ function Get-LVEventRecord {
     $records = New-Object System.Collections.Generic.List[object]
     $denied = New-Object System.Collections.Generic.List[string]
     $truncated = New-Object System.Collections.Generic.List[string]
+    $coverage = New-Object System.Collections.Generic.List[object]
+    $windowStart = $since
+    $windowEnd = Get-Date
 
     $total = @($Channel).Count
     $done = 0
@@ -197,9 +205,24 @@ function Get-LVEventRecord {
         # A denied channel answers the FilterHashtable query with "no events found",
         # so trust the -LogName probe instead of asking and believing the answer.
         if ($ChannelStatus -and $ChannelStatus.ContainsKey($ch)) {
-            $access = $ChannelStatus[$ch].Access
-            if ($access -eq 'denied')  { $denied.Add($ch) | Out-Null; continue }
-            if ($access -eq 'missing') { continue }
+            $probe = $ChannelStatus[$ch]
+            $access = $probe.Access
+            if ($access -eq 'denied') {
+                $denied.Add($ch) | Out-Null
+                $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'not-observed' `
+                    -Reason 'Access was denied during the channel probe.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $probe.Reason -Origin 'live')) | Out-Null
+                continue
+            }
+            if ($access -eq 'missing') {
+                $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'not-observed' `
+                    -Reason 'The requested channel does not exist on this machine.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $probe.Reason -Origin 'live')) | Out-Null
+                continue
+            }
+            if ($access -eq 'unreadable') {
+                $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'unreadable' `
+                    -Reason 'The channel probe failed, so events were not observed.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $probe.Reason -Origin 'live')) | Out-Null
+                continue
+            }
         }
 
         $filter = @{ LogName = $ch; StartTime = $since }
@@ -215,14 +238,23 @@ function Get-LVEventRecord {
             $kind = Get-LVErrorKind -ErrorRecord $_
             if ($kind -eq 'denied') {
                 $denied.Add($ch) | Out-Null
+                $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'not-observed' `
+                    -Reason 'Access was denied while reading the channel.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $_.Exception.Message -Origin 'live')) | Out-Null
             } elseif ($kind -eq 'other') {
                 Write-LVLog -Level warn -Message ("Channel '{0}' unreadable: {1}" -f $ch, $_.Exception.Message)
+                $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'unreadable' `
+                    -Reason 'The channel parser failed before records could be observed.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -ParserError $_.Exception.Message -Origin 'live')) | Out-Null
+            } else {
+                $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'empty' `
+                    -Reason 'No matching error or warning event was observed in the requested window.' -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel -Origin 'live')) | Out-Null
             }
             continue
         }
 
         $events = @($events)
-        if ($events.Count -ge $MaxPerChannel) { $truncated.Add($ch) | Out-Null }
+        $isTruncated = ($events.Count -ge $MaxPerChannel)
+        if ($isTruncated) { $truncated.Add($ch) | Out-Null }
+        $metadataMissing = 0
 
         foreach ($e in $events) {
             $message = $e.Message
@@ -230,6 +262,7 @@ function Get-LVEventRecord {
                 # Provider metadata missing (uninstalled software, or an offline copy).
                 # Keep the record - the signature is still valid, the prose just is not.
                 $message = '(no message template registered for this provider on this machine)'
+                $metadataMissing++
             }
 
             $records.Add([pscustomobject]@{
@@ -245,12 +278,24 @@ function Get-LVEventRecord {
                 Message      = $message.Trim()
             }) | Out-Null
         }
+        $coverageStatus = if ($isTruncated) { 'truncated' } elseif ($events.Count -eq 0) { 'empty' } else { 'readable' }
+        $coverageReason = if ($isTruncated) {
+            ('The per-channel record cap of {0} was reached; observed records are a lower bound.' -f $MaxPerChannel)
+        } elseif ($events.Count -eq 0) {
+            'No matching error or warning event was observed in the requested window.'
+        } elseif ($metadataMissing -gt 0) {
+            ('{0} record(s) had no provider message template on this machine.' -f $metadataMissing)
+        } else { $null }
+        $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status $coverageStatus `
+            -Reason $coverageReason -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel `
+            -ObservedRecords $events.Count -Origin 'live')) | Out-Null
     }
 
     if ($total -gt 8) { Write-Progress -Id 2 -Activity 'LogVerdict: reading event channels' -Completed }
 
     $script:LVDeniedChannel = @($denied.ToArray())
     $script:LVTruncatedChannel = @($truncated.ToArray())
+    $script:LVEventCoverage = @($coverage.ToArray())
 
     if ($denied.Count -gt 0) {
         Write-LVLog -Level warn -Message ("Access denied on {0} channel(s): {1}. Re-run elevated for full coverage." -f $denied.Count, ($denied -join ', '))

@@ -20,6 +20,10 @@
         #
         # Without this exclusion the analyzer reports 25 findings of this one rule and
         # nothing else, which trains contributors to ignore its output entirely.
-        'PSAvoidUsingWriteHost'
+        'PSAvoidUsingWriteHost',
+
+        # New-LVCoverageRecord is an in-memory object factory. Its New-* verb is part of
+        # the project's existing constructor naming convention and does not mutate state.
+        'PSUseShouldProcessForStateChangingFunctions'
     )
 }

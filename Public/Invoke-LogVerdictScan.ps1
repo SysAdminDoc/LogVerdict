@@ -131,8 +131,11 @@ function Invoke-LogVerdictScan {
     # an empty one, so coverage has to be established with -LogName first or the scan
     # silently reports "nothing wrong" for channels it was never allowed to open.
     $script:LVChannelMetadataErrorCount = 0
+    $script:LVChannelMetadataFailures = @()
     $script:LVDeniedChannel = @()
     $script:LVTruncatedChannel = @()
+    $script:LVEventCoverage = @()
+    $script:LVTextLogCoverage = @()
 
     Write-LVLog -Level info -Message ('Probing {0} channel(s) for access and history...' -f @($channels).Count)
     $channelStatus = Get-LVChannelStatus -Channel $channels
@@ -185,13 +188,16 @@ function Invoke-LogVerdictScan {
         Write-LVLog -Level info -Message 'Reading Reliability Monitor...'
         # Handed the records collected so far so it can drop anything already seen in a
         # channel. Order matters: this has to run after the channel and text-log reads.
-        foreach ($r in (Get-LVReliabilityRecord -DaysBack $DaysBack -ExistingRecord @($records.ToArray()))) {
+        $reliabilityRecords = @(Get-LVReliabilityRecord -DaysBack $DaysBack -ExistingRecord @($records.ToArray()))
+        foreach ($r in $reliabilityRecords) {
             $records.Add($r) | Out-Null
         }
         $stability = Get-LVStabilityTrend -DaysBack $DaysBack
         if ($stability) {
             Write-LVLog -Level info -Message ('System stability index {0}/10, {1} over the window (low {2})' -f $stability.Current, $stability.Direction, $stability.Lowest)
         }
+    } else {
+        $reliabilityRecords = @()
     }
 
     $all = @($records.ToArray())
@@ -294,6 +300,37 @@ function Invoke-LogVerdictScan {
         $coverageNotes.Add('Crash artifacts were inventoried, but none contained supported readable header metadata. They remain available by path and were not interpreted as health.') | Out-Null
     }
 
+    $coverageSources = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @($script:LVEventCoverage) + @($script:LVTextLogCoverage)) {
+        if ($entry) { $coverageSources.Add($entry) | Out-Null }
+    }
+    if ($script:LVChannelMetadataErrorCount -gt 0) {
+        $coverageSources.Add((New-LVCoverageRecord -Source 'event' -Kind 'metadata' -Name 'channel enumeration' -Status 'not-observed' `
+            -Reason 'Channel metadata could not be read, so those channels were not enumerated.' `
+            -ParserError (($script:LVChannelMetadataFailures | Where-Object { $_ }) -join ' | ') -Origin 'live')) | Out-Null
+    }
+    foreach ($note in $sequenceNotes) {
+        $match = [regex]::Match([string]$note, "^Event channel '([^']+)' has")
+        if ($match.Success) {
+            $coverageEntry = @($coverageSources | Where-Object { $_.Source -eq 'event' -and $_.Name -eq $match.Groups[1].Value } | Select-Object -First 1)
+            if ($coverageEntry.Count -eq 1) { $coverageEntry[0].RecordGap = [string]$note }
+        }
+    }
+    if ($setupDiagStatus) {
+        $setupStatus = if ($setupDiagStatus.Status -in @('absent', 'no-recent-logs', 'untrusted')) { 'not-observed' } elseif ($setupDiagStatus.Status -in @('execution-failed', 'requires-elevation', 'invalid-output', 'no-output')) { 'unreadable' } else { 'readable' }
+        $coverageSources.Add((New-LVCoverageRecord -Source 'SetupDiag' -Kind 'tool' -Name 'SetupDiag' -Status $setupStatus `
+            -Reason ([string]$setupDiagStatus.Message) -Path $setupDiagStatus.ExecutablePath -WindowStart $cutoff -WindowEnd $started `
+            -ObservedRecords @($setupDiag.Records).Count -ParserError $(if ($setupStatus -eq 'unreadable') { [string]$setupDiagStatus.Message } else { $null }) -Origin 'live')) | Out-Null
+    }
+    $reliabilityStatus = if ($SkipReliability) { 'not-observed' } elseif (-not $script:LVReliabilityAvailable) { 'unreadable' } elseif (@($reliabilityRecords).Count -eq 0) { 'empty' } else { 'readable' }
+    $coverageSources.Add((New-LVCoverageRecord -Source 'reliability' -Kind 'provider' -Name 'Reliability Monitor' -Status $reliabilityStatus `
+        -Reason $(if ($SkipReliability) { 'Skipped by request.' } elseif (-not $script:LVReliabilityAvailable) { [string]$script:LVReliabilitySkipReason } elseif (@($reliabilityRecords).Count -eq 0) { 'No reliability records were observed in the requested window.' } else { $null }) `
+        -WindowStart $cutoff -WindowEnd $started -ObservedRecords @($reliabilityRecords).Count -Origin 'live')) | Out-Null
+    $coverageSources.Add((New-LVCoverageRecord -Source 'crash' -Kind 'directory' -Name 'WER and minidump inventory' `
+        -Status $(if ($SkipTextLogs) { 'not-observed' } elseif ($crash.Count -eq 0) { 'empty' } else { 'readable' }) `
+        -Reason $(if ($SkipTextLogs) { 'Skipped by request.' } elseif ($crash.Count -eq 0) { 'No readable crash artifact was observed in the inventory window.' } else { $null }) `
+        -WindowStart $started.AddDays(-1 * [Math]::Max($DaysBack, 90)) -WindowEnd $started -ObservedRecords $crash.Count -Origin 'live')) | Out-Null
+
     # Precomputed here so callers (including the entry script) never need a private helper.
     # Correlations count toward the worst verdict: a pairing that is graver than either
     # of its parts is the whole reason it exists, and an exit code that ignored it would
@@ -324,6 +361,7 @@ function Invoke-LogVerdictScan {
         TruncatedChannels = @($script:LVTruncatedChannel)
         MetadataUnreadableCount = [int]$script:LVChannelMetadataErrorCount
         CoverageNotes  = @($coverageNotes)
+        Coverage       = @($coverageSources.ToArray())
         Reduction      = $stat
         Findings       = @($findings)
         Correlations   = @($correlations)

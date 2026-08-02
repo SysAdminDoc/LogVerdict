@@ -23,10 +23,10 @@ Scope: user
 UpgradeBehavior: install
 Commands:
   - LogVerdict
-ReleaseDate: 2026-08-02
+ReleaseDate: 2026-08-01
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/SysAdminDoc/LogVerdict/releases/download/v0.8.0/LogVerdict.exe
-    InstallerSha256: 7D030D57359854E4FF7FA811BBE6E83B71191D073472599CC5F8206A76FA93D9
+    InstallerSha256: 1B07A74A89009348CC5637534071507A4A2AA5ECD12F04AF9994CFCA63289203
 ManifestType: singleton
 ManifestVersion: 1.12.0

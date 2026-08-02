@@ -178,6 +178,60 @@ function Write-LVTextFile {
     [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
 }
 
+function New-LVCoverageRecord {
+    <#
+        .SYNOPSIS
+        Create the stable per-source coverage shape shared by collectors and reports.
+
+        .DESCRIPTION
+        `empty` means a source was observed and no matching record existed. The
+        other non-success states deliberately describe evidence that was not
+        observed, was unreadable, or was bounded before the complete source could
+        be read. Keep all fields present so JSON, CSV and old callers can project
+        the same contract without guessing which collector supplied the record.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Status,
+        [AllowNull()][string]$Reason,
+        [AllowNull()][string]$Path,
+        [AllowNull()][Nullable[datetime]]$WindowStart,
+        [AllowNull()][Nullable[datetime]]$WindowEnd,
+        [AllowNull()]$Cap,
+        [int64]$ObservedRecords = 0,
+        [int64]$SkippedRecords = 0,
+        [AllowNull()][string]$RecordGap,
+        [AllowNull()][string]$ParserError,
+        [AllowNull()][Nullable[int64]]$SizeBytes,
+        [AllowNull()][Nullable[int64]]$ParseMilliseconds,
+        [AllowNull()][string]$SHA256,
+        [AllowNull()][string]$Origin
+    )
+
+    return [pscustomobject][ordered]@{
+        Source            = $Source
+        Kind              = $Kind
+        Name              = $Name
+        Status            = $Status
+        Reason            = $Reason
+        Path              = $Path
+        WindowStart       = $WindowStart
+        WindowEnd         = $WindowEnd
+        Cap               = $Cap
+        ObservedRecords   = $ObservedRecords
+        SkippedRecords    = $SkippedRecords
+        RecordGap         = $RecordGap
+        ParserError       = $ParserError
+        SizeBytes         = $SizeBytes
+        ParseMilliseconds = $ParseMilliseconds
+        SHA256            = $SHA256
+        Origin            = $Origin
+    }
+}
+
 function Get-LVLogTranscript {
     return ConvertTo-LVArrayOutput -Value @($script:LVLogLines.ToArray())
 }
@@ -483,6 +537,21 @@ function ConvertTo-LVRedactedResult {
             $entry
         }
         $copy.EvidenceManifest = @($sources)
+    }
+    if ($Result.PSObject.Properties['Coverage']) {
+        $coverage = foreach ($source in @($Result.Coverage)) {
+            $entry = [pscustomobject]@{}
+            foreach ($prop in $source.PSObject.Properties) {
+                $entry | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+            }
+            foreach ($name in @('Path', 'Name', 'Reason', 'RecordGap', 'ParserError')) {
+                if ($entry.PSObject.Properties[$name] -and $entry.$name) {
+                    $entry.$name = ConvertTo-LVRedactedText -Text ([string]$entry.$name) -MachineName $machine
+                }
+            }
+            $entry
+        }
+        $copy.Coverage = @($coverage)
     }
     if ($copy.PSObject.Properties['CoverageNotes']) {
         $copy.CoverageNotes = @(@($Result.CoverageNotes) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
