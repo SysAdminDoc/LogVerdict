@@ -21,6 +21,16 @@ function ConvertTo-LVErrorHex {
 
     if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
     $text = $Value.Trim()
+    if ($text -match '^-[0-9]+$') {
+        try {
+            $signed = [int64]$text
+        } catch {
+            return $null
+        }
+        if ($signed -lt -2147483648) { return $null }
+        $number = [uint64]($signed + [int64]4294967296)
+        return ('0x{0:X8}' -f [uint32]$number)
+    }
     if ($text -notmatch '^(?i:0x)?[0-9a-f]+$') { return $null }
     if ($text -notmatch '^(?i:0x)') { $text = '0x' + $text }
     try {
@@ -369,7 +379,7 @@ function Get-LVErrorCatalogMatch {
         }
     }
 
-    $decimal = [regex]::Matches($sample, '(?i)(?:error|err(?:or)?|code|status|hresult|exception|result)\s*(?:code\s*)?(?:is|was|=|:)\s*(?!0x)(\d{1,10})(?!\d)')
+    $decimal = [regex]::Matches($sample, '(?i)(?:error|err(?:or)?|code|status|hresult|exception|result)\s*(?:code\s*)?(?:is|was|=|:)\s*(?!0x)(-?\d{1,11})(?!\d)')
     foreach ($match in $decimal) {
         $hex = ConvertTo-LVErrorHex -Value $match.Groups[1].Value
         if (-not $hex) { continue }

@@ -2191,6 +2191,21 @@
         "Id": 0,
         "SampleMessage": "Microsoft SetupDiag 1.7.0.0 matched profile FindSPFatalError (A4028172-1B09-48F8-AD3B-86CDD7D55852). Failure: Err = 0x00000057, LastOperation = Gather data, LastPhase = Downlevel. Remediation: Refer to the documented system error code."
       }
+    },
+    {
+      "ruleId": "LV-0327",
+      "name": "signed composite error codes",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "textlog",
+        "Channel": "SetupDiag",
+        "Provider": "Microsoft SetupDiag",
+        "Id": 0,
+        "ResultCode": "-2146498529",
+        "ExtendCode": "-2147024894",
+        "SampleMessage": "Microsoft SetupDiag 1.7.0.0 matched profile FindSPFatalError (A4028172-1B09-48F8-AD3B-86CDD7D55852). Failure: ResultCode = -2146498529; ExtendCode = -2147024894."
+      }
     }
   ]
 }

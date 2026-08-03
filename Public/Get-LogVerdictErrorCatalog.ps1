@@ -50,6 +50,11 @@ function Get-LogVerdictErrorCatalog {
         } else {
             $entries = @($entries | Where-Object { $_.normalized.hex.ToUpperInvariant() -eq $normalized })
         }
+        if ($entries.Count -eq 0 -and $normalized -match '^0X8007[0-9A-F]{4}$' -and
+            (-not $Kind -or $Kind -eq 'win32')) {
+            $win32Hex = '0x{0:X8}' -f ([Convert]::ToUInt32($normalized.Substring(6), 16))
+            $entries = @($catalog.LVIndexes.ByHex[$win32Hex.ToUpperInvariant()] | Where-Object { $_.kind -eq 'win32' })
+        }
         if ($Name) { $entries = @($entries | Where-Object { $_.name -like $Name }) }
     }
     return ConvertTo-LVArrayOutput -Value $entries

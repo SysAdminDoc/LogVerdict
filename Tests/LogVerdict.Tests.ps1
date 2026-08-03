@@ -861,6 +861,36 @@ Describe 'Bundled Microsoft error catalog' {
           $update[0].name | Should -BeExactly 'WU_E_NOT_APPLICABLE'
     }
 
+    It 'normalizes sign-extended Int32 codes for contexts, lookups, and findings' {
+        InModuleScope LogVerdict {
+            ConvertTo-LVErrorHex -Value '-2146498529' | Should -BeExactly '0x800F081F'
+            ConvertTo-LVErrorHex -Value '-2147024894' | Should -BeExactly '0x80070002'
+
+            $context = New-LVErrorContext -InputObject ([pscustomobject]@{
+                ResultCode = '-2146498529'; ExtendCode = '-2147024894'
+            }) -Message 'signed codes'
+            $context.ResultCode | Should -BeExactly '0x800F081F'
+            $context.ExtendCode | Should -BeExactly '0x80070002'
+
+            $setup = @(Get-LogVerdictErrorCatalog -Hex '-2146498529')
+            $setup.Count | Should -Be 1
+            $setup[0].name | Should -BeExactly 'CBS_E_SOURCE_MISSING'
+            $file = @(Get-LogVerdictErrorCatalog -Hex '-2147024894')
+            $file.Count | Should -Be 1
+            $file[0].name | Should -BeExactly 'ERROR_FILE_NOT_FOUND'
+
+            $signature = [pscustomobject]@{
+                Key='signed/error'; Source='textlog'; Channel='SetupDiag'; Provider='Microsoft SetupDiag'; Id=0
+                SampleMessage='SetupDiag ResultCode = -2146498529; ExtendCode = -2147024894'
+                ResultCode=$context.ResultCode; ExtendCode=$context.ExtendCode; ErrorContext=$context
+                Count=1; PerDay=0.1
+            }
+            $finding = @(Resolve-LVVerdict -Signature @($signature) -Database ([pscustomobject]@{ rules=@() }))[0]
+            $finding.ErrorName | Should -BeExactly 'CBS_E_SOURCE_MISSING'
+            $finding.ErrorCode | Should -BeExactly '0x800F081F'
+        }
+    }
+
     It 'enriches unknown signatures without changing their unknown verdict' {
         InModuleScope LogVerdict {
             $hresultSignature = [pscustomobject]@{
