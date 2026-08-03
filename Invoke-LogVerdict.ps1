@@ -82,6 +82,10 @@
     .PARAMETER NoReport
     Console only; write nothing to disk.
 
+    .PARAMETER Redact
+    Mask captured identifiers in written reports and, when model explanations are
+    enabled, in the prompt-specific finding copy sent to the local Ollama endpoint.
+
     .PARAMETER AllowRawEvidence
     Explicitly authorize a forensic raw evidence bundle when -IncludeEvidence is used
     without -Redact. Raw bundles are never described as sanitized.
@@ -184,6 +188,7 @@ try {
         PerformanceTelemetry = $PerformanceTelemetry
         AllChannels     = $AllChannels
         DiagnosticChannels = $DiagnosticChannels
+        Redact          = $Redact
         ExplainUnknown  = $ExplainUnknown
         OllamaModel     = $OllamaModel
         OllamaEndpoint  = $OllamaEndpoint

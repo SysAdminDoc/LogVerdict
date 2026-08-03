@@ -109,6 +109,7 @@ function Invoke-LogVerdictScan {
         [switch]$IncludeBenign,
         [string]$DatabasePath,
         [string]$EvidencePath,
+        [switch]$Redact,
         [switch]$ExplainUnknown,
         [string]$OllamaModel = 'llama3.2',
         [string]$OllamaEndpoint = 'http://127.0.0.1:11434',
@@ -139,6 +140,7 @@ function Invoke-LogVerdictScan {
             PerformanceTelemetry = $PerformanceTelemetry
             IncludeBenign  = $IncludeBenign
             DatabasePath   = $DatabasePath
+            Redact         = $Redact
             ExplainUnknown = $ExplainUnknown
             OllamaModel    = $OllamaModel
             OllamaEndpoint = $OllamaEndpoint
@@ -446,7 +448,8 @@ function Invoke-LogVerdictScan {
     $promotedDrafts = @()
     if ($modelRequested) {
         Write-LVLog -Level info -Message ('Requesting non-remedial draft explanations for unknown signatures from local Ollama model {0}...' -f $OllamaModel)
-        $findings = @(Add-LVModelExplanation -Finding @($findings) -Model $OllamaModel -Endpoint $OllamaEndpoint)
+        $findings = @(Add-LVModelExplanation -Finding @($findings) -Model $OllamaModel -Endpoint $OllamaEndpoint `
+            -Redact:$Redact -MachineName $env:COMPUTERNAME -UserName $env:USERNAME)
     }
     if ($PromoteToRule) {
         $accepted = @($findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation })

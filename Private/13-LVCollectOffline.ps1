@@ -491,6 +491,7 @@ function Invoke-LVOfflineScan {
         [ValidateRange(1, 4294967296)][long]$MaxEvtxFileBytes = 536870912,
         [ValidateRange(1, 8589934592)][long]$MaxEvtxTotalBytes = 2147483648,
         [ValidateRange(1, 600)][int]$MaxEvtxParseSeconds = 120,
+        [switch]$Redact,
         [switch]$ExplainUnknown,
         [string]$OllamaModel = 'llama3.2',
         [string]$OllamaEndpoint = 'http://127.0.0.1:11434',
@@ -696,7 +697,11 @@ function Invoke-LVOfflineScan {
         $promotedDrafts = @()
         if ($modelRequested) {
             Write-LVLog -Level info -Message ('Requesting non-remedial draft explanations for unknown signatures from local Ollama model {0}...' -f $OllamaModel)
-            $findings = @(Add-LVModelExplanation -Finding @($findings) -Model $OllamaModel -Endpoint $OllamaEndpoint)
+            $explanationMachine = $env:COMPUTERNAME
+            if ($sourceReport -and $sourceReport.MachineName) { $explanationMachine = [string]$sourceReport.MachineName }
+            elseif ($records.Count -gt 0 -and $records[0].MachineName) { $explanationMachine = [string]$records[0].MachineName }
+            $findings = @(Add-LVModelExplanation -Finding @($findings) -Model $OllamaModel -Endpoint $OllamaEndpoint `
+                -Redact:$Redact -MachineName $explanationMachine -UserName $env:USERNAME)
         }
         if ($PromoteToRule) {
             $accepted = @($findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation })

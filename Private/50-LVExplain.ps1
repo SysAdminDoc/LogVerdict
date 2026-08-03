@@ -161,6 +161,30 @@ $sample
     return ConvertFrom-LVModelExplanationResponse -Response $response -Model $Model
 }
 
+function ConvertTo-LVModelRequestFinding {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Finding,
+        [string]$MachineName = $env:COMPUTERNAME,
+        [string]$UserName = $env:USERNAME
+    )
+
+    # Only the fields copied into Get-LVModelExplanation's prompt need to cross the
+    # model boundary. Keep the original object untouched so local callers retain the
+    # raw evidence for their normal report/export choice.
+    $copy = [pscustomobject]@{}
+    foreach ($property in $Finding.PSObject.Properties) {
+        $copy | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force
+    }
+    foreach ($name in @('Key', 'Source', 'Channel', 'Provider', 'SampleMessage')) {
+        if ($copy.PSObject.Properties[$name]) {
+            $copy.$name = ConvertTo-LVRedactedText -Text ([string]$copy.$name) `
+                -UserName $UserName -MachineName $MachineName
+        }
+    }
+    return $copy
+}
+
 function Add-LVModelExplanation {
     <#
         .SYNOPSIS
@@ -171,7 +195,10 @@ function Add-LVModelExplanation {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Finding,
         [string]$Model = 'llama3.2',
         [string]$Endpoint = 'http://127.0.0.1:11434',
-        [ValidateRange(1, 300)][int]$TimeoutSec = 45
+        [ValidateRange(1, 300)][int]$TimeoutSec = 45,
+        [switch]$Redact,
+        [string]$MachineName = $env:COMPUTERNAME,
+        [string]$UserName = $env:USERNAME
     )
 
     # Validate before inspecting the findings. Supplying an unsafe destination is an
@@ -180,15 +207,20 @@ function Add-LVModelExplanation {
 
     foreach ($item in @($Finding)) {
         if (-not $item -or $item.Verdict -ne 'unknown' -or $item.RuleId) { continue }
+        $requestFinding = $item
         try {
-            $draft = Get-LVModelExplanation -Finding $item -Model $Model -Endpoint $Endpoint -TimeoutSec $TimeoutSec
+            if ($Redact) {
+                $requestFinding = ConvertTo-LVModelRequestFinding -Finding $item `
+                    -MachineName $MachineName -UserName $UserName
+            }
+            $draft = Get-LVModelExplanation -Finding $requestFinding -Model $Model -Endpoint $Endpoint -TimeoutSec $TimeoutSec
             $item | Add-Member -NotePropertyName 'ModelExplanation' -NotePropertyValue $draft -Force
             if ($item.PSObject.Properties['ModelExplanationError']) {
                 $item.PSObject.Properties.Remove('ModelExplanationError')
             }
         } catch {
             $item | Add-Member -NotePropertyName 'ModelExplanationError' -NotePropertyValue $_.Exception.Message -Force
-            Write-LVLog -Level warn -Message ('Local model did not produce a safe candidate for {0}: {1}' -f $item.Key, $_.Exception.Message)
+            Write-LVLog -Level warn -Message ('Local model did not produce a safe candidate for {0}: {1}' -f $requestFinding.Key, $_.Exception.Message)
         }
     }
 

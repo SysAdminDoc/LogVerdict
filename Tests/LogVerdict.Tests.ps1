@@ -592,9 +592,13 @@ Describe 'Entry script launch behaviour' {
         $text = Get-Content -LiteralPath $entry -Raw
         $text | Should -Match '\[switch\]\$ExplainUnknown'
         $text | Should -Match 'ExplainUnknown\s*=\s*\$ExplainUnknown'
+        $text | Should -Match '\[switch\]\$Redact'
+        $text | Should -Match 'Redact\s*=\s*\$Redact'
         $text | Should -Match '\[switch\]\$PromoteToRule'
         $text | Should -Match 'PromoteToRule\s*=\s*\$PromoteToRule'
         $scan = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $scan | Should -Match '\[switch\]\$Redact'
+        $scan | Should -Match 'Redact\s*=\s*\$Redact'
         $scan | Should -Match '\$modelRequested\s*=\s*\[bool\]\(\$ExplainUnknown\s+-or\s+\$PromoteToRule\)'
     }
 
@@ -2693,6 +2697,33 @@ Describe 'Local model explanations' {
             $out[0].ModelExplanation.PSObject.Properties.Name | Should -Not -Contain 'Action'
             $out[0].Plain | Should -BeExactly 'deterministic fallback'
             $out[0].Action | Should -BeExactly 'deterministic action'
+        }
+    }
+
+    It 'redacts the outbound model prompt without mutating the retained finding' {
+        InModuleScope LogVerdict {
+            $script:LVModelRequestBody = $null
+            Mock Invoke-RestMethod {
+                $script:LVModelRequestBody = $Body
+                [pscustomobject]@{
+                    response = '{"summary":"This may describe a service failure.","evidence":["The provider emitted the event."],"uncertainty":"The underlying cause is not identified."}'
+                }
+            }
+            $finding = [pscustomobject]@{
+                Key='HOST-9/99'; Source='event'; Channel='System'; Provider='HOST-9 Provider'; Id=99
+                Count=2; PerDay=0.2; SampleMessage='HOST-9: jsmith opened C:\Users\jsmith\app.log'
+                Verdict='unknown'; RuleId=$null
+            }
+
+            $out = @(Add-LVModelExplanation -Finding @($finding) -Model 'test-model' -Redact `
+                -MachineName 'HOST-9' -UserName 'jsmith')
+            $requestBody = $script:LVModelRequestBody | ConvertFrom-Json
+            $requestBody.prompt | Should -Not -Match 'HOST-9'
+            $requestBody.prompt | Should -Not -Match 'jsmith'
+            $requestBody.prompt | Should -Not -Match 'C:\\Users\\jsmith'
+            $requestBody.prompt | Should -Match '<MACHINE>|<USER>'
+            $finding.SampleMessage | Should -BeExactly 'HOST-9: jsmith opened C:\Users\jsmith\app.log'
+            $out[0].ModelExplanation | Should -Not -BeNullOrEmpty
         }
     }
 
