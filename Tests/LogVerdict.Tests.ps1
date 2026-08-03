@@ -2986,6 +2986,35 @@ Describe 'Report rendering' {
         $parsed.Reduction.SignatureCount | Should -Be 71
     }
 
+    It 'round-trips structured EventData and UserData values in the JSON report' {
+        $result = $script:FakeResult | Select-Object *
+        $finding = $script:FakeResult.Findings[0] | Select-Object *
+        $finding | Add-Member -NotePropertyName StructuredData -NotePropertyValue ([pscustomobject]@{
+            EventData = [pscustomobject]@{
+                Image = @('C:\Tools\one.exe', 'C:\Tools\two.exe')
+                Code = '0x80070057'
+            }
+            UserData = [pscustomobject]@{
+                Status = 'Failed'
+                Component = 'CBS'
+            }
+        })
+        $result.Findings = @($finding)
+        $out = Join-Path $TestDrive 'reports-structured'
+        Export-LogVerdictReport -Result $result -OutputDir $out -Format Json | Out-Null
+        $json = Get-Content -LiteralPath (Join-Path $out 'LogVerdict-Report.json') -Raw
+        $parsed = $json | ConvertFrom-Json
+        $structured = $parsed.Findings[0].StructuredData
+
+        @($structured.EventData.Image).Count | Should -Be 2
+        @($structured.EventData.Image) | Should -Contain 'C:\Tools\one.exe'
+        @($structured.EventData.Image) | Should -Contain 'C:\Tools\two.exe'
+        $structured.EventData.Code | Should -BeExactly '0x80070057'
+        $structured.UserData.Status | Should -BeExactly 'Failed'
+        $structured.UserData.Component | Should -BeExactly 'CBS'
+        $json | Should -Not -Match 'System\.Object\[\]'
+    }
+
     It 'emits UTC ISO timestamps and ISO durations in the JSON report' {
         $result = $script:FakeResult | Select-Object *
         $finding = $script:FakeResult.Findings[0] | Select-Object *

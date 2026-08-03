@@ -105,6 +105,8 @@ function Test-LVJsonTimestampProperty {
     return $Name -match '^(?i:ScanTime|GeneratedAt|FirstSeen|LastSeen|BurstOnset|WindowStart|WindowEnd|OldestRecord|TimeCreated|StartTime|EndTime|Start|End|Times|scanTime|generatedAt|firstObserved|lastObserved|completed|started|windowStart|windowEnd|oldestRecord|timeCreated|timestampUtc|endTimestampUtc)$'
 }
 
+$script:LVJsonProjectionDepth = 64
+
 function ConvertTo-LVJsonSafeValue {
     <#
         Convert an object graph to the JSON representation used by reports and
@@ -119,7 +121,7 @@ function ConvertTo-LVJsonSafeValue {
     )
 
     if ($null -eq $Value) { return $null }
-    if ($Depth -gt 64) { return '[DEPTH-LIMIT]' }
+    if ($Depth -gt $script:LVJsonProjectionDepth) { return '[DEPTH-LIMIT]' }
     if ($Value -is [datetime] -or $Value -is [datetimeoffset]) {
         return ConvertTo-LVUtcTimestamp -Value $Value
     }

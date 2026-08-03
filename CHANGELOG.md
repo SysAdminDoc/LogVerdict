@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Redacted the prompt-specific finding copy sent to the local model when `-Redact` is combined with unknown-signature explanations, while retaining the raw finding for local report/export handling.
 - Bounded evidence ZIP expansion by bytes actually copied, with separate per-member and total caps that reject understated archive headers before unbounded disk growth.
+- Raised JSON report serialization to the safe projection depth and added a round-trip regression for structured EventData/UserData values.
 - Routed GUI finding copies through the deterministic redaction helper, made the existing redaction toggle cover both saved reports and clipboard payloads, and made the status line identify redacted versus unredacted copies.
 - Normalized report, JSONL, standard-export, CSV, case, evidence, and review timestamps to invariant RFC3339 UTC strings; durations now use ISO-8601 values instead of runtime-specific PowerShell objects. The offline release gate now validates generated report/evidence/case/review/provider documents against their shipped schemas and proves malformed variants are rejected.
 - Added one shared scan-result resolver so JSON reports reloaded with `ConvertFrom-Json` restore `ScanTime` and `Duration` for case profiles, handoffs, comparisons, console/report presentation, and all standard export formats.

@@ -94,7 +94,7 @@ function Export-LogVerdictReport {
         if ($wantAll -or $Format -contains 'Json') {
             $p = Join-Path $OutputDir 'LogVerdict-Report.json'
             $jsonResult = ConvertTo-LVJsonSafeValue -Value $Result
-            Write-LVTextFile -Path $p -Content ($jsonResult | ConvertTo-Json -Depth 30)
+            Write-LVTextFile -Path $p -Content ($jsonResult | ConvertTo-Json -Depth $script:LVJsonProjectionDepth)
             $written.Add($p) | Out-Null
         }
 
