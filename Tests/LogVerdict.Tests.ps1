@@ -296,7 +296,7 @@ Describe 'Dependency advisory knowledge' {
     It 'ships a valid hash-checked offline cache with separate fields' {
         Test-LogVerdictAdvisoryDatabase -Quiet | Should -BeTrue
         $advisory = @(Get-LogVerdictAdvisory -Package PowerShell -Version '7.4.0')
-        $advisory.Count | Should -Be 1
+        $advisory.Count | Should -Be 2
         $advisory[0].FindingType | Should -BeExactly 'dependency-advisory'
         $advisory[0].RecordType | Should -BeExactly 'advisory'
         $advisory[0].AffectedRange | Should -Match '7\.4\.14'
@@ -334,16 +334,32 @@ Describe 'Dependency advisory knowledge' {
         InModuleScope LogVerdict {
             $stale = Get-LVAdvisoryScanContext -Path $TestDrive\stale-advisories.json -Package PowerShell -Version '7.4.0'
             $stale.Status | Should -BeExactly 'stale'
-            @($stale.Records).Count | Should -Be 1
+            @($stale.Records).Count | Should -Be 2
             $missing = Get-LVAdvisoryScanContext -Path (Join-Path $TestDrive 'missing-advisories.json') -Package PowerShell -Version '7.4.0'
             $missing.Status | Should -BeExactly 'unavailable'
             @($missing.Records).Count | Should -Be 0
         }
     }
 
+    It 'makes the release gate reject an aged cache' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $path = Join-Path $TestDrive 'aged-release-advisories.json'
+        $cache = Get-Content -LiteralPath (Join-Path $root 'Data\advisories.json') -Raw | ConvertFrom-Json
+        $cache.updated = '2020-01-01'
+        $cache.source.retrieved = '2020-01-01'
+        $cache | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
+
+        $release = Join-Path $root 'Tools\Test-LogVerdictRelease.ps1'
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $release -AdvisoryPath $path 2>&1)
+        $LASTEXITCODE | Should -Not -Be 0
+        ($output -join "`n") | Should -Match 'Offline advisory cache is stale'
+    }
+
     It 'matches version ranges without treating fixed versions as affected' {
+        @((Get-LogVerdictAdvisory -Package PowerShell -Version '7.4.12')).Count | Should -Be 2
         @((Get-LogVerdictAdvisory -Package PowerShell -Version '7.4.13')).Count | Should -Be 1
         @((Get-LogVerdictAdvisory -Package PowerShell -Version '7.4.14')).Count | Should -Be 0
+        @((Get-LogVerdictAdvisory -Package PowerShell -Version '7.5.3')).Count | Should -Be 2
         @((Get-LogVerdictAdvisory -Package PowerShell -Version '7.5.4')).Count | Should -Be 1
         @((Get-LogVerdictAdvisory -Package PowerShell -Version '7.5.5')).Count | Should -Be 0
     }

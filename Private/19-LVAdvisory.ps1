@@ -37,6 +37,21 @@ function Get-LVAdvisorySourceHash {
     }
 }
 
+function Get-LVAdvisoryCacheSourceHash {
+    param([Parameter(Mandatory)]$Advisories)
+
+    $canonical = @($Advisories | Where-Object { $_ } | Sort-Object id | ForEach-Object {
+        '{0}:{1}' -f [string]$_.id, [string]$_.sourceHash
+    }) -join '|'
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [Text.Encoding]::UTF8.GetBytes($canonical)
+        return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 function ConvertTo-LVAdvisoryDate {
     param([AllowNull()][string]$Value)
 
@@ -245,6 +260,12 @@ function Get-LVAdvisoryDatabaseProblem {
     }
     foreach ($coverageProblem in @(Get-LVAdvisoryCoverageProblem -Database $Database)) {
         $problems.Add($coverageProblem) | Out-Null
+    }
+    if ([string]$Database.sourceHash -match '^(?i:[0-9a-f]{64})$') {
+        $expectedCacheHash = Get-LVAdvisoryCacheSourceHash -Advisories $Database.advisories
+        if ([string]$Database.sourceHash -ine $expectedCacheHash) {
+            $problems.Add('cache sourceHash does not match its normalized advisory metadata') | Out-Null
+        }
     }
     return @($problems.ToArray())
 }

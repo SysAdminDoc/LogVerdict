@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [0.8.2] - 2026-08-02
 
+- Refreshed the offline PowerShell advisory cache with CVE-2026-26143 and CVE-2025-25004 coverage, added normalized cache-source integrity validation, and documented the explicit NVD-backed atomic refresh command. Release-gate tests now prove that an aged cache fails before a fresh run is trusted.
 - Added an explicit, versioned provider extension contract with hash-pinned entrypoints and fixtures, mandatory redaction, shared collection budgets, provider coverage, report projections, and an `-AllowUntrustedProvider` execution gate.
 - Added bounded JSONL timeline exports for standard and case handoffs, with UTC timestamps, event/finding/correlation/coverage/provider records, source record IDs, rule provenance, and explicit raw/redacted state.
 - Added versioned GUI/report localization resources with de-DE and ja-JP coverage, deterministic English fallback, packaged-resource embedding, and locale-aware text, HTML, and CSV presentation labels.

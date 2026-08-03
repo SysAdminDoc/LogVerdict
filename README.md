@@ -158,6 +158,14 @@ LogVerdict.exe -AdvisoryPackage PowerShell -AdvisoryVersion 7.4.0  match the shi
 
 The dependency/tool advisory cache is a separate, offline knowledge class. `-AdvisoryPackage` and `-AdvisoryVersion` match a package against `affectedRange`; the report carries fixed version, CVSS/vector, KEV state/date, publication and modification dates, source URL, and source hash under a distinct **DEPENDENCY ADVISORIES** section. These records never enter `Findings`, correlations, `WorstVerdict`, or the event exit code. `Get-LogVerdictAdvisory -Path .\Data\advisories.json -Package PowerShell -Version 7.4.0` queries the same cache without scanning logs. `Update-LogVerdictAdvisoryDatabase` is explicit and requires a SHA-256 digest, so an air-gapped cache can be staged with `-SourcePath` and used without a network.
 
+Refresh the committed PowerShell advisory snapshot explicitly when the release gate reports that its 60-day UTC freshness window is nearing expiry:
+
+```powershell
+.\Tools\Refresh-LogVerdictAdvisoryCache.ps1
+```
+
+The helper reads the two supported PowerShell CVEs from the NVD 2.0 API, derives the affected 7.4/7.5 ranges from the returned CPE records, validates the generated cache through the module, and installs it atomically. Normal scans and offline release gates never make a network request.
+
 Case profiles make a scan repeatable without copying raw event messages. `New-LogVerdictCaseProfile` records the selected sources, time bounds, redaction policy, operator choices, notes, and per-source SHA-256 values under a canonical profile id. `Invoke-LogVerdictScan -CaseProfilePath` attaches a validated profile for attribution; it does not override explicit scan parameters. `Export-LogVerdictHandoff` writes the profile, reviewable KAPE and Velociraptor collection recipes, deterministic attributed Timesketch and Hayabusa CSV timelines, and `LogVerdict-Timeline.jsonl`. The JSONL file is UTF-8 without a BOM, emits one versioned metadata/event/finding/correlation/coverage/provider object per line, normalizes timestamps to UTC, carries provider/channel/event/record IDs and rule provenance, and states whether the line is raw or redacted. It is written incrementally and atomically, so large handoffs do not create a second complete output graph. Timesketch rows include `message`, `datetime`, and `timestamp_desc`; source hashes and the profile id remain on every handoff row. The handoff contains normalized findings, not raw EVTX.
 The cache declares a 60-day UTC freshness threshold and reports fresh, stale, or unavailable state in advisory scan context. A stale or unavailable cache never changes event findings, WorstVerdict, or the event exit code; the release gate rejects stale metadata until the cache is refreshed.
 The shipped coverage manifest records Windows PowerShell 5.1 and PowerShell 7.x verification, plus the pinned Pester 5.9.0, PSScriptAnalyzer 1.25.0, and ps2exe 1.0.18 roles and runtimes.

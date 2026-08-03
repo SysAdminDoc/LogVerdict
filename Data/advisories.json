@@ -1,13 +1,13 @@
 {
   "schemaVersion": 2,
   "name": "LogVerdict reviewed dependency and tool advisory cache",
-  "updated": "2026-06-17",
+  "updated": "2026-08-03",
   "source": {
-    "name": "National Vulnerability Database",
-    "uri": "https://nvd.nist.gov/vuln/detail/CVE-2026-26143",
-    "retrieved": "2026-08-02"
+    "name": "National Vulnerability Database 2.0 API",
+    "uri": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+    "retrieved": "2026-08-03"
   },
-  "sourceHash": "8825e502419a9d3a7543c28be003f5da74696657a568f9b84a6a32d3b8ac59b8",
+  "sourceHash": "6703080aac93980cbe8ad208ceec65a2e514df4e7714d11ff666852daad25601",
   "freshness": {
     "maxCacheAgeDays": 60,
     "maxSourceAgeDays": 60,
@@ -76,9 +76,27 @@
       "modifiedDate": "2026-06-17",
       "source": "NVD/Microsoft",
       "sourceUri": "https://nvd.nist.gov/vuln/detail/CVE-2026-26143",
-      "sourceHash": "9573ae4bd7384cd11553ca18c213686259a275c95807192b8073cdebda8605e9",
       "title": "PowerShell improper input validation",
-      "description": "Improper input validation can allow a local unauthorized attacker to bypass a security feature. This advisory is dependency context, not a Windows event verdict."
+      "description": "Improper input validation in Microsoft PowerShell allows an unauthorized attacker to bypass a security feature locally. This advisory is dependency context, not a Windows event verdict.",
+      "sourceHash": "9573ae4bd7384cd11553ca18c213686259a275c95807192b8073cdebda8605e9"
+    },
+    {
+      "id": "CVE-2025-25004",
+      "ecosystem": "PowerShell",
+      "package": "PowerShell",
+      "affectedRange": ">=7.4.0 <7.4.13; >=7.5.0 <7.5.4",
+      "fixedVersion": "7.4.13 (7.4); 7.5.4 (7.5)",
+      "cvss": 7.3,
+      "cvssVector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:R/S:U/C:H/I:H/A:H",
+      "kev": false,
+      "kevDate": null,
+      "publishedDate": "2025-10-14",
+      "modifiedDate": "2026-06-17",
+      "source": "NVD/Microsoft",
+      "sourceUri": "https://nvd.nist.gov/vuln/detail/CVE-2025-25004",
+      "title": "PowerShell improper access control",
+      "description": "Improper access control in Microsoft PowerShell allows an authorized attacker to elevate privileges locally. This advisory is dependency context, not a Windows event verdict.",
+      "sourceHash": "9a44d137b6dfce0d2232ba4b1a5b5418e2a47ca12f7e4462e5b15f8a0b5ff8c9"
     }
   ]
 }
