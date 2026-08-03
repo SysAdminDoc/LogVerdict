@@ -2379,6 +2379,25 @@ Describe 'Verdict resolution' {
         }
     }
 
+    It 'emits empty optional collections instead of phantom null members' {
+        InModuleScope LogVerdict {
+            $db = [pscustomobject]@{ schemaVersion = 2; rules = @(
+                [pscustomobject]@{
+                    id = 'EMPTY-OPTIONALS'; status = 'stable'; verified = '2026-07-31'
+                    match = [pscustomobject]@{ source = 'event'; provider = 'Acme'; eventId = 7 }
+                    verdict = 'investigate'; title = 't'; plain = 'p'; why = 'w'; action = 'a'; confidence = 'high'
+                }) }
+            $sig = [pscustomobject]@{
+                Key = 'Acme/7'; Source = 'event'; Channel = 'System'; Provider = 'Acme'; Id = 7
+                Count = 1; PerDay = 0.1; SampleMessage = 'm'; FirstSeen = (Get-Date); LastSeen = (Get-Date)
+            }
+            $finding = @(Resolve-LVVerdict -Signature @($sig) -Database $db)[0]
+            foreach ($name in @('References', 'Sources', 'FalsePositives')) {
+                @($finding.$name).Count | Should -Be 0 -Because "$name must be an empty collection"
+            }
+        }
+    }
+
     It 'marks an unmatched compact cluster as a burst without changing unknown' {
         InModuleScope LogVerdict -Parameters @{ db = $script:TestDb } {
             param($db)
@@ -4826,6 +4845,17 @@ Describe 'Correlation' {
             Build-Sig -RuleId 'R-2' -Key 'b' -Times @([datetime]'2026-06-20 09:00:10')
         )
         @(Invoke-Correlate -Finding $findings -Database (Build-CorrDb)).Count | Should -Be 1
+    }
+
+    It 'emits empty correlation provenance collections instead of null members' {
+        $findings = @(
+            Build-Sig -RuleId 'R-1' -Key 'a' -Times @([datetime]'2026-06-20 09:00:00')
+            Build-Sig -RuleId 'R-2' -Key 'b' -Times @([datetime]'2026-06-20 09:00:10')
+        )
+        $correlation = @(Invoke-Correlate -Finding $findings -Database (Build-CorrDb))[0]
+        foreach ($name in @('References', 'Sources', 'FalsePositives')) {
+            @($correlation.$name).Count | Should -Be 0 -Because "$name must be an empty collection"
+        }
     }
 
     It 'renders correlations above the flat findings list in the text report' {

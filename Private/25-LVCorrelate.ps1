@@ -263,9 +263,9 @@ function Resolve-LVCorrelation {
             Why           = $rule.why
             Action        = $rule.action
             Confidence    = $rule.confidence
-            References    = @($rule.references)
-            Sources       = @($rule.sources)
-            FalsePositives = @($rule.falsepositives)
+            References    = @($rule.references | Where-Object { $_ })
+            Sources       = @($rule.sources | Where-Object { $_ })
+            FalsePositives = @($rule.falsepositives | Where-Object { $_ })
             Windows       = @($windows)
             OccurrenceCount = @($windows | ForEach-Object { @($_.Occurrences).Count } | Measure-Object -Sum).Sum
             InvolvedKeys  = @($involved | Select-Object -ExpandProperty Key)

@@ -417,7 +417,7 @@ function Resolve-LVVerdict {
                     $sig.Action = 'Read the provider and operation around this code, then follow the Microsoft reference before choosing a remediation.'
                 }
                 $sig.Reference = $entry.reference
-                $sig.References = @($entry.reference)
+                $sig.References = @($entry.reference | Where-Object { $_ })
             }
             Add-LVUnknownBurstContext -Signature $sig
             $results.Add($sig) | Out-Null
@@ -445,7 +445,7 @@ function Resolve-LVVerdict {
         # Schema v2 carries a references list; v1 carried a single reference. Accept
         # both so a local database written against the old shape keeps working.
         $refs = @()
-        if ($hit.references) { $refs = @($hit.references) }
+        if ($hit.references) { $refs = @($hit.references | Where-Object { $_ }) }
         elseif ($hit.reference) { $refs = @($hit.reference) }
 
         $sig | Add-Member -NotePropertyName 'Confidence' -NotePropertyValue $hit.confidence -Force
@@ -454,10 +454,10 @@ function Resolve-LVVerdict {
         # Provenance travels with the finding, not just with the rule: attribution that
         # only exists in the database is attribution the reader never sees, and CC-BY
         # and DRL both require it be visible wherever the ruling is.
-        $sig | Add-Member -NotePropertyName 'Sources'    -NotePropertyValue @($hit.sources) -Force
+        $sig | Add-Member -NotePropertyName 'Sources'    -NotePropertyValue @($hit.sources | Where-Object { $_ }) -Force
         $sig | Add-Member -NotePropertyName 'Status'     -NotePropertyValue $hit.status -Force
         $sig | Add-Member -NotePropertyName 'Verified'   -NotePropertyValue $hit.verified -Force
-        $sig | Add-Member -NotePropertyName 'FalsePositives' -NotePropertyValue @($hit.falsepositives) -Force
+        $sig | Add-Member -NotePropertyName 'FalsePositives' -NotePropertyValue @($hit.falsepositives | Where-Object { $_ }) -Force
         Add-LVErrorCatalogContext -Signature $sig -Match (Get-LVErrorCatalogMatch -Signature $sig)
         Add-LVUnknownBurstContext -Signature $sig
         $results.Add($sig) | Out-Null
