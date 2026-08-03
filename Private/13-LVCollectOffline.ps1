@@ -12,7 +12,11 @@ function Expand-LVEvidencePackage {
         Open an evidence directory, JSON report, or zip in a traversal-safe workspace.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Path)
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [ValidateRange(1, 8589934592)][long]$MaxEntryBytes = 1073741824,
+        [ValidateRange(1, 8589934592)][long]$MaxTotalBytes = 2147483648
+    )
 
     $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
     if (Test-Path -LiteralPath $resolved -PathType Container) {
@@ -64,10 +68,6 @@ function Expand-LVEvidencePackage {
 
         [long]$totalBytes = 0
         foreach ($entry in $zip.Entries) {
-            $totalBytes += [long]$entry.Length
-            if ($entry.Length -gt 1GB) { throw ('Evidence member is larger than 1 GB: {0}' -f $entry.FullName) }
-            if ($totalBytes -gt 2GB) { throw 'Evidence archive expands past the 2 GB safety limit.' }
-
             $relative = ([string]$entry.FullName).Replace('/', [IO.Path]::DirectorySeparatorChar)
             if ([IO.Path]::IsPathRooted($relative)) {
                 throw ('Evidence member uses an absolute path: {0}' -f $entry.FullName)
@@ -92,7 +92,26 @@ function Expand-LVEvidencePackage {
             if (-not (Test-Path -LiteralPath $parent)) { [IO.Directory]::CreateDirectory($parent) | Out-Null }
             $inputStream = $entry.Open()
             $outputStream = [IO.File]::Create($destination)
-            try { $inputStream.CopyTo($outputStream) } finally { $outputStream.Dispose(); $inputStream.Dispose() }
+            [long]$entryBytes = 0
+            try {
+                $buffer = New-Object byte[] 81920
+                while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                    if ($read -gt ($MaxEntryBytes - $entryBytes)) {
+                        throw ('Evidence member expansion exceeded the {0} byte per-entry cap after {1} bytes: {2}' -f `
+                            $MaxEntryBytes, $entryBytes, $entry.FullName)
+                    }
+                    if ($read -gt ($MaxTotalBytes - $totalBytes)) {
+                        throw ('Evidence archive expansion exceeded the {0} byte total cap after {1} bytes while reading: {2}' -f `
+                            $MaxTotalBytes, $totalBytes, $entry.FullName)
+                    }
+                    $outputStream.Write($buffer, 0, $read)
+                    $entryBytes += $read
+                    $totalBytes += $read
+                }
+            } finally {
+                $outputStream.Dispose()
+                $inputStream.Dispose()
+            }
         }
     } catch {
         if ($zip) { $zip.Dispose(); $zip = $null }

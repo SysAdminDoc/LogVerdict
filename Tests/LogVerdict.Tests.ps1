@@ -4747,6 +4747,46 @@ Describe 'Offline evidence analysis' {
         }
     }
 
+    It 'rejects archive payload bytes beyond the expansion cap even when headers understate them' {
+        $zipPath = Join-Path $TestDrive 'understated.zip'
+        $stream = [IO.File]::Open($zipPath, [IO.FileMode]::CreateNew)
+        $zip = New-Object IO.Compression.ZipArchive($stream, [IO.Compression.ZipArchiveMode]::Create)
+        try {
+            $entry = $zip.CreateEntry('payload.evtx', [IO.Compression.CompressionLevel]::NoCompression)
+            $payload = [byte[]](0..15)
+            $entryStream = $entry.Open()
+            try { $entryStream.Write($payload, 0, $payload.Length) } finally { $entryStream.Dispose() }
+        } finally {
+            $zip.Dispose()
+            $stream.Dispose()
+        }
+
+        $bytes = [IO.File]::ReadAllBytes($zipPath)
+        $centralSignature = [byte[]](0x50, 0x4b, 0x01, 0x02)
+        $centralOffset = -1
+        for ($index = 0; $index -le $bytes.Length - $centralSignature.Length; $index++) {
+            if ($bytes[$index] -eq $centralSignature[0] -and
+                $bytes[$index + 1] -eq $centralSignature[1] -and
+                $bytes[$index + 2] -eq $centralSignature[2] -and
+                $bytes[$index + 3] -eq $centralSignature[3]) {
+                $centralOffset = $index
+                break
+            }
+        }
+        $centralOffset | Should -BeGreaterThan -1
+        [BitConverter]::GetBytes([uint32]1).CopyTo($bytes, $centralOffset + 24)
+        [IO.File]::WriteAllBytes($zipPath, $bytes)
+
+        InModuleScope LogVerdict -Parameters @{ ZipPath = $zipPath } {
+            param($ZipPath)
+            $archivePath = $ZipPath
+            { Expand-LVEvidencePackage -Path $archivePath -MaxEntryBytes 8 -MaxTotalBytes 32 } |
+                Should -Throw '*per-entry cap*'
+            { Expand-LVEvidencePackage -Path $archivePath -MaxEntryBytes 32 -MaxTotalBytes 8 } |
+                Should -Throw '*total cap*'
+        }
+    }
+
     It 'rejects an archive member that escapes the extraction directory' {
         $zipPath = Join-Path $TestDrive 'traversal.zip'
         $stream = [IO.File]::Open($zipPath, [IO.FileMode]::CreateNew)
