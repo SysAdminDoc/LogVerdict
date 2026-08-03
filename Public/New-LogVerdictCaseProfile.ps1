@@ -22,7 +22,8 @@ function New-LogVerdictCaseProfile {
     )
 
     process {
-        $profile = New-LVCaseProfileObject -Result $Result -Name $Name -Purpose $Purpose -Note $Note -OperatorName $OperatorName -Ticket $Ticket -Redact:$Redact -AllowRawEvidence:$AllowRawEvidence
+        $normalized = Resolve-LVScanInput -InputObject $Result -Role 'result'
+        $profile = New-LVCaseProfileObject -Result $normalized -Name $Name -Purpose $Purpose -Note $Note -OperatorName $OperatorName -Ticket $Ticket -Redact:$Redact -AllowRawEvidence:$AllowRawEvidence
         if ($Path) {
             $parent = Split-Path -Parent $Path
             if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }

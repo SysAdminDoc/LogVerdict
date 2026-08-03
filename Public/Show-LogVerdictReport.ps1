@@ -12,5 +12,8 @@ function Show-LogVerdictReport {
     [CmdletBinding()]
     param([Parameter(Mandatory, ValueFromPipeline)]$Result)
 
-    process { Write-LVConsoleReport -Result $Result }
+    process {
+        $Result = Resolve-LVScanInput -InputObject $Result -Role 'result'
+        Write-LVConsoleReport -Result $Result
+    }
 }

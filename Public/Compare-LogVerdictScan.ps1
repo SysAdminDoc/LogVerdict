@@ -1,32 +1,3 @@
-function Resolve-LVScanInput {
-    <#
-        .SYNOPSIS
-        Normalize a scan result object or JSON report path for comparison.
-    #>
-    param(
-        [Parameter(Mandatory)]$InputObject,
-        [Parameter(Mandatory)][string]$Role
-    )
-
-    $report = $InputObject
-    if ($InputObject -is [string] -or $InputObject -is [IO.FileInfo]) {
-        $path = [string]$InputObject
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-            throw ("The {0} scan report does not exist: {1}" -f $Role, $path)
-        }
-        try {
-            $report = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        } catch {
-            throw ("The {0} scan report is not readable JSON: {1}" -f $Role, $_.Exception.Message)
-        }
-    }
-
-    if ($null -eq $report -or $null -eq $report.PSObject.Properties['Findings']) {
-        throw ("The {0} input is not a LogVerdict scan result: it has no Findings collection." -f $Role)
-    }
-    return $report
-}
-
 function ConvertTo-LVFindingMap {
     <#
         .SYNOPSIS

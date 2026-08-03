@@ -33,6 +33,7 @@ function Export-LogVerdictStandard {
     )
 
     process {
+        $Result = Resolve-LVScanInput -InputObject $Result -Role 'result'
         $projected = if ($Redact) { ConvertTo-LVRedactedResult -Result $Result } else { $Result }
         if ($Format -eq 'Jsonl') {
             $timelineRedact = [bool]($Redact -or ($projected.PSObject.Properties['Redacted'] -and $projected.Redacted))

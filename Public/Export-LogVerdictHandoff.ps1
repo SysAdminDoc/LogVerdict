@@ -21,6 +21,7 @@ function Export-LogVerdictHandoff {
     )
 
     process {
+        $Result = Resolve-LVScanInput -InputObject $Result -Role 'result'
         if ($ProfilePath -and $Profile) { throw 'Supply either -ProfilePath or -Profile, not both.' }
         if ($ProfilePath) { $Profile = Read-LVCaseProfile -Path $ProfilePath }
         if (-not $Profile -and $Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) { $Profile = $Result.CaseProfile }

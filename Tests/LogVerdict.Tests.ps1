@@ -110,6 +110,28 @@ Describe 'Case profiles and responder handoffs' {
         $standard.Document.scan.caseProfile.profileId | Should -BeExactly $profile.profileId
     }
 
+    It 'round-trips a written JSON report through every result consumer and standard format' {
+        $writtenDir = Join-Path $TestDrive 'roundtrip-written'
+        Export-LogVerdictReport -Result $script:CaseResult -OutputDir $writtenDir -Format Json 6>$null | Out-Null
+        $reloaded = Get-Content -LiteralPath (Join-Path $writtenDir 'LogVerdict-Report.json') -Raw | ConvertFrom-Json
+
+        $roundtripProfile = New-LogVerdictCaseProfile -Result $reloaded -Name 'Reloaded case'
+        $roundtripProfile.bounds.windowStart | Should -Match '^2026-07-26T'
+        $handoffDir = Join-Path $TestDrive 'roundtrip-handoff'
+        $handoff = Export-LogVerdictHandoff -Result $reloaded -Profile $roundtripProfile -OutputDir $handoffDir
+        @($handoff.Files).Count | Should -Be 7
+
+        $reportDir = Join-Path $TestDrive 'roundtrip-report'
+        Export-LogVerdictReport -Result $reloaded -OutputDir $reportDir -Format Text 6>$null | Out-Null
+        Show-LogVerdictReport -Result $reloaded 6>$null
+        @(Compare-LogVerdictScan -Before $reloaded -After $reloaded) | Should -BeNullOrEmpty
+
+        foreach ($format in @('Ecs', 'Ocsf', 'OpenTelemetry', 'Stix', 'Jsonl')) {
+            $standard = @(Export-LogVerdictStandard -Result $reloaded -Format $format)
+            $standard.Count | Should -BeGreaterThan 0 -Because "$format must accept a reloaded report"
+        }
+    }
+
     It 'wires the profile path through console, scan, and GUI entry points' {
         $root = Split-Path $PSScriptRoot -Parent
         $scan = Get-Content -LiteralPath (Join-Path $root 'Public\Invoke-LogVerdictScan.ps1') -Raw

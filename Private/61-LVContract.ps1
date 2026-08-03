@@ -4,6 +4,103 @@
 $script:LVReportContractVersion = 1
 $script:LVEvidenceContractVersion = 1
 
+function ConvertTo-LVScanDateTime {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowNull()]$Value,
+        [Parameter(Mandatory)][string]$Role
+    )
+
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return $null }
+    if ($Value -is [datetime]) { return [datetime]$Value }
+    if ($Value -is [datetimeoffset]) { return ([datetimeoffset]$Value).LocalDateTime }
+
+    $text = [string]$Value
+    $legacy = [regex]::Match($text, '^/Date\((?<milliseconds>-?\d+)(?:[+-]\d{4})?\)/$')
+    if ($legacy.Success) {
+        try { return [datetimeoffset]::FromUnixTimeMilliseconds([long]$legacy.Groups['milliseconds'].Value).LocalDateTime }
+        catch { throw ("The {0} report has an invalid ScanTime value: {1}" -f $Role, $text) }
+    }
+
+    $parsed = [datetime]::MinValue
+    $styles = [Globalization.DateTimeStyles]::AllowWhiteSpaces -bor [Globalization.DateTimeStyles]::RoundtripKind
+    if ([datetime]::TryParse($text, [Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$parsed)) {
+        return $parsed
+    }
+    throw ("The {0} report has an invalid ScanTime value: {1}" -f $Role, $text)
+}
+
+function ConvertTo-LVScanDuration {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowNull()]$Value,
+        [Parameter(Mandatory)][string]$Role
+    )
+
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return $null }
+    if ($Value -is [timespan]) { return [timespan]$Value }
+
+    $ticksProperty = $Value.PSObject.Properties['Ticks']
+    if ($ticksProperty -and $null -ne $ticksProperty.Value) {
+        try { return [timespan]::FromTicks([int64]$ticksProperty.Value) }
+        catch { throw ("The {0} report has an invalid Duration.Ticks value: {1}" -f $Role, $ticksProperty.Value) }
+    }
+
+    $text = [string]$Value
+    $parsed = [timespan]::Zero
+    if ([timespan]::TryParse($text, [Globalization.CultureInfo]::InvariantCulture, [Globalization.TimeSpanStyles]::None, [ref]$parsed)) {
+        return $parsed
+    }
+    if ($text -match '^P') {
+        try { return [System.Xml.XmlConvert]::ToTimeSpan($text) }
+        catch { Write-Verbose ("Ignoring non-ISO Duration value while parsing {0}: {1}" -f $Role, $_.Exception.Message) }
+    }
+    throw ("The {0} report has an invalid Duration value: {1}" -f $Role, $text)
+}
+
+function Resolve-LVScanInput {
+    <#
+        Normalize a live result object or a JSON report path for every public
+        result consumer. ConvertFrom-Json cannot restore DateTime and TimeSpan
+        runtime types, so repair those two fields once at this boundary rather
+        than making each consumer know the serialized representation.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$InputObject,
+        [Parameter(Mandatory)][string]$Role
+    )
+
+    $report = $InputObject
+    if ($InputObject -is [string] -or $InputObject -is [IO.FileInfo]) {
+        $path = [string]$InputObject
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw ("The {0} scan report does not exist: {1}" -f $Role, $path)
+        }
+        try {
+            $report = Get-Content -LiteralPath $path -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            throw ("The {0} scan report is not readable JSON: {1}" -f $Role, $_.Exception.Message)
+        }
+    }
+
+    if ($null -eq $report -or $null -eq $report.PSObject.Properties['Findings']) {
+        throw ("The {0} input is not a LogVerdict scan result: it has no Findings collection." -f $Role)
+    }
+
+    $normalized = [pscustomobject]@{}
+    foreach ($property in $report.PSObject.Properties) {
+        $normalized | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force
+    }
+    if ($report.PSObject.Properties['ScanTime']) {
+        $normalized.ScanTime = ConvertTo-LVScanDateTime -Value $report.ScanTime -Role $Role
+    }
+    if ($report.PSObject.Properties['Duration']) {
+        $normalized.Duration = ConvertTo-LVScanDuration -Value $report.Duration -Role $Role
+    }
+    return $normalized
+}
+
 function New-LVReportContract {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '',
         Justification = 'This function constructs an in-memory contract object and changes no external state.')]

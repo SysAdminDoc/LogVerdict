@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [0.8.2] - 2026-08-02
 
+- Added one shared scan-result resolver so JSON reports reloaded with `ConvertFrom-Json` restore `ScanTime` and `Duration` for case profiles, handoffs, comparisons, console/report presentation, and all standard export formats.
 - Fixed RecordId sequence coverage so level-filtered scans validate candidate gaps against an unfiltered event range and do not report skipped Information events as missing records.
 - Added one shared `http`/`https` URI allow-list for verdict database validation, HTML links, GUI references, and external navigation; unsafe `javascript:`, `file:`, UNC, and `ms-settings:` values are rejected or rendered as inert text.
 - Fixed optional finding and correlation provenance arrays so missing `references`, `sources`, and `falsepositives` serialize as empty collections instead of `[null]`.

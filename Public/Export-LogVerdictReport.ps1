@@ -57,6 +57,7 @@ function Export-LogVerdictReport {
 
         # Normalize legacy results and fail closed when a future writer's contract
         # cannot be understood by this reader.
+        $Result = Resolve-LVScanInput -InputObject $Result -Role 'result'
         $Result = ConvertFrom-LVReportContract -InputObject $Result
 
         # Captured before redacting. The folder name keeps the real machine name because
