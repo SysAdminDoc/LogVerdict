@@ -64,6 +64,12 @@ $script:LVUICulture = (Get-UICulture).Name
 
 $script:LVLogLines = New-Object System.Collections.Generic.List[string]
 
+# Event collection keeps a second, unfiltered range when the normal scan level
+# filter would make RecordId continuity ambiguous. Initialize both values so a
+# direct coverage check never inherits state from an earlier scan.
+$script:LVEventSequence = @()
+$script:LVEventSequenceIncompleteChannel = @()
+
 # Optional live feed of log lines, set by a caller that cannot see Write-Host output.
 # The GUI runs a scan in a background runspace, where Write-Host goes nowhere a user
 # can read; it hands in a concurrent queue here and drains it from the UI thread.

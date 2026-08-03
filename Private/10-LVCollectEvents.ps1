@@ -210,8 +210,18 @@ function Get-LVEventRecord {
     $denied = New-Object System.Collections.Generic.List[string]
     $truncated = New-Object System.Collections.Generic.List[string]
     $coverage = New-Object System.Collections.Generic.List[object]
+    $sequenceRecords = New-Object System.Collections.Generic.List[object]
+    $sequenceIncomplete = New-Object System.Collections.Generic.List[string]
     $windowStart = $since
     $windowEnd = Get-Date
+
+    # The normal collector intentionally asks Windows for only errors and warnings.
+    # RecordId continuity cannot be inferred from that filtered stream: an Information
+    # event between two errors is expected, not evidence of a missing record.
+    $levelFilterNeedsSequenceRead = $false
+    if ($Level -and $Level.Count -gt 0) {
+        $levelFilterNeedsSequenceRead = @((0..5 | Where-Object { $Level -notcontains $_ })).Count -gt 0
+    }
 
     $total = @($Channel).Count
     $done = 0
@@ -354,6 +364,61 @@ function Get-LVEventRecord {
             $observedThisChannel++
             $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
         }
+
+        $sequenceEvents = @()
+        if (-not $levelFilterNeedsSequenceRead) {
+            $sequenceEvents = @($events)
+        } elseif (-not $isTruncated -and -not $budgetStop) {
+            # A second query is only useful when the filtered stream has a candidate
+            # gap or ordering anomaly. Healthy filtered ranges cannot produce a
+            # sequence note, so avoid doubling every channel read on a normal scan.
+            $filteredSequence = @($events | Where-Object {
+                $null -ne $_.RecordId -and [string]$_.RecordId -match '^\d+$'
+            })
+            $needsSequenceValidation = $false
+            if ($filteredSequence.Count -ge 2) {
+                $filteredOrdered = @($filteredSequence | Sort-Object { [long]$_.RecordId })
+                for ($i = 1; $i -lt $filteredOrdered.Count; $i++) {
+                    $previous = $filteredOrdered[$i - 1]
+                    $current = $filteredOrdered[$i]
+                    if (([long]$current.RecordId - [long]$previous.RecordId) -gt 1 -or
+                        ($previous.TimeCreated -and $current.TimeCreated -and $current.TimeCreated -lt $previous.TimeCreated)) {
+                        $needsSequenceValidation = $true
+                        break
+                    }
+                }
+            }
+
+            if (-not $needsSequenceValidation) {
+                $sequenceEvents = @($events)
+            } else {
+                try {
+                    # This is metadata for a coverage check, not a second event stream.
+                    # Do not spend the shared record budget on it, but treat a cap-sized
+                    # result as incomplete so it can never produce a false warning.
+                    $sequenceEvents = @(Get-WinEvent -FilterHashtable @{ LogName = $ch; StartTime = $since } `
+                        -MaxEvents $MaxPerChannel -ErrorAction Stop)
+                    if ($sequenceEvents.Count -ge $MaxPerChannel) {
+                        $sequenceIncomplete.Add($ch) | Out-Null
+                    }
+                } catch {
+                    # The filtered event stream remains useful even when the unfiltered
+                    # continuity probe is unavailable. Omitting the probe is safer than
+                    # presenting a level-filter artefact as a retention gap.
+                    $sequenceEvents = @()
+                }
+            }
+        }
+        foreach ($sequenceEvent in $sequenceEvents) {
+            if ($null -eq $sequenceEvent.RecordId -or [string]$sequenceEvent.RecordId -notmatch '^\d+$') { continue }
+            $sequenceRecords.Add([pscustomobject]@{
+                Source = 'event'
+                Channel = $ch
+                RecordId = $sequenceEvent.RecordId
+                TimeCreated = $sequenceEvent.TimeCreated
+            }) | Out-Null
+        }
+
         if ($budgetStop) { $isTruncated = $true; $truncated.Add($ch) | Out-Null }
         $coverageStatus = if ($budgetStop) { $budgetStop } elseif ($isTruncated) { 'truncated' } elseif ($observedThisChannel -eq 0) { 'empty' } else { 'readable' }
         $coverageReason = if ($budgetStop) {
@@ -375,6 +440,8 @@ function Get-LVEventRecord {
     $script:LVDeniedChannel = @($denied.ToArray())
     $script:LVTruncatedChannel = @($truncated.ToArray())
     $script:LVEventCoverage = @($coverage.ToArray())
+    $script:LVEventSequence = @($sequenceRecords.ToArray())
+    $script:LVEventSequenceIncompleteChannel = @($sequenceIncomplete.ToArray())
 
     if ($denied.Count -gt 0) {
         Write-LVLog -Level warn -Message ("Access denied on {0} channel(s): {1}. Re-run elevated for full coverage." -f $denied.Count, ($denied -join ', '))
@@ -400,15 +467,23 @@ function Get-LVEventSequenceGap {
         the sequence is incomplete.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Record)
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Record,
+        [AllowEmptyCollection()][object[]]$SequenceRecord
+    )
 
     $notes = New-Object System.Collections.Generic.List[string]
-    $eventRecords = @($Record | Where-Object {
+    # Callers that have a level-filtered event stream should provide the separate
+    # unfiltered sequence range. Direct fixture callers may omit it and use Record
+    # itself, preserving the small pure-function contract used by older integrations.
+    $sequenceInput = if ($PSBoundParameters.ContainsKey('SequenceRecord')) { @($SequenceRecord) } else { @($Record) }
+    $eventRecords = @($sequenceInput | Where-Object {
         $_ -and $_.Source -eq 'event' -and $null -ne $_.RecordId -and
         [string]$_.RecordId -match '^\d+$' -and $_.Channel
     })
     foreach ($group in @($eventRecords | Group-Object Channel)) {
-        if (@($script:LVTruncatedChannel) -contains $group.Name) { continue }
+        if (@($script:LVTruncatedChannel) -contains $group.Name -or
+            @($script:LVEventSequenceIncompleteChannel) -contains $group.Name) { continue }
         $ordered = @($group.Group | Sort-Object { [long]$_.RecordId })
         if ($ordered.Count -lt 3) { continue }
 

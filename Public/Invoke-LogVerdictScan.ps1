@@ -226,6 +226,8 @@ function Invoke-LogVerdictScan {
     $script:LVDeniedChannel = @()
     $script:LVTruncatedChannel = @()
     $script:LVEventCoverage = @()
+    $script:LVEventSequence = @()
+    $script:LVEventSequenceIncompleteChannel = @()
     $script:LVTextLogCoverage = @()
 
     Write-LVLog -Level info -Message ('Probing {0} channel(s) for access and history...' -f @($channels).Count)
@@ -245,7 +247,7 @@ function Invoke-LogVerdictScan {
             -Cap (& $performanceCap -Coverage $eventCoverage) -ElapsedMilliseconds ([int64][Math]::Round($eventTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
     }
     Write-LVLog -Level ok -Message ('{0} event record(s)' -f $records.Count)
-    $sequenceNotes = @(Get-LVEventSequenceGap -Record @($records.ToArray()))
+    $sequenceNotes = @(Get-LVEventSequenceGap -Record @($records.ToArray()) -SequenceRecord @($script:LVEventSequence))
     foreach ($note in $sequenceNotes) { Write-LVLog -Level warn -Message $note }
 
     $crash = @()

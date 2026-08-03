@@ -2276,6 +2276,35 @@ Describe 'Event sequence coverage' {
             @(Get-LVEventSequenceGap -Record $records) | Should -BeNullOrEmpty
         }
     }
+
+    It 'uses the unfiltered event range when the collector level filter omits records' {
+        InModuleScope LogVerdict {
+            $script:LVTruncatedChannel = @()
+            $all = 10..15 | ForEach-Object {
+                [pscustomobject]@{
+                    ProviderName = 'Fixture'; Id = 7; Level = if ($_ -in @(10, 15)) { 2 } else { 4 }
+                    LevelDisplayName = if ($_ -in @(10, 15)) { 'Error' } else { 'Information' }
+                    TimeCreated = (Get-Date '2026-08-01 10:00:00').AddSeconds($_)
+                    MachineName = 'FIXTURE'; RecordId = $_; Message = "event $_"
+                }
+            }
+            Mock Get-WinEvent {
+                param($FilterHashtable)
+                if ($FilterHashtable.ContainsKey('Level')) {
+                    return @($all | Where-Object { $FilterHashtable.Level -contains $_.Level })
+                }
+                return $all
+            }
+
+            $filtered = @(Get-LVEventRecord -Channel @('Fake') -DaysBack 1 -MaxPerChannel 20)
+            @($filtered).Count | Should -Be 2
+            @($script:LVEventSequence).Count | Should -Be 6
+            @(Get-LVEventSequenceGap -Record $filtered -SequenceRecord $script:LVEventSequence) | Should -BeNullOrEmpty
+
+            $deleted = @($script:LVEventSequence | Where-Object RecordId -ne 13)
+            @(Get-LVEventSequenceGap -Record $filtered -SequenceRecord $deleted) | Should -Match '12 to 14'
+        }
+    }
 }
 
 Describe 'Verdict resolution' {
