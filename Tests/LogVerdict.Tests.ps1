@@ -3538,6 +3538,37 @@ Describe 'GUI and console feature parity' {
 }
 
 Describe 'GUI pure presentation logic' {
+    It 'builds a redacted clipboard payload without retaining machine or account identifiers' {
+        InModuleScope LogVerdict {
+            $finding = [pscustomobject]@{
+                Verdict='investigate'; Title='HOST-9 finding'; Key='event|System|7'; Count=2; PerDay=1
+                LastSeen=(Get-Date).AddMinutes(-5); RuleId='LV-7'; Plain='Review HOST-9 activity'
+                Why='Account jsmith saw C:\Users\jsmith\event.log'; Action='Check the event'
+                References=@('https://example.invalid/HOST-9'); SampleMessage='HOST-9: jsmith opened C:\Users\jsmith\event.log'
+            }
+            $raw = ConvertTo-LVGuiClipboardText -Finding $finding -MachineName 'HOST-9' -UserName 'jsmith'
+            $raw.Text | Should -Match 'HOST-9|jsmith'
+            $raw.Redacted | Should -BeFalse
+            $raw.Status | Should -Match 'unredacted'
+
+            $redacted = ConvertTo-LVGuiClipboardText -Finding $finding -Redact `
+                -MachineName 'HOST-9' -UserName 'jsmith'
+            $redacted.Text | Should -Not -Match 'HOST-9|jsmith|C:\\Users\\jsmith'
+            $redacted.Text | Should -Match '<MACHINE>|<USER>'
+            $redacted.Redacted | Should -BeTrue
+            $redacted.Status | Should -Match 'identifiers redacted'
+        }
+    }
+
+    It 'routes the clipboard handler through the redaction toggle and states the copied mode' {
+        $gui = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1') -Raw
+        $gui | Should -Match 'ConvertTo-LVGuiClipboardText'
+        $gui | Should -Match 'Redact:\(\[bool\]\$ui\.ChkOverviewRedact\.IsChecked\)'
+        $gui | Should -Match '\$clipboard\.Status'
+        $xaml = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Private\50-LVGuiXaml.ps1') -Raw
+        $xaml | Should -Match 'Redact reports and clipboard'
+    }
+
     It 'filters by enabled verdict and literal case-insensitive text' {
         InModuleScope LogVerdict {
             $row = [pscustomobject]@{ Verdict='investigate'; Haystack='Disk [2] Failure' }

@@ -758,7 +758,7 @@ function Get-LVGuiXaml {
                           Content="Folder..." Margin="7,0,0,0" Padding="11,6"/>
                 </Grid>
                 <WrapPanel Margin="0,8,0,0">
-                  <CheckBox x:Name="ChkOverviewRedact" Content="Redact written reports" Margin="0,0,20,6"/>
+                  <CheckBox x:Name="ChkOverviewRedact" Content="Redact reports and clipboard" Margin="0,0,20,6"/>
                   <CheckBox x:Name="ChkOverviewEvidence" Content="Include evidence zip" Margin="0,0,0,6"/>
                 </WrapPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,2,0,0">

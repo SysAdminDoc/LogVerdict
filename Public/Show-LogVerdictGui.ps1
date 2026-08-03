@@ -1024,23 +1024,12 @@ function Show-LogVerdictGui {
         $f = & $resolveFinding $row
         if ($null -eq $f) { return }
 
-        $lines = New-Object System.Collections.Generic.List[string]
-        $lines.Add(('[{0}] {1}' -f ([string]$f.Verdict).ToUpperInvariant(), $f.Title))
-        $lines.Add(('Signature : {0}' -f $f.Key))
-        $lines.Add(('Seen      : {0} time(s), {1}/day, last {2}' -f $f.Count, $f.PerDay, (Format-LVGuiWhen -When $f.LastSeen)))
-        if ($f.RuleId) { $lines.Add(('Rule      : {0}' -f $f.RuleId)) }
-        $lines.Add('')
-        $lines.Add(('Plain English : {0}' -f $f.Plain))
-        $lines.Add(('Why           : {0}' -f $f.Why))
-        $lines.Add(('What to do    : {0}' -f $f.Action))
-        foreach ($r in @($f.References | Where-Object { $_ })) { $lines.Add(('Source        : {0}' -f $r)) }
-        $lines.Add('')
-        $lines.Add('Raw evidence:')
-        $lines.Add([string]$f.SampleMessage)
-
         try {
-            [System.Windows.Clipboard]::SetText(($lines -join [Environment]::NewLine))
-            & $setStatus 'Finding copied to the clipboard.'
+            $clipboard = ConvertTo-LVGuiClipboardText -Finding $f `
+                -Redact:([bool]$ui.ChkOverviewRedact.IsChecked) `
+                -MachineName $state.Result.MachineName -UserName $env:USERNAME
+            [System.Windows.Clipboard]::SetText($clipboard.Text)
+            & $setStatus $clipboard.Status
         } catch {
             & $setStatus ('Could not reach the clipboard: {0}' -f $_.Exception.Message)
         }

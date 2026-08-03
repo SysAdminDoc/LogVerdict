@@ -657,6 +657,51 @@ function Get-LVGuiVerdictCount {
     return $count
 }
 
+function ConvertTo-LVGuiClipboardText {
+    <#
+        Build the detail-pane clipboard payload without touching WPF or the system
+        clipboard. Redaction is applied to the complete payload, including rule and
+        reference text, so this helper is safe to exercise in a headless test.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Finding,
+        [switch]$Redact,
+        [AllowNull()][string]$MachineName = $env:COMPUTERNAME,
+        [AllowNull()][string]$UserName = $env:USERNAME
+    )
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add(('[{0}] {1}' -f ([string]$Finding.Verdict).ToUpperInvariant(), $Finding.Title))
+    $lines.Add(('Signature : {0}' -f $Finding.Key))
+    $lines.Add(('Seen      : {0} time(s), {1}/day, last {2}' -f $Finding.Count, $Finding.PerDay, (Format-LVGuiWhen -When $Finding.LastSeen)))
+    if ($Finding.RuleId) { $lines.Add(('Rule      : {0}' -f $Finding.RuleId)) }
+    $lines.Add('')
+    $lines.Add(('Plain English : {0}' -f $Finding.Plain))
+    $lines.Add(('Why           : {0}' -f $Finding.Why))
+    $lines.Add(('What to do    : {0}' -f $Finding.Action))
+    foreach ($reference in @($Finding.References | Where-Object { $_ })) {
+        $lines.Add(('Source        : {0}' -f $reference))
+    }
+    $lines.Add('')
+    $lines.Add('Raw evidence:')
+    $lines.Add([string]$Finding.SampleMessage)
+
+    $text = $lines -join [Environment]::NewLine
+    if ($Redact) {
+        $text = ConvertTo-LVRedactedText -Text $text -MachineName $MachineName -UserName $UserName
+    }
+    return [pscustomobject][ordered]@{
+        Text = $text
+        Redacted = [bool]$Redact
+        Status = if ($Redact) {
+            'Finding copied to the clipboard with identifiers redacted.'
+        } else {
+            'Finding copied to the clipboard with unredacted evidence.'
+        }
+    }
+}
+
 function ConvertTo-LVGuiDetail {
     <#
         .SYNOPSIS
