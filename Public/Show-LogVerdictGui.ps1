@@ -257,8 +257,10 @@ function Show-LogVerdictGui {
             $ui.PnlFalsePositives.Visibility = 'Collapsed'
         }
 
-        if ($detail.Reference.Count -gt 0) {
-            $ui.LstRefs.ItemsSource = [string[]]$detail.Reference
+        $referenceBuckets = Get-LVGuiReferenceBucket -Reference $detail.Reference
+        $ui.LstRefs.ItemsSource = [string[]]$referenceBuckets.Allowed
+        $ui.LstUnsafeRefs.ItemsSource = [string[]]$referenceBuckets.Blocked
+        if (@($referenceBuckets.Allowed).Count -gt 0 -or @($referenceBuckets.Blocked).Count -gt 0) {
             $ui.PnlRefs.Visibility = 'Visible'
         } else {
             $ui.PnlRefs.Visibility = 'Collapsed'
@@ -837,8 +839,14 @@ function Show-LogVerdictGui {
         [System.Windows.Navigation.RequestNavigateEventHandler] {
             param($SenderControl, $NavigateArgs)
             $uri = [string]$NavigateArgs.Uri.AbsoluteUri
+            $uriProblem = Get-LVAllowedUriProblem -Uri $uri
+            if ($uriProblem) {
+                & $setStatus ('Blocked link: {0}' -f $uriProblem)
+                $NavigateArgs.Handled = $true
+                return
+            }
             try {
-                Start-Process $uri
+                Start-Process -FilePath $uri
                 & $setStatus ('Opened {0}' -f $uri)
             } catch {
                 & $setStatus ('Could not open {0}: {1}' -f $uri, $_.Exception.Message)

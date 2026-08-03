@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [0.8.2] - 2026-08-02
 
+- Added one shared `http`/`https` URI allow-list for verdict database validation, HTML links, GUI references, and external navigation; unsafe `javascript:`, `file:`, UNC, and `ms-settings:` values are rejected or rendered as inert text.
 - Refreshed the offline PowerShell advisory cache with CVE-2026-26143 and CVE-2025-25004 coverage, added normalized cache-source integrity validation, and documented the explicit NVD-backed atomic refresh command. Release-gate tests now prove that an aged cache fails before a fresh run is trusted.
 - Added an explicit, versioned provider extension contract with hash-pinned entrypoints and fixtures, mandatory redaction, shared collection budgets, provider coverage, report projections, and an `-AllowUntrustedProvider` execution gate.
 - Added bounded JSONL timeline exports for standard and case handoffs, with UTC timestamps, event/finding/correlation/coverage/provider records, source record IDs, rule provenance, and explicit raw/redacted state.

@@ -1260,6 +1260,14 @@ function Get-LVGuiXaml {
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
+                <ItemsControl x:Name="LstUnsafeRefs" Margin="0,4,0,0">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,5" FontSize="11.5"
+                                 Foreground="{DynamicResource Peach}"/>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
               </StackPanel>
 
               <TextBlock Text="RAW EVIDENCE, UNEDITED" Style="{StaticResource SectionLabel}"/>

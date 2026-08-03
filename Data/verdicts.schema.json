@@ -83,7 +83,7 @@
         "confidence": { "enum": ["high", "medium", "low"] },
         "references": {
           "type": "array",
-          "items": { "type": "string", "format": "uri" }
+          "items": { "type": "string", "format": "uri", "pattern": "^https?://" }
         },
         "falsepositives": {
           "type": "array",
@@ -97,7 +97,7 @@
             "required": ["uri"],
             "additionalProperties": false,
             "properties": {
-              "uri": { "type": "string", "format": "uri" },
+              "uri": { "type": "string", "format": "uri", "pattern": "^https?://" },
               "licence": { "type": "string" },
               "author": { "type": "string" },
               "retrieved": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
@@ -240,7 +240,8 @@
           "type": "array",
           "items": {
             "type": "string",
-            "format": "uri"
+            "format": "uri",
+            "pattern": "^https?://"
           },
           "description": "Sources backing the ruling. Strongly encouraged for anything asserting what a vendor recommends."
         },
@@ -289,6 +290,7 @@
               "uri": {
                 "type": "string",
                 "format": "uri",
+                "pattern": "^https?://",
                 "description": "Where the claim can be checked."
               },
               "licence": {

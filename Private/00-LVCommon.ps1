@@ -76,6 +76,39 @@ $script:LVLogSink = $null
 # checkout reads Data/localization.json so an operator can inspect the contract.
 $script:LVLocalizationDocument = $null
 
+function Get-LVAllowedUriProblem {
+    <#
+        Return a user-readable reason when a URI is not safe to expose as a
+        navigable link. Rule data is untrusted input even when it came from a
+        local file, so every presentation layer uses this same scheme boundary.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][AllowEmptyString()][string]$Uri)
+
+    if ([string]::IsNullOrWhiteSpace($Uri)) { return 'URI is empty' }
+
+    $candidate = $Uri.Trim()
+    $parsed = $null
+    if (-not [System.Uri]::TryCreate($candidate, [System.UriKind]::Absolute, [ref]$parsed) -or $null -eq $parsed) {
+        return 'URI must be an absolute http or https URI'
+    }
+    $scheme = $parsed.Scheme.ToLowerInvariant()
+    if (@('http', 'https') -notcontains $scheme) {
+        return ("URI scheme '{0}' is not allowed; only http and https are permitted" -f $parsed.Scheme)
+    }
+    if ([string]::IsNullOrWhiteSpace($parsed.Host)) {
+        return 'URI must include a host'
+    }
+    return $null
+}
+
+function Test-LVAllowedUri {
+    [CmdletBinding()]
+    param([AllowNull()][AllowEmptyString()][string]$Uri)
+
+    return ($null -eq (Get-LVAllowedUriProblem -Uri $Uri))
+}
+
 function Get-LVLocalizationDocument {
     [CmdletBinding()]
     param()

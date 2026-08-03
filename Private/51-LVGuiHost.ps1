@@ -391,7 +391,7 @@ $script:LVGuiElement = @(
     'PnlEmpty', 'TxtEmptyTitle', 'TxtEmptyBody',
     'TxtNoSelection', 'ScrDetail', 'PillDetail', 'TxtDetailVerdict', 'TxtDetailTitle',
     'TxtDetailMeta', 'TxtPlain', 'TxtWhy', 'TxtAction',
-    'PnlFalsePositives', 'LstFalsePositives', 'PnlRefs', 'LstRefs',
+    'PnlFalsePositives', 'LstFalsePositives', 'PnlRefs', 'LstRefs', 'LstUnsafeRefs',
     'TxtSample', 'TxtProvenance',
     'BtnCopy', 'BtnSaveReport', 'BtnOpenReport',
     'RowLog', 'BtnToggleLog', 'TxtLastLine', 'TxtLog',
@@ -737,6 +737,29 @@ function ConvertTo-LVGuiDetail {
         Reference     = [string[]]$reference
         SampleText    = (@($sample | Select-Object -Unique) -join ([Environment]::NewLine * 2))
         Provenance    = $provenance
+    }
+}
+
+function Get-LVGuiReferenceBucket {
+    [CmdletBinding()]
+    param([AllowEmptyCollection()][object[]]$Reference)
+
+    $allowed = New-Object System.Collections.Generic.List[string]
+    $blocked = New-Object System.Collections.Generic.List[string]
+    foreach ($value in @($Reference)) {
+        if ($null -eq $value) { continue }
+        $text = [string]$value
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if (Test-LVAllowedUri -Uri $text) {
+            if (-not $allowed.Contains($text)) { $allowed.Add($text) }
+        } else {
+            $blocked.Add(('Blocked as text (only http/https links are allowed): {0}' -f $text))
+        }
+    }
+
+    return [pscustomobject]@{
+        Allowed = [string[]]$allowed.ToArray()
+        Blocked = [string[]]$blocked.ToArray()
     }
 }
 

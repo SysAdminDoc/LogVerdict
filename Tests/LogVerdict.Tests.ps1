@@ -633,6 +633,51 @@ Describe 'Verdict database' {
         @(Test-LogVerdictDatabase).Count | Should -Be 0
     }
 
+    It 'allows only http and https rule URIs and names the offending rule' {
+        $unsafe = [ordered]@{
+            'URI-JS'       = @{ field = 'references'; value = 'javascript:alert(1)' }
+            'URI-FILE'     = @{ field = 'references'; value = 'file:///C:/Windows/System32/drivers/etc/hosts' }
+            'URI-UNC'      = @{ field = 'sources'; value = '\\server\share\rule.html' }
+            'URI-SETTINGS' = @{ field = 'sources'; value = 'ms-settings:privacy' }
+        }
+        $rules = foreach ($entry in $unsafe.GetEnumerator()) {
+            $rule = [ordered]@{
+                id = $entry.Key; status = 'stable'; verified = '2026-07-31'
+                match = @{ source = 'event' }; verdict = 'benign'; title = 't'; plain = 'p'; why = 'w'; action = 'a'; confidence = 'high'
+            }
+            if ($entry.Value.field -eq 'references') {
+                $rule.references = @($entry.Value.value)
+            } else {
+                $rule.sources = @(@{ uri = $entry.Value.value })
+            }
+            [pscustomobject]$rule
+        }
+        $path = Join-Path $TestDrive 'unsafe-uris.json'
+        [pscustomobject]@{
+            schemaVersion = 5; name = 'unsafe'; updated = '2026-07-31'; rules = @($rules); correlations = @()
+        } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path -Encoding UTF8
+
+        $problems = @(Test-LogVerdictDatabase -Path $path -SkipFixture)
+        foreach ($id in $unsafe.Keys) {
+            $ruleProblems = @($problems | Where-Object RuleId -eq $id)
+            $ruleProblems.Count | Should -Be 1 -Because "unsafe URI in $id must be rejected once"
+            $ruleProblems[0].Problem | Should -Match 'only http and https are permitted|absolute http or https URI|include a host'
+        }
+        Test-LogVerdictDatabase -Path $path -SkipFixture -Quiet | Should -BeFalse
+        { Get-LogVerdictDatabase -Path $path } | Should -Throw '*URI-JS*'
+    }
+
+    It 'accepts http and https URIs in references and sources' {
+        InModuleScope LogVerdict {
+            Test-LVAllowedUri -Uri 'http://example.invalid/rule' | Should -BeTrue
+            Test-LVAllowedUri -Uri 'https://example.invalid/rule' | Should -BeTrue
+            Test-LVAllowedUri -Uri 'javascript:alert(1)' | Should -BeFalse
+            Test-LVAllowedUri -Uri 'file:///C:/Windows/hosts' | Should -BeFalse
+            Test-LVAllowedUri -Uri '\\server\share\rule.html' | Should -BeFalse
+            Test-LVAllowedUri -Uri 'ms-settings:privacy' | Should -BeFalse
+        }
+    }
+
     It 'has unique rule ids' {
         $ids = (Get-LogVerdictDatabase).rules.id
         ($ids | Select-Object -Unique).Count | Should -Be $ids.Count
@@ -713,6 +758,11 @@ Describe 'Verdict database' {
         $schemaVerdicts = @($schema.definitions.rule.properties.verdict.enum) | Sort-Object
         $schemaStatuses = @($schema.definitions.rule.properties.status.enum) | Sort-Object
         $schemaConfidence = @($schema.definitions.rule.properties.confidence.enum) | Sort-Object
+
+        $schema.definitions.correlationRule.properties.references.items.pattern | Should -BeExactly '^https?://'
+        $schema.definitions.correlationRule.properties.sources.items.properties.uri.pattern | Should -BeExactly '^https?://'
+        $schema.definitions.rule.properties.references.items.pattern | Should -BeExactly '^https?://'
+        $schema.definitions.rule.properties.sources.items.properties.uri.pattern | Should -BeExactly '^https?://'
 
         InModuleScope LogVerdict -Parameters @{ sv = $schemaVerdicts; ss = $schemaStatuses; sc = $schemaConfidence } {
             param($sv, $ss, $sc)
@@ -3067,6 +3117,28 @@ Describe 'Report rendering' {
         }
     }
 
+    It 'renders unsafe finding URIs as inert text instead of links' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $finding = $r.Findings[0] | Select-Object *
+            $finding | Add-Member -NotePropertyName Sources -NotePropertyValue @(
+                [pscustomobject]@{ uri = 'javascript:alert(1)'; author = 'unsafe' },
+                [pscustomobject]@{ uri = 'https://example.invalid/good'; author = 'safe' }
+            ) -Force
+            $finding | Add-Member -NotePropertyName Reference -NotePropertyValue 'file:///C:/Windows/hosts' -Force
+            $result.Findings = @($finding)
+
+            $html = ConvertTo-LVHtmlReport -Result $result
+            $html | Should -Match 'javascript:alert\(1\)'
+            $html | Should -Match 'file:///C:/Windows/hosts'
+            $html | Should -Match 'href="https://example.invalid/good"'
+            $html | Should -Not -Match 'href="javascript:'
+            $html | Should -Not -Match 'href="file:'
+            $html | Should -Match 'not a link: only http/https URIs are allowed'
+        }
+    }
+
     It 'renders offline verdict toggles and text search without hiding findings when scripting is disabled' {
         InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
             param($r)
@@ -3113,6 +3185,24 @@ Describe 'GUI markup' {
             $missing = @($script:LVGuiElement | Where-Object { $xaml -notmatch ('x:Name="{0}"' -f [regex]::Escape($_)) })
             ($missing -join ', ') | Should -BeExactly ''
         }
+    }
+
+    It 'keeps unsafe references as inert GUI text and guards navigation' {
+        InModuleScope LogVerdict {
+            $buckets = Get-LVGuiReferenceBucket -Reference @(
+                'https://example.invalid/good',
+                'javascript:alert(1)',
+                'file:///C:/Windows/hosts',
+                '\\server\share\rule.html',
+                'ms-settings:privacy'
+            )
+            @($buckets.Allowed) | Should -Be @('https://example.invalid/good')
+            @($buckets.Blocked).Count | Should -Be 4
+            $buckets.Blocked -join ' ' | Should -Match 'javascript:alert(1)|file:///C:/Windows/hosts|\\server\\share\\rule.html|ms-settings:privacy'
+        }
+        $gui = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1') -Raw
+        $gui | Should -Match 'Get-LVAllowedUriProblem'
+        $gui | Should -Match 'Start-Process -FilePath \$uri'
     }
 
     It 'binds only to properties the row objects actually carry' {

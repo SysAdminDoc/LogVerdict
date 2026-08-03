@@ -43,6 +43,35 @@ function Test-LVDatabaseProvenance {
     return ($Item.provenance -eq 'internal-observation')
 }
 
+function Get-LVDatabaseUriProblem {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Item,
+        [Parameter(Mandatory)][string]$RuleId
+    )
+
+    foreach ($reference in @($Item.references)) {
+        if ($null -eq $reference) { continue }
+        $problem = Get-LVAllowedUriProblem -Uri ([string]$reference)
+        if ($problem) {
+            [pscustomobject]@{
+                RuleId = $RuleId
+                Problem = ("references[]: {0}" -f $problem)
+            }
+        }
+    }
+    foreach ($source in @($Item.sources)) {
+        if ($null -eq $source -or -not $source.uri) { continue }
+        $problem = Get-LVAllowedUriProblem -Uri ([string]$source.uri)
+        if ($problem) {
+            [pscustomobject]@{
+                RuleId = $RuleId
+                Problem = ("sources[].uri: {0}" -f $problem)
+            }
+        }
+    }
+}
+
 function Get-LVDatabaseTrustProblem {
     <#
         Validate fields that the resolver consumes but JSON Schema cannot express:
@@ -73,6 +102,10 @@ function Get-LVDatabaseTrustProblem {
         $allIds[$id] = $true
         $ruleById[$id] = $rule
 
+        foreach ($uriProblem in @(Get-LVDatabaseUriProblem -Item $rule -RuleId $id)) {
+            $problems.Add($uriProblem) | Out-Null
+        }
+
         if (-not $SkipRuleProvenance -and (Test-LVRuleActive -Rule $rule)) {
             if ($rule.provenance -and $rule.provenance -ne 'internal-observation') {
                 $problems.Add([pscustomobject]@{ RuleId=$id; Problem=("unknown provenance '{0}'; valid: internal-observation" -f $rule.provenance) }) | Out-Null
@@ -97,6 +130,10 @@ function Get-LVDatabaseTrustProblem {
             $problems.Add([pscustomobject]@{ RuleId=$id; Problem='duplicate id shared by rules or correlations' }) | Out-Null
         }
         $allIds[$id] = $true
+
+        foreach ($uriProblem in @(Get-LVDatabaseUriProblem -Item $correlationRule -RuleId $id)) {
+            $problems.Add($uriProblem) | Out-Null
+        }
 
         if (Test-LVRuleActive -Rule $correlationRule) {
             if ($correlationRule.provenance -and $correlationRule.provenance -ne 'internal-observation') {

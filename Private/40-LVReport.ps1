@@ -878,9 +878,17 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
                 (ConvertTo-LVHtmlEncoded $advisory.Package), (ConvertTo-LVHtmlEncoded $advisory.Version),
                 (ConvertTo-LVHtmlEncoded $advisory.AffectedRange), (ConvertTo-LVHtmlEncoded $advisory.FixedVersion),
                 $advisory.CVSS, $advisory.KEV, (ConvertTo-LVHtmlEncoded $advisory.PublishedDate), (ConvertTo-LVHtmlEncoded $advisory.ModifiedDate))
-            Add-LVLine $sb ('<div>{0}: <a href="{1}">{1}</a>; hash {2}</div>' -f `
-                (ConvertTo-LVHtmlEncoded $advisory.Source), (ConvertTo-LVHtmlEncoded $advisory.SourceUri),
-                (ConvertTo-LVHtmlEncoded $advisory.SourceHash))
+            $advisoryUri = [string]$advisory.SourceUri
+            $advisoryUriText = ConvertTo-LVHtmlEncoded $advisoryUri
+            if (Test-LVAllowedUri -Uri $advisoryUri) {
+                Add-LVLine $sb ('<div>{0}: <a href="{1}">{1}</a>; hash {2}</div>' -f `
+                    (ConvertTo-LVHtmlEncoded $advisory.Source), $advisoryUriText,
+                    (ConvertTo-LVHtmlEncoded $advisory.SourceHash))
+            } else {
+                Add-LVLine $sb ('<div>{0}: <span>{1}</span> (not a link: only http/https URIs are allowed); hash {2}</div>' -f `
+                    (ConvertTo-LVHtmlEncoded $advisory.Source), $advisoryUriText,
+                    (ConvertTo-LVHtmlEncoded $advisory.SourceHash))
+            }
             Add-LVLine $sb ('<div>{0}</div>' -f (ConvertTo-LVHtmlEncoded $advisory.Description))
         }
         if (@($Result.Advisories).Count -eq 0 -and $Result.AdvisoryStatus -eq 'no-match') {
@@ -1040,15 +1048,25 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         }
         foreach ($src in @($f.Sources)) {
             if (-not $src.uri) { continue }
-            $uri = ConvertTo-LVHtmlEncoded $src.uri
+            $rawUri = [string]$src.uri
+            $uri = ConvertTo-LVHtmlEncoded $rawUri
             $credit = @($src.author, $src.licence) | Where-Object { $_ }
             $suffix = ''
             if ($credit.Count -gt 0) { $suffix = ' ' + (ConvertTo-LVHtmlEncoded (('({0})' -f ($credit -join ', ')))) }
-            Add-LVLine $sb ('<div class="row"><div class="lbl">Source</div><div><a href="{0}">{1}</a>{2}</div></div>' -f $uri, $uri, $suffix)
+            if (Test-LVAllowedUri -Uri $rawUri) {
+                Add-LVLine $sb ('<div class="row"><div class="lbl">Source</div><div><a href="{0}">{1}</a>{2}</div></div>' -f $uri, $uri, $suffix)
+            } else {
+                Add-LVLine $sb ('<div class="row"><div class="lbl">Source</div><div><span>{0}</span> (not a link: only http/https URIs are allowed){1}</div></div>' -f $uri, $suffix)
+            }
         }
         if ($f.Reference) {
-            $ref = ConvertTo-LVHtmlEncoded $f.Reference
-            Add-LVLine $sb ('<div class="row"><div class="lbl">Reference</div><div><a href="{0}">{1}</a></div></div>' -f $ref, $ref)
+            $rawReference = [string]$f.Reference
+            $ref = ConvertTo-LVHtmlEncoded $rawReference
+            if (Test-LVAllowedUri -Uri $rawReference) {
+                Add-LVLine $sb ('<div class="row"><div class="lbl">Reference</div><div><a href="{0}">{1}</a></div></div>' -f $ref, $ref)
+            } else {
+                Add-LVLine $sb ('<div class="row"><div class="lbl">Reference</div><div><span>{0}</span> (not a link: only http/https URIs are allowed)</div></div>' -f $ref)
+            }
         }
         Add-LVLine $sb ('<pre class="ev">{0}</pre>' -f (ConvertTo-LVHtmlEncoded $f.SampleMessage))
         Add-LVLine $sb '</article>'
