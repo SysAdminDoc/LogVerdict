@@ -315,7 +315,7 @@ function New-LVReviewArtifact {
         }
         run = [pscustomobject][ordered]@{
             mode = Get-LVReviewProperty -InputObject (Get-LVReviewProperty -InputObject $Result -Name 'Contract') -Name 'mode'
-            scanTime = $Result.ScanTime
+            scanTime = ConvertTo-LVCaseUtcText $Result.ScanTime
             daysBack = $Result.DaysBack
             sourceCount = @($Result.Coverage).Count
             unknownCount = @($orderedItems | Where-Object { $_.kind -eq 'unknown' }).Count

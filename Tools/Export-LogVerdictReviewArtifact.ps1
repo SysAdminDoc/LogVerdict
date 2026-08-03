@@ -75,6 +75,10 @@ if ($OutputPath) {
     $target = [IO.Path]::GetFullPath($OutputPath)
     $parent = Split-Path -Parent $target
     if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-    [IO.File]::WriteAllText($target, (($artifact | ConvertTo-Json -Depth 30) + [Environment]::NewLine), (New-Object Text.UTF8Encoding($false)))
+    $safeArtifact = & $module {
+        param($Value)
+        ConvertTo-LVJsonSafeValue -Value $Value
+    } $artifact
+    [IO.File]::WriteAllText($target, (($safeArtifact | ConvertTo-Json -Depth 30) + [Environment]::NewLine), (New-Object Text.UTF8Encoding($false)))
 }
 return $artifact

@@ -12,7 +12,7 @@
         "schemaVersion": { "const": 1 },
         "name": { "const": "LogVerdict.Report" },
         "mode": { "enum": ["live", "offline"] },
-        "generatedAt": { "type": "string", "format": "date-time" },
+        "generatedAt": { "type": "string", "format": "date-time", "pattern": "Z$" },
         "privacy": {
           "type": "object",
           "required": ["redacted", "rawEvidence", "statement"],
@@ -34,7 +34,8 @@
     },
     "Tool": { "const": "LogVerdict" },
     "Version": { "type": "string" },
-    "ScanTime": { "type": "string", "format": "date-time" },
+    "ScanTime": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "Duration": { "type": ["string", "null"], "pattern": "^P" },
     "DaysBack": { "type": "integer", "minimum": 1, "maximum": 3650 },
     "Coverage": {
       "type": "array",
@@ -51,11 +52,51 @@
           "Reason": { "type": ["string", "null"] },
           "ParserError": { "type": ["string", "null"] },
           "SHA256": { "type": ["string", "null"] },
-          "CollectionBudget": { "type": ["object", "null"] }
+          "CollectionBudget": { "type": ["object", "null"] },
+          "WindowStart": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
+          "WindowEnd": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" }
         }
       }
     },
-    "Findings": { "type": "array" },
+    "Findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "FirstSeen": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
+          "LastSeen": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
+          "BurstOnset": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
+          "Times": { "type": "array", "items": { "type": "string", "format": "date-time", "pattern": "Z$" } }
+        }
+      }
+    },
+    "Correlations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "Windows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "Start": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
+                "End": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "HealthProfiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "OldestRecord": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" }
+        }
+      }
+    },
     "Performance": { "type": "array" },
     "WorstVerdict": { "type": "string" },
     "ExitCode": { "type": "integer", "minimum": 0, "maximum": 4 }

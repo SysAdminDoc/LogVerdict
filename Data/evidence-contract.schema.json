@@ -11,7 +11,7 @@
       "properties": {
         "schemaVersion": { "const": 1 },
         "name": { "const": "LogVerdict.Evidence" },
-        "generatedAt": { "type": "string", "format": "date-time" },
+        "generatedAt": { "type": "string", "format": "date-time", "pattern": "Z$" },
         "compatibility": {
           "type": "object",
           "required": ["readerMajor", "migration"],
@@ -22,7 +22,12 @@
         }
       }
     },
-    "ReportContract": { "type": "object" },
+    "ReportContract": {
+      "type": "object",
+      "properties": {
+        "generatedAt": { "type": "string", "format": "date-time", "pattern": "Z$" }
+      }
+    },
     "Privacy": {
       "type": "object",
       "required": ["redacted", "rawEvidence", "statement", "auditStatus"],

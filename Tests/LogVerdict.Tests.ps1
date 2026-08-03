@@ -2891,7 +2891,8 @@ Describe 'Report rendering' {
             $csv = ConvertTo-LVCsvReport -Result $result
             $text | Should -Match 'Burst\s+: began 2026-08-01 10:00; 3 occurrence\(s\) in 4 minute\(s\)'
             $html | Should -Match 'Burst</div><div>2026-08-01 10:00'
-            $csv | Should -Match '"True".*"2026-08-01T10:00:00.*".*"3".*"4"'
+            $expectedBurstUtc = ConvertTo-LVUtcTimestamp $finding.BurstOnset
+            $csv | Should -Match ('"True".*"{0}".*"3".*"4"' -f [regex]::Escape($expectedBurstUtc))
         }
     }
 
@@ -2952,6 +2953,32 @@ Describe 'Report rendering' {
         $parsed = $json | ConvertFrom-Json
         $parsed.Findings[0].Verdict | Should -Be 'actionable'
         $parsed.Reduction.SignatureCount | Should -Be 71
+    }
+
+    It 'emits UTC ISO timestamps and ISO durations in the JSON report' {
+        $result = $script:FakeResult | Select-Object *
+        $finding = $script:FakeResult.Findings[0] | Select-Object *
+        $finding | Add-Member -NotePropertyName Times -NotePropertyValue @(
+            [datetime]'2026-07-01 00:00:00', [datetime]'2026-07-30 00:00:00'
+        )
+        $result.Findings = @($finding)
+        $result | Add-Member -NotePropertyName Coverage -NotePropertyValue @([pscustomobject]@{
+            Source='event'; Kind='channel'; Name='System'; Status='empty'; ObservedRecords=0; SkippedRecords=0
+            WindowStart=[datetime]'2026-07-30 00:00:00'; WindowEnd=[datetime]'2026-07-31 00:00:00'
+        })
+        $out = Join-Path $TestDrive 'reports-utc'
+        Export-LogVerdictReport -Result $result -OutputDir $out -Format Json | Out-Null
+        $json = Get-Content -LiteralPath (Join-Path $out 'LogVerdict-Report.json') -Raw
+
+        $json | Should -Not -Match '(?i)/Date\('
+        $json | Should -Not -Match '"Duration"\s*:\s*\{'
+        $json | Should -Not -Match '"Ticks"\s*:'
+        $json | Should -Match '"ScanTime"\s*:\s*"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z"'
+        $json | Should -Match '"FirstSeen"\s*:\s*"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z"'
+        $json | Should -Match '"LastSeen"\s*:\s*"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z"'
+        $json | Should -Match '"Times"\s*:\s*\[\s*"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z"'
+        $json | Should -Match '"Duration"\s*:\s*"P[^"\r\n]+"'
+        $json | Should -Match '"WindowStart"\s*:\s*"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z"'
     }
 
     It 'writes one stable scalar CSV row per finding' {
@@ -3116,6 +3143,36 @@ Describe 'Report rendering' {
             $written = Export-LogVerdictStandard -Result $result -Format Ecs -Path $path
             $written.Path | Should -BeExactly $path
             (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).adapter | Should -BeExactly 'ecs'
+        }
+    }
+
+    It 'keeps every machine-readable standard timestamp in RFC3339 UTC form' {
+        $result = $script:FakeResult | Select-Object *
+        $result | Add-Member -NotePropertyName Coverage -NotePropertyValue @([pscustomobject]@{
+            Source='event'; Kind='channel'; Name='System'; Status='empty'; Reason='No matching event'
+            Path=$null; WindowStart=[datetime]'2026-07-30 00:00:00'; WindowEnd=[datetime]'2026-07-31 00:00:00'
+            Cap=20; ObservedRecords=0; SkippedRecords=0; RecordGap=$null; ParserError=$null
+            SizeBytes=$null; ParseMilliseconds=4; SHA256=$null; Origin='live'
+        })
+        $timestampPattern = '(?im)"(?:generatedAt|scanTime|scanTimes|firstObserved|lastObserved|windowStart|windowEnd|oldestRecord|timestampUtc|endTimestampUtc)"\s*:\s*"([^"]+)"'
+        foreach ($format in @('Ecs', 'Ocsf', 'OpenTelemetry', 'Stix')) {
+            $document = (Export-LogVerdictStandard -Result $result -Format $format).Document
+            $json = $document | ConvertTo-Json -Depth 30
+            $json | Should -Not -Match '(?i)/Date\('
+            $timestampMatches = [regex]::Matches($json, $timestampPattern)
+            $timestampMatches.Count | Should -BeGreaterThan 0 -Because "$format must carry machine-readable timestamps"
+            foreach ($match in $timestampMatches) {
+                $match.Groups[1].Value | Should -Match 'Z$' -Because "$format timestamps must be UTC"
+            }
+        }
+
+        $lines = @(Export-LogVerdictStandard -Result $result -Format Jsonl)
+        $lines.Count | Should -BeGreaterThan 0
+        foreach ($line in $lines) {
+            $line | Should -Not -Match '(?i)/Date\('
+            foreach ($match in [regex]::Matches($line, $timestampPattern)) {
+                $match.Groups[1].Value | Should -Match 'Z$' -Because 'JSONL timestamps must be UTC'
+            }
         }
     }
 

@@ -8,7 +8,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "name": { "const": "LogVerdict.ReviewArtifact" },
-    "generatedAt": { "type": "string", "format": "date-time" },
+    "generatedAt": { "type": "string", "format": "date-time", "pattern": "Z$" },
     "tool": { "const": "LogVerdict" },
     "version": { "type": "string" },
     "privacy": {
@@ -21,7 +21,12 @@
         "statement": { "type": "string", "minLength": 1 }
       }
     },
-    "run": { "type": "object" },
+    "run": {
+      "type": "object",
+      "properties": {
+        "scanTime": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" }
+      }
+    },
     "items": {
       "type": "array",
       "items": {

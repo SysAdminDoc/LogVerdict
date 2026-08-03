@@ -29,18 +29,7 @@ function ConvertTo-LVCaseUtcText {
     [CmdletBinding()]
     param([AllowNull()]$Value)
 
-    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return $null }
-    if ($Value -is [datetime]) {
-        return ([datetime]$Value).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ')
-    }
-    if ($Value -is [datetimeoffset]) {
-        return ([datetimeoffset]$Value).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ')
-    }
-    try {
-        return ([DateTimeOffset]::Parse([string]$Value)).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ')
-    } catch {
-        return $null
-    }
+    return ConvertTo-LVUtcTimestamp -Value $Value
 }
 
 function Get-LVCaseSourceRecords {

@@ -6,8 +6,7 @@ $script:LVStandardExportVersion = '1.0.0'
 function ConvertTo-LVStandardTimestamp {
     param([AllowNull()]$Value)
 
-    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return $null }
-    try { return ([datetime]$Value).ToUniversalTime().ToString('o') } catch { return $null }
+    return ConvertTo-LVUtcTimestamp -Value $Value
 }
 
 function ConvertTo-LVStandardUnixMillisecond {
@@ -217,7 +216,7 @@ function ConvertTo-LVStandardHistory {
         baseline            = [pscustomobject][ordered]@{
             method      = $History.Baseline.Method
             sampleCount = $History.Baseline.SampleCount
-            scanTimes   = @($History.Baseline.ScanTimes)
+            scanTimes   = @($History.Baseline.ScanTimes | ForEach-Object { ConvertTo-LVStandardTimestamp $_ })
         }
         threshold           = [pscustomobject][ordered]@{
             relativeIncrease = $History.Threshold.RelativeIncrease
@@ -523,7 +522,8 @@ function Write-LVJsonlTimeline {
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         $writer = New-Object System.IO.StreamWriter($temporary, $false, $utf8NoBom)
         foreach ($line in Get-LVTimelineLine -Result $Result -Redact:$Redact) {
-            $writer.WriteLine(($line | ConvertTo-Json -Depth 30 -Compress))
+            $safeLine = ConvertTo-LVJsonSafeValue -Value $line
+            $writer.WriteLine(($safeLine | ConvertTo-Json -Depth 30 -Compress))
             $lineCount++
         }
         $writer.Flush()

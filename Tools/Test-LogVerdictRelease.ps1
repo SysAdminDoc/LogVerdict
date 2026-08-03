@@ -22,6 +22,128 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
+
+function Get-LVReleaseSha256 {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($Path)))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Write-LVReleaseJson {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]$Value
+    )
+
+    $parent = Split-Path -Parent $Path
+    if ($parent -and -not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($Path, (($Value | ConvertTo-Json -Depth 30) + [Environment]::NewLine), $utf8NoBom)
+}
+
+function Test-LVReleaseJsonSchema {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$SchemaPath,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    if (-not (Get-Command -Name Test-Json -ErrorAction SilentlyContinue)) {
+        throw 'JSON schema validation requires PowerShell 7 or newer with Test-Json.'
+    }
+    try {
+        $valid = Test-Json -LiteralPath $Path -SchemaFile $SchemaPath -ErrorAction Stop
+    } catch {
+        throw ("{0} failed JSON schema validation: {1}" -f $Label, $_.Exception.Message)
+    }
+    if (-not $valid) { throw ("{0} failed JSON schema validation." -f $Label) }
+}
+
+function Read-LVReleaseJson {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
+    if ($PSVersionTable.PSVersion -ge [version]'7.0') {
+        return $raw | ConvertFrom-Json -DateKind String -ErrorAction Stop
+    }
+    return $raw | ConvertFrom-Json -ErrorAction Stop
+}
+
+function Assert-LVReleaseUtcTimestamp {
+    param(
+        [AllowNull()]$Value,
+        [string]$Path = 'document'
+    )
+
+    if ($null -eq $Value) { return }
+    $timestampNames = @(
+        'ScanTime', 'GeneratedAt', 'FirstSeen', 'LastSeen', 'BurstOnset', 'WindowStart', 'WindowEnd',
+        'OldestRecord', 'TimeCreated', 'StartTime', 'EndTime', 'Start', 'End', 'Times',
+        'scanTime', 'generatedAt', 'firstObserved', 'lastObserved', 'completed', 'started',
+        'windowStart', 'windowEnd', 'oldestRecord', 'timeCreated', 'timestampUtc', 'endTimestampUtc'
+    )
+    $utcPattern = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z$'
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        foreach ($key in @($Value.Keys)) {
+            Assert-LVReleaseUtcTimestamp -Value $Value[$key] -Path ("{0}.{1}" -f $Path, $key)
+        }
+        return
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        $index = 0
+        foreach ($item in @($Value)) {
+            Assert-LVReleaseUtcTimestamp -Value $item -Path ("{0}[{1}]" -f $Path, $index)
+            $index++
+        }
+        return
+    }
+
+    $properties = @($Value.PSObject.Properties)
+    foreach ($property in $properties) {
+        $propertyPath = "{0}.{1}" -f $Path, $property.Name
+        $propertyValue = $property.Value
+        if ($timestampNames -contains [string]$property.Name) {
+            $timestampValues = if ($propertyValue -is [System.Collections.IEnumerable] -and $propertyValue -isnot [string]) {
+                @($propertyValue)
+            } else {
+                @($propertyValue)
+            }
+            foreach ($timestampValue in $timestampValues) {
+                if ($null -eq $timestampValue) { continue }
+                if ($timestampValue -isnot [string] -or [string]$timestampValue -notmatch $utcPattern) {
+                    throw ("{0} is not an RFC3339 UTC timestamp: {1}" -f $propertyPath, $timestampValue)
+                }
+            }
+        }
+        if ([string]$property.Name -eq 'Duration' -and $null -ne $propertyValue) {
+            if ($propertyValue -isnot [string] -or [string]$propertyValue -notmatch '^P') {
+                throw ("{0} must be an ISO-8601 duration string." -f $propertyPath)
+            }
+        }
+        Assert-LVReleaseUtcTimestamp -Value $propertyValue -Path $propertyPath
+    }
+}
+
+function Test-LVReleaseUtcDocument {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
+    if ($raw -match '(?i)/Date\(') { throw ("{0} contains a legacy serialized DateTime." -f $Label) }
+    $document = Read-LVReleaseJson -Path $Path
+    Assert-LVReleaseUtcTimestamp -Value $document -Path $Label
+}
+
 if ([string]::IsNullOrWhiteSpace($ManifestDirectory)) {
     $ManifestDirectory = Join-Path $repoRoot 'Packaging'
 }
@@ -140,19 +262,144 @@ foreach ($requiredTool in @(
         throw ("Supported-runtime coverage is missing pinned {0} v{1}." -f $requiredTool.Name, $requiredTool.Version)
     }
 }
-$caseSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/case-profile.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$caseSchemaPath = Join-Path $repoRoot 'Data/case-profile.schema.json'
+$reportSchemaPath = Join-Path $repoRoot 'Data/report-contract.schema.json'
+$evidenceSchemaPath = Join-Path $repoRoot 'Data/evidence-contract.schema.json'
+$reviewSchemaPath = Join-Path $repoRoot 'Data/review-artifact.schema.json'
+$providerSchemaPath = Join-Path $repoRoot 'Data/provider.schema.json'
+$caseSchema = Get-Content -LiteralPath $caseSchemaPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$caseSchema.properties.schemaVersion.const -ne 1) { throw 'Case profile schema is not pinned at version 1.' }
-$reportSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/report-contract.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$reportSchema = Get-Content -LiteralPath $reportSchemaPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$reportSchema.properties.Contract.properties.schemaVersion.const -ne 1) { throw 'Report contract schema is not pinned at version 1.' }
-$evidenceSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/evidence-contract.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$evidenceSchema = Get-Content -LiteralPath $evidenceSchemaPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$evidenceSchema.properties.Contract.properties.schemaVersion.const -ne 1) { throw 'Evidence contract schema is not pinned at version 1.' }
-$reviewSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/review-artifact.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$reviewSchema = Get-Content -LiteralPath $reviewSchemaPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$reviewSchema.properties.schemaVersion.const -ne 1) { throw 'Review artifact schema is not pinned at version 1.' }
-$providerSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/provider.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$providerSchema = Get-Content -LiteralPath $providerSchemaPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$providerSchema.properties.schemaVersion.const -ne 1 -or
     @($providerSchema.required) -notcontains 'entrypointSha256' -or
     @($providerSchema.properties.capabilities.items.enum) -notcontains 'redaction') {
     throw 'Provider extension manifest schema is not pinned at version 1 with the required redaction and entrypoint contract.'
+}
+
+$releaseSchemaRoot = Join-Path ([IO.Path]::GetTempPath()) ('LogVerdict-release-schema-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $releaseSchemaRoot -Force | Out-Null
+try {
+    $releaseScanTime = Get-Date
+    $releaseResult = [pscustomobject][ordered]@{
+        Tool = 'LogVerdict'
+        Version = $version
+        MachineName = 'RELEASE-GATE'
+        ScanTime = $releaseScanTime
+        Duration = [timespan]::FromSeconds(1)
+        DaysBack = 1
+        Channels = @('System')
+        Elevated = $false
+        WorstVerdict = 'benign'
+        ExitCode = 0
+        Reduction = [pscustomobject]@{ RecordCount = 0; SignatureCount = 0; Ratio = 0 }
+        Findings = @()
+        Correlations = @()
+        Coverage = @([pscustomobject]@{
+            Source = 'event'; Kind = 'channel'; Name = 'System'; Status = 'empty'
+            ObservedRecords = 0; SkippedRecords = 0; Reason = $null; ParserError = $null
+            SHA256 = $null; CollectionBudget = $null; WindowStart = $releaseScanTime.AddDays(-1)
+            WindowEnd = $releaseScanTime; Path = $null; Origin = 'release-gate'
+        })
+        Performance = @()
+        HealthProfiles = @()
+        EvidenceManifest = @()
+        CoverageNotes = @()
+        CrashArtifacts = @()
+        Horizon = @{}
+        HorizonWarning = $null
+        Stability = $null
+        SetupDiag = $null
+        History = $null
+        ProviderExtensions = @()
+        ProviderProjections = @()
+        Advisories = @()
+        AdvisoryStatus = 'not-requested'
+        AdvisoryCache = $null
+        ScanOptions = [ordered]@{ channelMode = 'named'; channels = @('System'); skipTextLogs = $true; skipReliability = $true; includeBenign = $true }
+    }
+
+    $reportDirectory = Join-Path $releaseSchemaRoot 'report'
+    Export-LogVerdictReport -Result $releaseResult -OutputDir $reportDirectory -Format Json 6>$null | Out-Null
+    $reportPath = Join-Path $reportDirectory 'LogVerdict-Report.json'
+
+    $casePath = Join-Path $releaseSchemaRoot 'CASE-PROFILE.json'
+    New-LogVerdictCaseProfile -Result $releaseResult -Path $casePath | Out-Null
+
+    $module = Get-Module LogVerdict
+    $evidence = & $module {
+        param($Result)
+        $contract = New-LVEvidenceContract -Result $Result -Content @() -Omission @('release schema gate') -Redacted
+        ConvertTo-LVJsonSafeValue -Value $contract
+    } $releaseResult
+    $evidencePath = Join-Path $releaseSchemaRoot 'EVIDENCE-CONTRACT.json'
+    Write-LVReleaseJson -Path $evidencePath -Value $evidence
+
+    $review = & $module {
+        param($Result)
+        $artifact = New-LVReviewArtifact -Result $Result -Candidate @() `
+            -GeneratedAt (ConvertTo-LVUtcTimestamp (Get-Date)) -MachineName 'RELEASE-GATE'
+        ConvertTo-LVJsonSafeValue -Value $artifact
+    } $releaseResult
+    $reviewPath = Join-Path $releaseSchemaRoot 'REVIEW-ARTIFACT.json'
+    Write-LVReleaseJson -Path $reviewPath -Value $review
+
+    $providerDirectory = Join-Path $releaseSchemaRoot 'provider'
+    New-Item -ItemType Directory -Path $providerDirectory -Force | Out-Null
+    $entrypointPath = Join-Path $providerDirectory 'provider.ps1'
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($entrypointPath, "param(`$Context)`r`n", $utf8NoBom)
+    $providerManifest = [ordered]@{
+        schemaVersion = 1
+        id = 'release-gate.provider'
+        name = 'Release gate provider'
+        version = '1.0.0'
+        entrypoint = 'provider.ps1'
+        entrypointSha256 = Get-LVReleaseSha256 -Path $entrypointPath
+        capabilities = @('collect', 'normalize', 'coverage', 'redaction')
+        permissions = @('read-only')
+    }
+    $providerPath = Join-Path $providerDirectory 'manifest.json'
+    Write-LVReleaseJson -Path $providerPath -Value ([pscustomobject]$providerManifest)
+    if (-not (Test-LogVerdictProvider -Path $providerDirectory -Quiet)) {
+        throw 'Generated provider fixture failed the provider manifest trust gate.'
+    }
+
+    $schemaDocuments = @(
+        [pscustomobject]@{ Label = 'report'; Path = $reportPath; SchemaPath = $reportSchemaPath; InvalidProperty = 'Tool' }
+        [pscustomobject]@{ Label = 'evidence'; Path = $evidencePath; SchemaPath = $evidenceSchemaPath; InvalidProperty = 'Contract.schemaVersion' }
+        [pscustomobject]@{ Label = 'case'; Path = $casePath; SchemaPath = $caseSchemaPath; InvalidProperty = 'schemaVersion' }
+        [pscustomobject]@{ Label = 'review'; Path = $reviewPath; SchemaPath = $reviewSchemaPath; InvalidProperty = 'schemaVersion' }
+        [pscustomobject]@{ Label = 'provider'; Path = $providerPath; SchemaPath = $providerSchemaPath; InvalidProperty = 'schemaVersion' }
+    )
+    foreach ($documentInfo in $schemaDocuments) {
+        $document = Read-LVReleaseJson -Path $documentInfo.Path
+        switch ($documentInfo.Label) {
+            'report' { $document.Tool = 'NotLogVerdict' }
+            'evidence' { $document.Contract.schemaVersion = 999 }
+            default { $document.schemaVersion = 999 }
+        }
+        $invalidPath = Join-Path $releaseSchemaRoot ('invalid-{0}.json' -f $documentInfo.Label)
+        Write-LVReleaseJson -Path $invalidPath -Value $document
+        $rejected = $false
+        try {
+            Test-LVReleaseJsonSchema -Path $invalidPath -SchemaPath $documentInfo.SchemaPath -Label ("malformed {0}" -f $documentInfo.Label)
+        } catch { $rejected = $true }
+        if (-not $rejected) {
+            throw ("Malformed {0} document was accepted by its shipped schema." -f $documentInfo.Label)
+        }
+        Test-LVReleaseJsonSchema -Path $documentInfo.Path -SchemaPath $documentInfo.SchemaPath -Label $documentInfo.Label
+        Test-LVReleaseUtcDocument -Path $documentInfo.Path -Label $documentInfo.Label
+    }
+} finally {
+    if (Test-Path -LiteralPath $releaseSchemaRoot) {
+        Remove-Item -LiteralPath $releaseSchemaRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 $localization = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/localization.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $locales = @($localization.locales.PSObject.Properties.Name)

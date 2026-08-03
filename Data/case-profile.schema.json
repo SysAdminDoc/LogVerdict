@@ -54,8 +54,8 @@
       "required": [ "daysBack", "windowStart", "windowEnd", "channels" ],
       "properties": {
         "daysBack": { "type": [ "integer", "null" ], "minimum": 1 },
-        "windowStart": { "type": [ "string", "null" ], "format": "date-time" },
-        "windowEnd": { "type": [ "string", "null" ], "format": "date-time" },
+        "windowStart": { "type": [ "string", "null" ], "format": "date-time", "pattern": "Z$" },
+        "windowEnd": { "type": [ "string", "null" ], "format": "date-time", "pattern": "Z$" },
         "channels": { "type": "array", "items": { "type": "string" } }
       }
     },

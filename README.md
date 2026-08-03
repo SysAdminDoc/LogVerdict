@@ -234,7 +234,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Build-LogVerdictExe.
 
 `VERSION` is the release source of truth. The build refuses a manifest-version mismatch, and
 `Tools\Test-LogVerdictRelease.ps1` checks the module, README badge, typed catalog, verdict
-provenance, package manifests, and (when supplied) executable hashes. Generate package metadata
+provenance, package manifests, generated JSON contracts, and (when supplied) executable hashes.
+The schema-validation portion runs under PowerShell 7 or newer because it uses the built-in
+`Test-Json` command; the LogVerdict module itself remains compatible with Windows PowerShell 5.1.
+Generate package metadata
 from local assets without contacting GitHub with:
 
 ```powershell

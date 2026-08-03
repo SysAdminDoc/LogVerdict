@@ -70,6 +70,95 @@ $script:LVLogLines = New-Object System.Collections.Generic.List[string]
 $script:LVEventSequence = @()
 $script:LVEventSequenceIncompleteChannel = @()
 
+function ConvertTo-LVUtcTimestamp {
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return $null }
+    if ($Value -is [datetime]) {
+        return ([datetime]$Value).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($Value -is [datetimeoffset]) {
+        return ([datetimeoffset]$Value).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ', [Globalization.CultureInfo]::InvariantCulture)
+    }
+
+    $text = [string]$Value
+    $legacy = [regex]::Match($text, '^/Date\((?<milliseconds>-?\d+)(?:[+-]\d{4})?\)/$')
+    if ($legacy.Success) {
+        try {
+            return [datetimeoffset]::FromUnixTimeMilliseconds([long]$legacy.Groups['milliseconds'].Value).ToUniversalTime().ToString(
+                'yyyy-MM-ddTHH:mm:ss.fffffffZ', [Globalization.CultureInfo]::InvariantCulture)
+        } catch { return $null }
+    }
+
+    $parsed = [datetimeoffset]::MinValue
+    if ([datetimeoffset]::TryParse($text, [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AllowWhiteSpaces, [ref]$parsed)) {
+        return $parsed.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    return $null
+}
+
+function Test-LVJsonTimestampProperty {
+    param([AllowNull()][string]$Name)
+
+    return $Name -match '^(?i:ScanTime|GeneratedAt|FirstSeen|LastSeen|BurstOnset|WindowStart|WindowEnd|OldestRecord|TimeCreated|StartTime|EndTime|Start|End|Times|scanTime|generatedAt|firstObserved|lastObserved|completed|started|windowStart|windowEnd|oldestRecord|timeCreated|timestampUtc|endTimestampUtc)$'
+}
+
+function ConvertTo-LVJsonSafeValue {
+    <#
+        Convert an object graph to the JSON representation used by reports and
+        interchange adapters. PowerShell's serializer otherwise emits local or
+        legacy DateTime values and expands TimeSpan into a runtime-specific object.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$Value,
+        [AllowEmptyString()][string]$PropertyName,
+        [int]$Depth = 0
+    )
+
+    if ($null -eq $Value) { return $null }
+    if ($Depth -gt 64) { return '[DEPTH-LIMIT]' }
+    if ($Value -is [datetime] -or $Value -is [datetimeoffset]) {
+        return ConvertTo-LVUtcTimestamp -Value $Value
+    }
+    if ($Value -is [timespan]) {
+        return [System.Xml.XmlConvert]::ToString([timespan]$Value)
+    }
+    if ($Value -is [string] -or $Value -is [bool] -or $Value -is [byte] -or
+        $Value -is [int16] -or $Value -is [int32] -or $Value -is [int64] -or
+        $Value -is [decimal] -or $Value -is [double] -or $Value -is [single]) {
+        if ($Value -is [string] -and (Test-LVJsonTimestampProperty -Name $PropertyName)) {
+            $timestamp = ConvertTo-LVUtcTimestamp -Value $Value
+            if ($timestamp) { return $timestamp }
+        }
+        return $Value
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $dictionary = [ordered]@{}
+        foreach ($key in @($Value.Keys)) {
+            $dictionary[[string]$key] = ConvertTo-LVJsonSafeValue -Value $Value[$key] -PropertyName ([string]$key) -Depth ($Depth + 1)
+        }
+        return [pscustomobject]$dictionary
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        $items = New-Object System.Collections.Generic.List[object]
+        foreach ($item in @($Value)) {
+            $items.Add((ConvertTo-LVJsonSafeValue -Value $item -PropertyName $PropertyName -Depth ($Depth + 1))) | Out-Null
+        }
+        return ,$items.ToArray()
+    }
+
+    $properties = @($Value.PSObject.Properties)
+    if ($properties.Count -eq 0) { return $Value }
+    $object = [ordered]@{}
+    foreach ($property in $properties) {
+        $object[$property.Name] = ConvertTo-LVJsonSafeValue -Value $property.Value -PropertyName $property.Name -Depth ($Depth + 1)
+    }
+    return [pscustomobject]$object
+}
+
 # Optional live feed of log lines, set by a caller that cannot see Write-Host output.
 # The GUI runs a scan in a background runspace, where Write-Host goes nowhere a user
 # can read; it hands in a concurrent queue here and drains it from the UI thread.

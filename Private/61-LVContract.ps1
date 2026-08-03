@@ -48,7 +48,7 @@ function ConvertTo-LVScanDuration {
 
     $text = [string]$Value
     $parsed = [timespan]::Zero
-    if ([timespan]::TryParse($text, [Globalization.CultureInfo]::InvariantCulture, [Globalization.TimeSpanStyles]::None, [ref]$parsed)) {
+    if ([timespan]::TryParse($text, [Globalization.CultureInfo]::InvariantCulture, [ref]$parsed)) {
         return $parsed
     }
     if ($text -match '^P') {
@@ -114,7 +114,7 @@ function New-LVReportContract {
     if ($Result.PSObject.Properties['Offline'] -and $Result.Offline) { $mode = 'offline' }
     $scanTime = $null
     if ($Result.PSObject.Properties['ScanTime'] -and $Result.ScanTime) {
-        $scanTime = ([datetime]$Result.ScanTime).ToUniversalTime().ToString('o')
+        $scanTime = ConvertTo-LVUtcTimestamp -Value $Result.ScanTime
     }
     $alreadyRedacted = $false
     if ($Result.PSObject.Properties['Redacted']) { $alreadyRedacted = [bool]$Result.Redacted }
@@ -268,7 +268,7 @@ function New-LVEvidenceContract {
         Contract = [pscustomobject][ordered]@{
             schemaVersion = $script:LVEvidenceContractVersion
             name          = 'LogVerdict.Evidence'
-            generatedAt   = if ($Result.ScanTime) { ([datetime]$Result.ScanTime).ToUniversalTime().ToString('o') } else { $null }
+            generatedAt   = ConvertTo-LVUtcTimestamp -Value $Result.ScanTime
             compatibility = [pscustomobject][ordered]@{ readerMajor = $script:LVEvidenceContractVersion; migration = $null }
         }
         ReportContract = $reportContract

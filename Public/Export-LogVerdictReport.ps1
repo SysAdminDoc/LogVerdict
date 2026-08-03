@@ -93,8 +93,8 @@ function Export-LogVerdictReport {
 
         if ($wantAll -or $Format -contains 'Json') {
             $p = Join-Path $OutputDir 'LogVerdict-Report.json'
-            # Depth 6 covers signature -> samples[] without dragging in the whole graph.
-            Write-LVTextFile -Path $p -Content ($Result | ConvertTo-Json -Depth 6)
+            $jsonResult = ConvertTo-LVJsonSafeValue -Value $Result
+            Write-LVTextFile -Path $p -Content ($jsonResult | ConvertTo-Json -Depth 30)
             $written.Add($p) | Out-Null
         }
 

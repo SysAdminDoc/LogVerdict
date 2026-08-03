@@ -42,11 +42,12 @@ function Export-LogVerdictStandard {
                 return [pscustomobject][ordered]@{ Format = $Format; Path = $Path; LineCount = $written.LineCount; Document = $null }
             }
             foreach ($line in Get-LVTimelineLine -Result $projected -Redact:$timelineRedact) {
-                $line | ConvertTo-Json -Depth 30 -Compress
+                $safeLine = ConvertTo-LVJsonSafeValue -Value $line
+                $safeLine | ConvertTo-Json -Depth 30 -Compress
             }
             return
         }
-        $document = ConvertTo-LVStandardDocument -Result $projected -Format $Format
+        $document = ConvertTo-LVJsonSafeValue -Value (ConvertTo-LVStandardDocument -Result $projected -Format $Format)
         if ($Path) {
             $parent = Split-Path -Parent $Path
             if ($parent -and -not (Test-Path -LiteralPath $parent)) {

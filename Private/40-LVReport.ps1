@@ -234,7 +234,7 @@ function ConvertTo-LVFlatFindingRow {
     foreach ($finding in @($Result.Findings | Where-Object { $_ })) {
         [pscustomobject][ordered]@{
             RowType           = 'finding'
-            ScanTime          = if ($Result.ScanTime) { ([datetime]$Result.ScanTime).ToString('o') } else { $null }
+            ScanTime          = ConvertTo-LVUtcTimestamp $Result.ScanTime
             MachineName       = $Result.MachineName
             DaysBack          = $Result.DaysBack
             Elevated          = $Result.Elevated
@@ -245,8 +245,8 @@ function ConvertTo-LVFlatFindingRow {
             Key               = $finding.Key
             Count             = $finding.Count
             PerDay            = $finding.PerDay
-            FirstSeen         = if ($finding.FirstSeen) { ([datetime]$finding.FirstSeen).ToString('o') } else { $null }
-            LastSeen          = if ($finding.LastSeen) { ([datetime]$finding.LastSeen).ToString('o') } else { $null }
+            FirstSeen         = ConvertTo-LVUtcTimestamp $finding.FirstSeen
+            LastSeen          = ConvertTo-LVUtcTimestamp $finding.LastSeen
             Verdict           = $finding.Verdict
             Title             = $finding.Title
             RuleId            = $finding.RuleId
@@ -268,7 +268,7 @@ function ConvertTo-LVFlatFindingRow {
             ErrorOperation    = $finding.ErrorOperation
             Reference         = $finding.Reference
             Burst             = if ($finding.PSObject.Properties['Burst']) { $finding.Burst } else { $false }
-            BurstOnset        = if ($finding.PSObject.Properties['BurstOnset'] -and $finding.BurstOnset) { ([datetime]$finding.BurstOnset).ToString('o') } else { $null }
+            BurstOnset        = if ($finding.PSObject.Properties['BurstOnset']) { ConvertTo-LVUtcTimestamp $finding.BurstOnset } else { $null }
             BurstCount        = if ($finding.PSObject.Properties['BurstCount']) { $finding.BurstCount } else { $null }
             BurstWindowMinutes = if ($finding.PSObject.Properties['BurstWindowMinutes']) { $finding.BurstWindowMinutes } else { $null }
             CoverageSource    = $null; CoverageKind = $null; CoverageName = $null; CoverageStatus = $null
@@ -297,7 +297,7 @@ function ConvertTo-LVCoverageCsvRow {
 
     return [pscustomobject][ordered]@{
         RowType           = 'coverage'
-        ScanTime          = if ($Result.ScanTime) { ([datetime]$Result.ScanTime).ToString('o') } else { $null }
+        ScanTime          = ConvertTo-LVUtcTimestamp $Result.ScanTime
         MachineName       = $Result.MachineName
         DaysBack          = $Result.DaysBack
         Elevated          = $Result.Elevated
@@ -310,8 +310,8 @@ function ConvertTo-LVCoverageCsvRow {
         Burst             = $null; BurstOnset = $null; BurstCount = $null; BurstWindowMinutes = $null
         CoverageSource    = $Coverage.Source; CoverageKind = $Coverage.Kind; CoverageName = $Coverage.Name
         CoverageStatus    = $Coverage.Status; CoverageReason = $Coverage.Reason; CoveragePath = $Coverage.Path
-        CoverageWindowStart = if ($Coverage.WindowStart) { ([datetime]$Coverage.WindowStart).ToString('o') } else { $null }
-        CoverageWindowEnd = if ($Coverage.WindowEnd) { ([datetime]$Coverage.WindowEnd).ToString('o') } else { $null }
+        CoverageWindowStart = ConvertTo-LVUtcTimestamp $Coverage.WindowStart
+        CoverageWindowEnd = ConvertTo-LVUtcTimestamp $Coverage.WindowEnd
         CoverageCap       = $Coverage.Cap; CoverageObservedRecords = $Coverage.ObservedRecords
         CoverageSkippedRecords = $Coverage.SkippedRecords; CoverageRecordGap = $Coverage.RecordGap
         CoverageParserError = $Coverage.ParserError; CoverageSizeBytes = $Coverage.SizeBytes
@@ -341,7 +341,7 @@ function ConvertTo-LVHealthCsvRow {
 
     return [pscustomobject][ordered]@{
         RowType = 'health'
-        ScanTime = if ($Result.ScanTime) { ([datetime]$Result.ScanTime).ToString('o') } else { $null }
+        ScanTime = ConvertTo-LVUtcTimestamp $Result.ScanTime
         MachineName = $Result.MachineName; DaysBack = $Result.DaysBack; Elevated = $Result.Elevated
         Channel = $null; Source = $null; Provider = $null; Id = $null; Key = $null
         Count = $null; PerDay = $null; FirstSeen = $null; LastSeen = $null
@@ -363,7 +363,7 @@ function ConvertTo-LVHealthCsvRow {
         HealthMetadataStatus = $Health.MetadataStatus; HealthReadExistingEvents = $Health.ReadExistingEvents
         HealthHeartbeatIntervalSeconds = $Health.HeartbeatIntervalSeconds; HealthBookmarkState = $Health.BookmarkState
         HealthRetentionMode = $Health.RetentionMode; HealthRecordCount = $Health.RecordCount
-        HealthOldestRecord = if ($Health.OldestRecord) { ([datetime]$Health.OldestRecord).ToString('o') } else { $null }
+        HealthOldestRecord = ConvertTo-LVUtcTimestamp $Health.OldestRecord
          HealthMaximumSizeBytes = $Health.MaximumSizeBytes; HealthClockOffsetMinutes = $Health.ClockOffsetMinutes
          HealthReason = $Health.Reason; HealthAdvice = $Health.Advice; HealthPath = $Health.Path
          HealthPollErrors = if ($Health.PSObject.Properties['PollErrors']) { $Health.PollErrors } else { $null }
