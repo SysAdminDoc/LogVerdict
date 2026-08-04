@@ -58,15 +58,19 @@ function Export-LogVerdictStandard {
 
         if ([string]$template.kind -eq 'line') {
             $model = Get-LVStandardModel -Result $projected
-            $lines = @(ConvertTo-LVTemplateJsonLine -Model $model -Template $template)
+            # Capture the module-private command explicitly. A closure invoked later
+            # by the writer may run outside the module's command-resolution scope.
+            $lineConverter = Get-Command ConvertTo-LVTemplateJsonLine -CommandType Function -ErrorAction Stop
+            $producer = { & $lineConverter -Model $model -Template $template }.GetNewClosure()
             if ($Path) {
-                Write-LVTemplateJsonl -Path $Path -Lines $lines -Append:$Append
+                $written = Write-LVJsonlStream -Path $Path -LineProducer $producer -Append:$Append `
+                    -Redacted:([bool]($projected.PSObject.Properties['Redacted'] -and $projected.Redacted)) -Format ([string]$template.id)
                 return [pscustomobject][ordered]@{
                     Format = [string]$template.id; TemplateName = [string]$template.id; Path = $Path
-                    LineCount = $lines.Count; Document = $null; Appended = [bool]$Append
+                    LineCount = $written.LineCount; Document = $null; Appended = [bool]$Append
                 }
             }
-            $lines
+            & $producer
             return
         }
         $model = Get-LVStandardModel -Result $projected

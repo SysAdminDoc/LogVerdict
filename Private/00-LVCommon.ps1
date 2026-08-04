@@ -275,6 +275,38 @@ $script:LVLogSink = $null
 # GUI implementations. The compiled host embeds the same JSON, while a module
 # checkout reads Data/localization.json so an operator can inspect the contract.
 $script:LVLocalizationDocument = $null
+$script:LVLocalizationEnglishBySource = @{}
+$script:LVLocalizationReportLabels = @()
+$script:LVLocalizationIndexedDocument = $null
+
+function Initialize-LVLocalizationIndex {
+    param([Parameter(Mandatory)]$Document)
+
+    $bySource = @{}
+    $labels = New-Object System.Collections.Generic.List[object]
+    $english = $Document.locales.PSObject.Properties['en-US']
+    if ($english) {
+        $ordinal = 0
+        foreach ($entry in $english.Value.PSObject.Properties) {
+            $source = [string]$entry.Value
+            if ($source -and -not $bySource.ContainsKey($source)) {
+                # Preserve the first key for duplicate English strings, matching the
+                # previous property-order scan while making exact lookups O(1).
+                $bySource[$source] = [string]$entry.Name
+            }
+            if ($source -and $entry.Name -like 'report.label.*') {
+                $labels.Add([pscustomobject]@{ Source = $source; Key = [string]$entry.Name; Ordinal = $ordinal }) | Out-Null
+            }
+            $ordinal++
+        }
+    }
+    $script:LVLocalizationEnglishBySource = $bySource
+    # Longer labels must win when one label is a prefix of another. The old scan
+    # depended on resource order; precomputing a deterministic order avoids repeating
+    # the full English catalog for every report line.
+    $script:LVLocalizationReportLabels = @($labels.ToArray() | Sort-Object -Property @{ Expression = { $_.Source.Length }; Descending = $true }, @{ Expression = { $_.Ordinal }; Descending = $false })
+    $script:LVLocalizationIndexedDocument = $Document
+}
 
 function Get-LVAllowedUriProblem {
     <#
@@ -313,7 +345,12 @@ function Get-LVLocalizationDocument {
     [CmdletBinding()]
     param()
 
-    if ($script:LVLocalizationDocument) { return $script:LVLocalizationDocument }
+    if ($script:LVLocalizationDocument) {
+        if (-not [object]::ReferenceEquals($script:LVLocalizationIndexedDocument, $script:LVLocalizationDocument)) {
+            Initialize-LVLocalizationIndex -Document $script:LVLocalizationDocument
+        }
+        return $script:LVLocalizationDocument
+    }
 
     $raw = $null
     if ($script:LVDataDir) {
@@ -349,6 +386,7 @@ function Get-LVLocalizationDocument {
         }
     }
     $script:LVLocalizationDocument = $document
+    Initialize-LVLocalizationIndex -Document $document
     return $document
 }
 
@@ -394,14 +432,9 @@ function Get-LVTextForSource {
     param([AllowEmptyString()][AllowNull()][string]$Text)
 
     if ($null -eq $Text -or $Text -eq '') { return $Text }
-    $document = Get-LVLocalizationDocument
-    $english = $document.locales.PSObject.Properties['en-US']
-    if ($english) {
-        foreach ($entry in $english.Value.PSObject.Properties) {
-            if ([string]$entry.Value -eq $Text) {
-                return Get-LVText -Key $entry.Name -Default $Text
-            }
-        }
+    Get-LVLocalizationDocument | Out-Null
+    if ($script:LVLocalizationEnglishBySource.ContainsKey($Text)) {
+        return Get-LVText -Key $script:LVLocalizationEnglishBySource[$Text] -Default $Text
     }
     return $Text
 }
@@ -437,17 +470,14 @@ function ConvertTo-LVLocalizedReportLine {
 
     if ($null -eq $Text -or $Text -eq '') { return $Text }
     $localized = Get-LVTextForSource -Text $Text
-    $document = Get-LVLocalizationDocument
-    $english = $document.locales.PSObject.Properties['en-US']
-    if ($english) {
-        foreach ($entry in @($english.Value.PSObject.Properties | Where-Object { $_.Name -like 'report.label.*' })) {
-            $source = [string]$entry.Value
-            if ($source -and $localized.StartsWith($source, [StringComparison]::Ordinal)) {
-                $suffix = $localized.Substring($source.Length)
-                if ($suffix -match '^\s*:') {
-                    $localized = (Get-LVText -Key $entry.Name -Default $source) + $suffix
+    Get-LVLocalizationDocument | Out-Null
+    foreach ($entry in $script:LVLocalizationReportLabels) {
+        $source = [string]$entry.Source
+        if ($source -and $localized.StartsWith($source, [StringComparison]::Ordinal)) {
+            $suffix = $localized.Substring($source.Length)
+            if ($suffix -match '^\s*:') {
+                $localized = (Get-LVText -Key $entry.Key -Default $source) + $suffix
                     break
-                }
             }
         }
     }

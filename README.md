@@ -293,8 +293,8 @@ runtimes. It creates small, large, malformed-text, malformed-EVTX, and reduction
 the runner's temporary directory, deletes them after the run, and writes an aggregate
 report containing statuses, bounded record counts, sizes, and timing. The checked-in
 `Data\performance-budgets.json` makes end-to-end and parser-level timing regressions
-fail the gate, including a separate 60-second ceiling for the reduction stage; the
-report never contains fixture text or paths.
+fail the gate, including a measured 25-second ceiling for the 2,359-record reduction
+stage; the report never contains fixture text or paths.
 Drop a `verdicts.local.json` beside either .exe to add your own rules; they are merged automatically and win ties against the compiled-in ones. A full `Data\verdicts.json` beside the .exe replaces the compiled-in database entirely.
 
 Rule updates are opt-in. `Update-LogVerdictDatabase` fetches `verdicts.json` from a

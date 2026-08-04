@@ -1,6 +1,7 @@
 # Ruling layer: match each signature against the verdict database.
 # Deliberately deterministic. Everything a reader sees here is either a curated
 # human-written explanation or an honest admission that the signature is unrecognized.
+$script:LVPreparedRuleCache = @{}
 
 function Assert-LVSchemaVersion {
     <#
@@ -610,6 +611,37 @@ function Get-LVRuleSpecificity {
     return $score
 }
 
+function Get-LVPreparedRuleSet {
+    param([Parameter(Mandatory)]$Database)
+
+    if (-not $script:LVPreparedRuleCache) { $script:LVPreparedRuleCache = @{} }
+    $identity = [Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($Database)
+    if ($script:LVPreparedRuleCache.ContainsKey($identity)) {
+        $cached = $script:LVPreparedRuleCache[$identity]
+        if ([object]::ReferenceEquals($cached.Database, $Database) -and
+            [object]::ReferenceEquals($cached.SourceRules, $Database.rules)) {
+            return @($cached.Rules)
+        }
+    }
+
+    # Specificity first, then load order. The second key is what makes local rules
+    # beat shipped ones at equal specificity - PowerShell 5.1's Sort-Object is not
+    # stable, so without an explicit tie-break the winner is arbitrary. This is
+    # intentionally prepared once per immutable database object rather than once per
+    # fixture/signature.
+    $rules = @($Database.rules |
+        Where-Object { Test-LVRuleActive -Rule $_ } |
+        Sort-Object -Property `
+            @{ Expression = { Get-LVRuleSpecificity -Rule $_ }; Descending = $true }, `
+            @{ Expression = { [int]$_.lvOrdinal }; Descending = $false })
+    $script:LVPreparedRuleCache[$identity] = [pscustomobject]@{
+        Database = $Database
+        SourceRules = $Database.rules
+        Rules = $rules
+    }
+    return @($rules)
+}
+
 function Test-LVRuleMatch {
     param(
         [Parameter(Mandatory)]$Rule,
@@ -755,14 +787,7 @@ function Resolve-LVVerdict {
         [Parameter(Mandatory)]$Database
     )
 
-    # Specificity first, then load order. The second key is what makes local rules
-    # beat shipped ones at equal specificity - PowerShell 5.1's Sort-Object is not
-    # stable, so without an explicit tie-break the winner is arbitrary.
-    $rules = @($Database.rules |
-        Where-Object { Test-LVRuleActive -Rule $_ } |
-        Sort-Object -Property `
-            @{ Expression = { Get-LVRuleSpecificity -Rule $_ }; Descending = $true }, `
-            @{ Expression = { [int]$_.lvOrdinal }; Descending = $false })
+    $rules = Get-LVPreparedRuleSet -Database $Database
     $results = New-Object System.Collections.Generic.List[object]
 
     foreach ($original in $Signature) {

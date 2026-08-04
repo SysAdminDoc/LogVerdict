@@ -3279,6 +3279,29 @@ Describe 'Cross-version, locale, and fixture coverage' {
         }
     }
 
+    It 'accumulates repeated structured fields and projects them once per signature' {
+        InModuleScope LogVerdict {
+            $now = Get-Date
+            $records = 1..400 | ForEach-Object {
+                [pscustomobject]@{
+                    Source = 'event'; Channel = 'System'; Provider = 'StructuredFixture'; Id = 700
+                    Level = 2; LevelName = 'Error'; TimeCreated = $now.AddSeconds(-$_); RecordId = $_
+                    Message = 'structured fixture'
+                    StructuredData = [pscustomobject]@{
+                        EventData = [pscustomobject]@{ Value = "value-$_"; Stable = 'same' }
+                        UserData = [pscustomobject]@{ State = 'failed' }
+                    }
+                }
+            }
+
+            $reduced = Get-LVSignatureReduction -Record $records -WindowDays 30
+            @($reduced.Signatures).Count | Should -Be 1
+            @($reduced.Signatures[0].StructuredData.EventData.Value).Count | Should -Be 8
+            $reduced.Signatures[0].StructuredData.EventData.Stable | Should -BeExactly 'same'
+            @($reduced.Signatures[0].PSObject.Properties.Name) | Should -Not -Contain 'StructuredDataAccumulator'
+        }
+    }
+
     It 'exercises a text-log fixture through the real collector shape' {
         $fixture = $script:CoverageFixtures.fixtures | Where-Object kind -eq 'textlog' | Select-Object -First 1
         $path = Join-Path $TestDrive 'coverage-fixture.log'
@@ -3352,6 +3375,33 @@ Describe 'Provider and configuration health profiles' {
             @($profiles[0].EventIds) | Should -Contain '7'
             @($profiles[0].EventVersions) | Should -Contain '7=3'
             $profiles[0].MetadataStatus | Should -BeExactly 'readable'
+        }
+    }
+
+    It 'memoizes provider metadata when one provider appears on multiple channels' {
+        InModuleScope LogVerdict {
+            Mock Get-WinEvent {
+                param($ListProvider)
+                if ($ListProvider) {
+                    [pscustomobject]@{
+                        Name = $ListProvider
+                        Events = @([pscustomobject]@{ Id = 7; Version = 3 })
+                    }
+                }
+            }
+            $status = @{
+                First = [pscustomobject]@{ Access = 'readable'; Oldest = (Get-Date).AddDays(-2) }
+                Second = [pscustomobject]@{ Access = 'readable'; Oldest = (Get-Date).AddDays(-2) }
+            }
+            $records = @(
+                [pscustomobject]@{ Source = 'event'; Channel = 'First'; Provider = 'SharedProvider'; ProviderId = 'provider-1'; Id = 7; Version = 3; TimeCreated = (Get-Date); Message = 'first' }
+                [pscustomobject]@{ Source = 'event'; Channel = 'Second'; Provider = 'SharedProvider'; ProviderId = 'provider-1'; Id = 7; Version = 3; TimeCreated = (Get-Date); Message = 'second' }
+            )
+
+            $profiles = @(Get-LVProviderHealthProfile -EventRecord $records -ChannelStatus $status)
+            @($profiles).Count | Should -Be 2
+            @($profiles | Where-Object MetadataStatus -eq 'readable').Count | Should -Be 2
+            Should -Invoke Get-WinEvent -Times 1 -Exactly
         }
     }
 
@@ -3674,6 +3724,32 @@ Describe 'Verdict resolution' {
             $out = Resolve-LVVerdict -Signature @($sig) -Database $db
             $out[0].RuleId | Should -Be 'SITE-1'
             $out[0].Verdict | Should -Be 'critical'
+        }
+    }
+
+    It 'prepares active rule ordering once for a database object' {
+        InModuleScope LogVerdict {
+            $script:LVPreparedRuleCache = @{}
+            Mock Test-LVRuleActive { return $true }
+            Mock Get-LVRuleSpecificity {
+                param($Rule)
+                if ($Rule.id -eq 'NARROW') { return 2 }
+                return 1
+            }
+            $db = [pscustomobject]@{
+                rules = @(
+                    [pscustomobject]@{ id = 'BROAD'; lvOrdinal = 1; match = [pscustomobject]@{} }
+                    [pscustomobject]@{ id = 'NARROW'; lvOrdinal = 0; match = [pscustomobject]@{} }
+                )
+            }
+
+            $first = @(Get-LVPreparedRuleSet -Database $db)
+            $second = @(Get-LVPreparedRuleSet -Database $db)
+            @($first).Count | Should -Be 2
+            $first[0].id | Should -BeExactly 'NARROW'
+            $second[0].id | Should -BeExactly 'NARROW'
+            Should -Invoke Test-LVRuleActive -Times 2 -Exactly
+            Should -Invoke Get-LVRuleSpecificity -Times 2 -Exactly
         }
     }
 

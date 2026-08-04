@@ -466,7 +466,6 @@ function ConvertTo-LVTemplateRecord {
     if ($sourceName -eq 'timeline') {
         throw "Template source 'timeline' is reserved for the built-in Jsonl adapter."
     }
-    $records = New-Object System.Collections.Generic.List[object]
     foreach ($item in @($source)) {
         $scope = [ordered]@{
             context = $Model.Context
@@ -483,9 +482,8 @@ function ConvertTo-LVTemplateRecord {
         if ($Template.recordType -and $value -is [pscustomobject] -and -not $value.PSObject.Properties['recordType']) {
             $value | Add-Member -NotePropertyName recordType -NotePropertyValue ([string]$Template.recordType) -Force
         }
-        $records.Add($value) | Out-Null
+        Write-Output -InputObject $value
     }
-    return @($records.ToArray())
 }
 
 function ConvertTo-LVTemplateDocument {
@@ -1120,79 +1118,31 @@ function Get-LVTimelineLine {
     }
 }
 
-function Write-LVJsonlTimeline {
+function Write-LVJsonlStream {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'LineProducer',
+        Justification = 'The producer is invoked inside the streaming writer closure.')]
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]$Result,
         [Parameter(Mandatory)][string]$Path,
-        [switch]$Redact
+        [Parameter(Mandatory)][scriptblock]$LineProducer,
+        [switch]$Append,
+        [switch]$Redacted,
+        [string]$Format = 'LogVerdict.Timeline'
     )
 
     $parent = Split-Path -Parent $Path
     if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-    $temporary = '{0}.{1}.tmp' -f $Path, ([guid]::NewGuid().ToString('N'))
-    $writer = $null
-    $lineCount = 0
-    try {
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        $writer = New-Object System.IO.StreamWriter($temporary, $false, $utf8NoBom)
-        foreach ($line in Get-LVTimelineLine -Result $Result -Redact:$Redact) {
-            $safeLine = ConvertTo-LVJsonSafeValue -Value $line
-            $writer.WriteLine(($safeLine | ConvertTo-Json -Depth 30 -Compress))
-            $lineCount++
-        }
-        $writer.Flush()
-    } catch {
-        if (Test-Path -LiteralPath $temporary -PathType Leaf) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
-        throw
-    } finally {
-        if ($writer) { $writer.Dispose() }
-    }
-    try {
-        if (Test-Path -LiteralPath $Path -PathType Leaf) {
-            try { [IO.File]::Replace($temporary, $Path, $null, $true) }
-            catch { Move-Item -LiteralPath $temporary -Destination $Path -Force }
-        } else {
-            Move-Item -LiteralPath $temporary -Destination $Path -Force
-        }
-    } catch {
-        if (Test-Path -LiteralPath $temporary -PathType Leaf) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
-        throw
-    }
-    return [pscustomobject][ordered]@{ Path = $Path; LineCount = $lineCount; Redacted = [bool]$Redact; Format = 'LogVerdict.Timeline' }
-}
-
-function ConvertTo-LVTemplateJsonLine {
-    param(
-        [Parameter(Mandatory)]$Model,
-        [Parameter(Mandatory)]$Template,
-        [AllowNull()]$Budget
-    )
-
-    if ($null -eq $Budget) { $Budget = New-LVTemplateBudget }
-    $values = switch ([string]$Template.projection) {
-        'builtin:timeline' { @(Get-LVTimelineLine -Result $Model.Result -Redact:([bool]$Model.Context.privacy.redacted)); break }
-        'builtin:ecs' { @(ConvertTo-LVEcsExport -Model $Model); break }
-        default { @(ConvertTo-LVTemplateRecord -Model $Model -Template $Template -Budget $Budget); break }
-    }
-    foreach ($value in $values) {
-        $safe = ConvertTo-LVJsonSafeValue -Value $value
-        $safe | ConvertTo-Json -Depth 30 -Compress
-    }
-}
-
-function Write-LVTemplateJsonl {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Lines,
-        [switch]$Append
-    )
-
-    $parent = Split-Path -Parent $Path
-    if ($parent -and -not (Test-Path -LiteralPath $parent)) {
-        New-Item -ItemType Directory -Path $parent -Force | Out-Null
-    }
     $encoding = New-Object System.Text.UTF8Encoding($false)
+    $writeLines = {
+        param([Parameter(Mandatory)]$Writer)
+        $count = 0
+        & $LineProducer | ForEach-Object {
+            $Writer.WriteLine([string]$_)
+            $count++ | Out-Null
+        }
+        return $count
+    }.GetNewClosure()
+
     if ($Append) {
         $needsSeparator = $false
         if (Test-Path -LiteralPath $Path -PathType Leaf) {
@@ -1210,22 +1160,96 @@ function Write-LVTemplateJsonl {
         $writer = New-Object System.IO.StreamWriter($Path, $true, $encoding)
         try {
             if ($needsSeparator) { $writer.WriteLine() }
-            foreach ($line in $Lines) { $writer.WriteLine($line) }
+            $lineCount = & $writeLines $writer
             $writer.Flush()
         } finally {
             $writer.Dispose()
         }
-        return
+        return [pscustomobject][ordered]@{
+            Path = $Path; LineCount = [int]$lineCount; Appended = $true
+            Redacted = [bool]$Redacted; Format = $Format
+        }
     }
 
     $temporary = '{0}.{1}.tmp' -f $Path, ([guid]::NewGuid().ToString('N'))
+    $writer = $null
     try {
-        $content = if ($Lines.Count -gt 0) { ($Lines -join [Environment]::NewLine) + [Environment]::NewLine } else { '' }
-        Write-LVTextFile -Path $temporary -Content $content
-        Move-Item -LiteralPath $temporary -Destination $Path -Force
+        $writer = New-Object System.IO.StreamWriter($temporary, $false, $encoding)
+        $lineCount = & $writeLines $writer
+        $writer.Flush()
+        $writer.Dispose()
+        $writer = $null
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            try { [IO.File]::Replace($temporary, $Path, $null, $true) }
+            catch { Move-Item -LiteralPath $temporary -Destination $Path -Force }
+        } else {
+            Move-Item -LiteralPath $temporary -Destination $Path -Force
+        }
     } finally {
+        if ($writer) { $writer.Dispose() }
         if (Test-Path -LiteralPath $temporary -PathType Leaf) {
             Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        }
+    }
+    return [pscustomobject][ordered]@{
+        Path = $Path; LineCount = [int]$lineCount; Appended = $false
+        Redacted = [bool]$Redacted; Format = $Format
+    }
+}
+
+function Write-LVJsonlTimeline {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Result',
+        Justification = 'The result is captured by the streaming producer closure.')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Result,
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$Redact
+    )
+
+    $timelineCommand = Get-Command Get-LVTimelineLine -CommandType Function -ErrorAction Stop
+    $safeCommand = Get-Command ConvertTo-LVJsonSafeValue -CommandType Function -ErrorAction Stop
+    $producer = {
+        & $timelineCommand -Result $Result -Redact:$Redact | ForEach-Object {
+            $safeLine = & $safeCommand -Value $_
+            $safeLine | ConvertTo-Json -Depth 30 -Compress
+        }
+    }.GetNewClosure()
+    return Write-LVJsonlStream -Path $Path -LineProducer $producer -Redacted:$Redact -Format 'LogVerdict.Timeline'
+}
+
+function ConvertTo-LVTemplateJsonLine {
+    param(
+        [Parameter(Mandatory)]$Model,
+        [Parameter(Mandatory)]$Template,
+        [AllowNull()]$Budget
+    )
+
+    if ($null -eq $Budget) { $Budget = New-LVTemplateBudget }
+    # Keep each projection on the pipeline. In particular, timeline records are
+    # already yielded one at a time; collecting them in a switch assignment made
+    # the template adapter hold a second complete report in memory.
+    switch ([string]$Template.projection) {
+        'builtin:timeline' {
+            Get-LVTimelineLine -Result $Model.Result -Redact:([bool]$Model.Context.privacy.redacted) | ForEach-Object {
+                $safe = ConvertTo-LVJsonSafeValue -Value $_
+                $safe | ConvertTo-Json -Depth 30 -Compress
+            }
+            return
+        }
+        'builtin:ecs' {
+            ConvertTo-LVEcsExport -Model $Model | ForEach-Object {
+                $safe = ConvertTo-LVJsonSafeValue -Value $_
+                $safe | ConvertTo-Json -Depth 30 -Compress
+            }
+            return
+        }
+        default {
+            ConvertTo-LVTemplateRecord -Model $Model -Template $Template -Budget $Budget | ForEach-Object {
+                $safe = ConvertTo-LVJsonSafeValue -Value $_
+                $safe | ConvertTo-Json -Depth 30 -Compress
+            }
+            return
         }
     }
 }

@@ -421,9 +421,23 @@ function Get-LVProviderHealthProfile {
 
     $profiles = New-Object System.Collections.Generic.List[object]
     $eventRecords = @($EventRecord | Where-Object { $_ -and $_.Source -eq 'event' })
+    # Build the channel index once. The previous channel loop filtered the complete
+    # event collection for every channel, which made an all-channel scan quadratic in
+    # the number of channels and records.
+    $recordsByChannel = @{}
+    foreach ($record in $eventRecords) {
+        $recordChannel = [string]$record.Channel
+        if (-not $recordsByChannel.ContainsKey($recordChannel)) {
+            $recordsByChannel[$recordChannel] = New-Object 'System.Collections.Generic.List[object]'
+        }
+        $recordsByChannel[$recordChannel].Add($record) | Out-Null
+    }
+    $providerMetadataCache = @{}
     $channels = @($ChannelStatus.Keys | Sort-Object)
     foreach ($channel in $channels) {
-        $channelRecords = @($eventRecords | Where-Object { [string]$_.Channel -eq [string]$channel })
+        $channelRecords = if ($recordsByChannel.ContainsKey([string]$channel)) {
+            @($recordsByChannel[[string]$channel].ToArray())
+        } else { @() }
         $channelState = $ChannelStatus[$channel]
         $channelDisabled = $channelState.PSObject.Properties['IsEnabled'] -and $channelState.IsEnabled -eq $false
         if ($channelRecords.Count -eq 0) {
@@ -452,22 +466,33 @@ function Get-LVProviderHealthProfile {
                     '{0}={1}' -f $_.Id, $_.Version
                 } | Sort-Object -Unique)
             $providerId = @($groupRecords | Where-Object { $_.ProviderId } | Select-Object -ExpandProperty ProviderId -First 1)
-            $manifest = $null
-            $metadataStatus = 'unreadable'
-            $metadataReason = $null
-            $definitionCount = $null
-            try {
-                $manifest = @(Get-WinEvent -ListProvider $provider -ErrorAction Stop | Select-Object -First 1)
-                if ($manifest.Count -gt 0) {
-                    $metadataStatus = 'readable'
-                    if ($manifest[0].PSObject.Properties['Events']) {
-                        $definitionCount = @($manifest[0].Events).Count
+            if ($providerMetadataCache.ContainsKey($provider)) {
+                $metadata = $providerMetadataCache[$provider]
+                $metadataStatus = $metadata.Status
+                $metadataReason = $metadata.Reason
+                $definitionCount = $metadata.DefinitionCount
+            } else {
+                $metadataStatus = 'unreadable'
+                $metadataReason = $null
+                $definitionCount = $null
+                try {
+                    $manifest = @(Get-WinEvent -ListProvider $provider -ErrorAction Stop | Select-Object -First 1)
+                    if ($manifest.Count -gt 0) {
+                        $metadataStatus = 'readable'
+                        if ($manifest[0].PSObject.Properties['Events']) {
+                            $definitionCount = @($manifest[0].Events).Count
+                        }
+                    } else {
+                        $metadataReason = 'The provider manifest returned no metadata.'
                     }
-                } else {
-                    $metadataReason = 'The provider manifest returned no metadata.'
+                } catch {
+                    $metadataReason = $_.Exception.Message
                 }
-            } catch {
-                $metadataReason = $_.Exception.Message
+                $providerMetadataCache[$provider] = [pscustomobject]@{
+                    Status = $metadataStatus
+                    Reason = $metadataReason
+                    DefinitionCount = $definitionCount
+                }
             }
             $observed = 'Observed EventID(s): {0}' -f $(if ($eventIds.Count -gt 0) { $eventIds -join ', ' } else { 'none' })
             if ($versions.Count -gt 0) { $observed += '; versions: ' + ($versions -join ', ') }

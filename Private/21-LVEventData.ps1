@@ -58,17 +58,53 @@ function Add-LVStructuredDataObject {
 function ConvertTo-LVStructuredDataObject {
     param([AllowNull()]$InputObject)
 
-    $eventData = @{}
-    $userData = @{}
+    $accumulator = New-LVStructuredDataAccumulator
     if ($InputObject) {
-        foreach ($section in @('EventData', 'UserData')) {
-            $property = $InputObject.PSObject.Properties[$section]
-            if ($property -and $property.Value) {
-                $target = if ($section -eq 'EventData') { $eventData } else { $userData }
-                Add-LVStructuredDataObject -Map $target -Prefix $section -InputObject $property.Value
+        Add-LVEventStructuredDataToAccumulator -Accumulator $accumulator -Incoming $InputObject
+    }
+    return ConvertTo-LVStructuredDataProjection -Accumulator $accumulator
+}
+
+function New-LVStructuredDataAccumulator {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '',
+        Justification = 'This creates an in-memory bounded accumulator and changes no external state.')]
+    [CmdletBinding()]
+    param()
+    return [pscustomobject][ordered]@{
+        EventData = @{}
+        UserData  = @{}
+    }
+}
+
+function Add-LVEventStructuredDataToAccumulator {
+    param(
+        [Parameter(Mandatory)]$Accumulator,
+        [AllowNull()]$Incoming
+    )
+
+    if (-not $Incoming) { return }
+    foreach ($section in @('EventData', 'UserData')) {
+        $target = $Accumulator.$section
+        if ($target.Count -ge $script:LVStructuredDataMaxFields) { continue }
+        $incomingSection = $Incoming.PSObject.Properties[$section]
+        if (-not $incomingSection -or -not $incomingSection.Value) { continue }
+        foreach ($property in @($incomingSection.Value.PSObject.Properties)) {
+            foreach ($value in @($property.Value)) {
+                Add-LVStructuredDataValue -Map $target -Name ([string]$property.Name) -Value $value
+                if ($target.Count -ge $script:LVStructuredDataMaxFields) { break }
             }
+            if ($target.Count -ge $script:LVStructuredDataMaxFields) { break }
         }
     }
+}
+
+function ConvertTo-LVStructuredDataProjection {
+    param([Parameter(Mandatory)]$Accumulator)
+
+    $eventData = @{}
+    $userData = @{}
+    foreach ($property in @($Accumulator.EventData.Keys)) { $eventData[$property] = $Accumulator.EventData[$property] }
+    foreach ($property in @($Accumulator.UserData.Keys)) { $userData[$property] = $Accumulator.UserData[$property] }
     return [pscustomobject][ordered]@{
         EventData = [pscustomobject]$eventData
         UserData  = [pscustomobject]$userData
@@ -135,25 +171,10 @@ function Merge-LVEventStructuredData {
         [AllowNull()]$Incoming
     )
 
-    $merged = ConvertTo-LVStructuredDataObject -InputObject $Existing
-    if (-not $Incoming) { return $merged }
-    foreach ($section in @('EventData', 'UserData')) {
-        $target = @{}
-        $current = $merged.$section
-        if ($current) {
-            foreach ($property in @($current.PSObject.Properties)) { $target[$property.Name] = $property.Value }
-        }
-        $incomingSection = $Incoming.PSObject.Properties[$section]
-        if ($incomingSection -and $incomingSection.Value) {
-            foreach ($property in @($incomingSection.Value.PSObject.Properties)) {
-                foreach ($value in @($property.Value)) {
-                    Add-LVStructuredDataValue -Map $target -Name ([string]$property.Name) -Value $value
-                }
-            }
-        }
-        $merged.$section = [pscustomobject]$target
-    }
-    return $merged
+    $accumulator = New-LVStructuredDataAccumulator
+    Add-LVEventStructuredDataToAccumulator -Accumulator $accumulator -Incoming $Existing
+    Add-LVEventStructuredDataToAccumulator -Accumulator $accumulator -Incoming $Incoming
+    return ConvertTo-LVStructuredDataProjection -Accumulator $accumulator
 }
 
 function Get-LVStructuredFieldValues {

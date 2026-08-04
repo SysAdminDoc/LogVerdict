@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [0.8.2] - 2026-08-02
 
+- Removed repeated channel/provider/rule preparation work, bounded structured-data accumulation, restored streaming JSONL writes, and tightened the 2,359-record reduction budget to 25 seconds from three measured post-optimization runs.
 - Added a sibling evidence manifest with rule-database provenance, scan window, redaction level, host pseudonym, and a pre-capture data inventory that is printed through both console and GUI logging.
 - Added a versioned module ZIP beside the executables; its manifest FileList is copied exactly, the archive is hash- and SBOM-covered, and the README documents process-scoped execution policy and non-administrator capability boundaries.
 - Added Constrained Language Mode detection and capability reporting, a fail-closed GUI refusal with named exit code 5, and a `Compress-Archive` evidence-creation fallback while documenting the remaining FullLanguage surfaces.

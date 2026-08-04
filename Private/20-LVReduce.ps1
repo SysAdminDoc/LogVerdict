@@ -156,6 +156,7 @@ function Get-LVSignatureReduction {
                 Times         = (New-Object System.Collections.Generic.List[datetime])
                 RecordIds     = (New-Object System.Collections.Generic.List[object])
                 StructuredData = $null
+                StructuredDataAccumulator = $null
                 ProviderExtension = if ($r.PSObject.Properties['ProviderExtension']) { $r.ProviderExtension } else { $null }
                 Area          = $r.PSObject.Properties['Area'] | ForEach-Object { $_.Value }
             }
@@ -168,7 +169,10 @@ function Get-LVSignatureReduction {
             if ($recordId -and -not $b.RecordIds.Contains($recordId)) { $b.RecordIds.Add($recordId) | Out-Null }
         }
         if ($r.PSObject.Properties['StructuredData'] -and $r.StructuredData) {
-            $b.StructuredData = Merge-LVEventStructuredData -Existing $b.StructuredData -Incoming $r.StructuredData
+            if (-not $b.StructuredDataAccumulator) {
+                $b.StructuredDataAccumulator = New-LVStructuredDataAccumulator
+            }
+            Add-LVEventStructuredDataToAccumulator -Accumulator $b.StructuredDataAccumulator -Incoming $r.StructuredData
         }
 
         foreach ($field in @(
@@ -271,6 +275,10 @@ function Get-LVSignatureReduction {
         $recordIds = @($b.RecordIds.ToArray())
         $b | Add-Member -NotePropertyName 'RecordIds' -NotePropertyValue $recordIds -Force
         $b | Add-Member -NotePropertyName 'RecordId' -NotePropertyValue ($recordIds | Select-Object -First 1) -Force
+        if ($b.StructuredDataAccumulator) {
+            $b | Add-Member -NotePropertyName 'StructuredData' -NotePropertyValue (ConvertTo-LVStructuredDataProjection -Accumulator $b.StructuredDataAccumulator) -Force
+        }
+        $b.PSObject.Properties.Remove('StructuredDataAccumulator')
         $b
     }
 

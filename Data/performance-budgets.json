@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "content-free-parser-benchmarks",
   "units": "milliseconds",
-  "notes": "Synthetic inputs are generated under the runner temp directory and deleted after each run. Reports retain counts, sizes, statuses, and timing only.",
+  "notes": "Synthetic inputs are generated under the runner temp directory and deleted after each run. Reports retain counts, sizes, statuses, and timing only. The reduction-medium ceiling is 3x the observed median of 8237 ms across three post-optimization runs.",
   "fixtures": [
     {
       "id": "text-small",
@@ -48,7 +48,7 @@
       "sourceKind": "reduction",
       "recordCount": 2359,
       "expectedStatus": "reduced",
-      "maxElapsedMilliseconds": 60000
+      "maxElapsedMilliseconds": 25000
     }
   ]
 }
