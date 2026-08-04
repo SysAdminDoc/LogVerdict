@@ -13,7 +13,11 @@ param(
 
     [string]$AssetDirectory,
 
-    [string]$SourceDirectory
+    [string]$SourceDirectory,
+
+    [string]$ModuleZipPath,
+
+    [switch]$RequireModuleZip
 )
 
 Set-StrictMode -Version 2.0
@@ -156,6 +160,97 @@ function Get-LVDependencyTreeHash {
     return $hash
 }
 
+function Get-LVModuleFileMap {
+    param([Parameter(Mandatory)][string]$BasePath)
+
+    $manifestPath = Join-Path $BasePath 'LogVerdict.psd1'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw ("Module manifest not found: {0}" -f $manifestPath)
+    }
+    $manifest = Test-ModuleManifest -Path $manifestPath
+    $root = ([IO.Path]::GetFullPath($BasePath)).TrimEnd('\') + '\'
+    $files = @()
+    foreach ($manifestFile in @($manifest.FileList | Where-Object { $_ })) {
+        $fullPath = [IO.Path]::GetFullPath([string]$manifestFile)
+        if (-not $fullPath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
+            throw ("Module manifest file '{0}' is outside the source checkout." -f $fullPath)
+        }
+        $relative = $fullPath.Substring($root.Length).Replace('\', '/')
+        if ([string]::IsNullOrWhiteSpace($relative) -or $relative -match '(^|/)\.\.(/|$)' -or $relative.StartsWith('/')) {
+            throw ("Module manifest file '{0}' has an unsafe relative path." -f $relative)
+        }
+        if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+            throw ("Module manifest file is missing: {0}" -f $fullPath)
+        }
+        $files += [pscustomobject]@{ RelativePath = $relative; FullPath = $fullPath }
+    }
+    $duplicates = @($files | Group-Object RelativePath | Where-Object { $_.Count -gt 1 })
+    if ($duplicates.Count -gt 0) {
+        throw ("Module manifest contains duplicate file paths: {0}" -f (($duplicates | Select-Object -ExpandProperty Name) -join ', '))
+    }
+    return @($files | Sort-Object RelativePath)
+}
+
+function Get-LVZipEntrySha256 {
+    param([Parameter(Mandatory)]$Entry)
+
+    $stream = $Entry.Open()
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $algorithm.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Test-LVModuleZipContent {
+    param(
+        [Parameter(Mandatory)][string]$ZipPath,
+        [Parameter(Mandatory)][string]$SourceDirectory,
+        [Parameter(Mandatory)][string]$ExpectedVersion
+    )
+
+    if ([IO.Path]::GetFileName($ZipPath) -cne ('LogVerdict-Module-v{0}.zip' -f $ExpectedVersion)) {
+        throw ("Module ZIP has the wrong name: {0}" -f [IO.Path]::GetFileName($ZipPath))
+    }
+    if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
+        throw ("Module ZIP release asset not found: {0}" -f $ZipPath)
+    }
+
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+    } catch {
+        # The assembly is already loaded on some Windows PowerShell hosts.
+        Write-Verbose 'System.IO.Compression.FileSystem is already loaded.'
+    }
+    $expectedFiles = @(Get-LVModuleFileMap -BasePath $SourceDirectory)
+    $archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $entries = @($archive.Entries | Where-Object { -not ([string]$_.FullName).EndsWith('/') })
+        $entryNames = @($entries | ForEach-Object { ([string]$_.FullName).Replace('\', '/') })
+        if ($entryNames.Count -ne @($entryNames | Sort-Object -Unique).Count) {
+            throw 'Module ZIP contains duplicate file entries.'
+        }
+        $expectedNames = @($expectedFiles | ForEach-Object { $_.RelativePath })
+        $missing = @($expectedNames | Where-Object { $entryNames -notcontains $_ })
+        $unexpected = @($entryNames | Where-Object { $expectedNames -notcontains $_ })
+        if ($missing.Count -gt 0) { throw ("Module ZIP is missing file(s): {0}" -f ($missing -join ', ')) }
+        if ($unexpected.Count -gt 0) { throw ("Module ZIP contains unexpected file(s): {0}" -f ($unexpected -join ', ')) }
+
+        foreach ($expected in $expectedFiles) {
+            $entry = @($entries | Where-Object { ([string]$_.FullName).Replace('\', '/') -ceq $expected.RelativePath })
+            if ($entry.Count -ne 1) { throw ("Module ZIP entry is not unique: {0}" -f $expected.RelativePath) }
+            Assert-LVEqual -Actual (Get-LVZipEntrySha256 -Entry $entry[0]) -Expected (Get-LVFileSha256 -Path $expected.FullPath) `
+                -Message ("Module ZIP content {0}" -f $expected.RelativePath)
+            Assert-LVEqual -Actual ([int64]$entry[0].Length) -Expected ([int64](Get-Item -LiteralPath $expected.FullPath).Length) `
+                -Message ("Module ZIP size {0}" -f $expected.RelativePath)
+        }
+    } finally {
+        $archive.Dispose()
+    }
+}
+
 $indexPath = Join-Path $MetadataDirectory 'logverdict-supply-chain.json'
 $index = Read-LVJson -Path $indexPath
 Assert-LVEqual -Actual $index.schemaVersion -Expected 1 -Message 'Supply-chain schema version'
@@ -167,7 +262,22 @@ Assert-LVEqual -Actual ([bool]$index.sourceDirty) -Expected $false -Message 'Sou
 $headRevision = Invoke-LVGitText -BasePath $SourceDirectory -ArgumentList @('rev-parse', 'HEAD')
 Assert-LVEqual -Actual $index.sourceRevision -Expected $headRevision -Message 'Source revision'
 $assets = @($index.assets)
-if ($assets.Count -ne 2) { throw ("Supply-chain index must contain two assets; found {0}." -f $assets.Count) }
+$moduleZipName = 'LogVerdict-Module-v{0}.zip' -f $Version
+$moduleAssets = @($assets | Where-Object { [string]$_.name -ceq $moduleZipName })
+$executableAssets = @($assets | Where-Object { [string]$_.name -in @('LogVerdict.exe', 'LogVerdict-GUI.exe') })
+if ($executableAssets.Count -ne 2 -or $assets.Count -lt 2 -or $assets.Count -gt 3) {
+    throw ("Supply-chain index must contain the two executables and at most one module ZIP; found {0} asset(s)." -f $assets.Count)
+}
+if ($moduleAssets.Count -gt 1) { throw 'Supply-chain index contains duplicate module ZIP assets.' }
+if ($RequireModuleZip -and $moduleAssets.Count -ne 1) {
+    throw ("Supply-chain index is missing required asset '{0}'." -f $moduleZipName)
+}
+
+$moduleZipAssetPath = $null
+if ($moduleAssets.Count -eq 1 -and ($AssetDirectory -or $ModuleZipPath)) {
+    $moduleZipAssetPath = if ($ModuleZipPath) { [IO.Path]::GetFullPath($ModuleZipPath) } else { Join-Path $AssetDirectory $moduleZipName }
+    Test-LVModuleZipContent -ZipPath $moduleZipAssetPath -SourceDirectory $SourceDirectory -ExpectedVersion $Version
+}
 
 $sourceManifestPath = Join-Path $MetadataDirectory ([string]$index.sourceManifest)
 Assert-LVEqual -Actual (Get-LVFileSha256 -Path $sourceManifestPath) -Expected $index.sourceManifestSha256 -Message 'Source manifest hash'
@@ -202,7 +312,7 @@ foreach ($dependency in @($dependencyManifest.dependencies)) {
 }
 
 foreach ($asset in $assets) {
-    if ([string]$asset.name -notin @('LogVerdict.exe', 'LogVerdict-GUI.exe')) { throw ("Unexpected release asset '{0}'." -f $asset.name) }
+    if ([string]$asset.name -notin @('LogVerdict.exe', 'LogVerdict-GUI.exe', $moduleZipName)) { throw ("Unexpected release asset '{0}'." -f $asset.name) }
     if ([string]$asset.sha256 -notmatch '^[0-9a-f]{64}$') { throw ("Invalid release hash for {0}." -f $asset.name) }
     $spdxPath = Join-Path $MetadataDirectory ([string]$asset.sbom)
     $cycloneDxPath = Join-Path $MetadataDirectory ([string]$asset.cyclonedx)
@@ -212,7 +322,7 @@ foreach ($asset in $assets) {
     Assert-LVEqual -Actual (Get-LVFileSha256 -Path $provenancePath) -Expected $asset.provenanceSha256 -Message ("Provenance hash {0}" -f $asset.name)
 
     if ($AssetDirectory) {
-        $assetPath = Join-Path $AssetDirectory $asset.name
+        $assetPath = if ([string]$asset.name -ceq $moduleZipName -and $moduleZipAssetPath) { $moduleZipAssetPath } else { Join-Path $AssetDirectory $asset.name }
         if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) { throw ("Release asset not found: {0}" -f $assetPath) }
         Assert-LVEqual -Actual (Get-LVFileSha256 -Path $assetPath) -Expected $asset.sha256 -Message ("Release hash {0}" -f $asset.name)
     }

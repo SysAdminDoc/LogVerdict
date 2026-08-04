@@ -317,12 +317,15 @@ Build them yourself:
 Install-Module ps2exe -RequiredVersion 1.0.18 -Scope CurrentUser
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Build-LogVerdictExe.ps1
 # -> dist\LogVerdict.exe  and  dist\LogVerdict-GUI.exe
+# -> dist\LogVerdict-Module-v0.8.2.zip
 # -Target Console or -Target Gui builds just one
 ```
 
 `VERSION` is the release source of truth. The build refuses a manifest-version mismatch, and
 `Tools\Test-LogVerdictRelease.ps1` checks the module, README badge, typed catalog, verdict
-provenance, package manifests, generated JSON contracts, and (when supplied) executable hashes.
+provenance, package manifests, generated JSON contracts, and (when supplied) executable and
+module-ZIP hashes. Release CI requires the module ZIP and verifies that every archive member
+matches the manifest `FileList` and source bytes.
 The schema-validation portion runs under PowerShell 7.6 or newer because it uses the built-in
 `Test-Json` command; the LogVerdict module itself remains compatible with Windows PowerShell 5.1.
 Generate package metadata
@@ -340,6 +343,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\New-PackageManifests
 ```
 
 The generator downloads the existing release assets, pins their SHA-256 hashes, and writes both manifests under `Packaging\`. It never creates or changes a release. Published assets must not be replaced in place: Scoop, winget, and SmartScreen all attach trust to the exact file hash.
+
+### Module ZIP distribution
+
+The build also emits `LogVerdict-Module-v<version>.zip`. It is the same module tree that
+PowerShell installs: extract it to a writable folder, set execution policy only for the
+current process, and import the manifest.
+
+```powershell
+Expand-Archive -LiteralPath .\LogVerdict-Module-v0.8.2.zip -DestinationPath .\LogVerdict-Module
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+Import-Module .\LogVerdict-Module\LogVerdict.psd1
+Invoke-LogVerdictScan -DaysBack 30
+```
+
+No administrator rights are required to import the module, query its rule and advisory
+databases, scan readable event or text sources, produce reports and redacted evidence, or
+re-evaluate an offline capture. The module does not elevate silently: ACL-protected channels
+such as Security, protected system paths, and WMI providers remain explicitly reported as
+unreadable or unavailable until the operator reruns the relevant operation elevated. The ZIP
+is unsigned and contains no installer, registry writes, or runtime package dependency.
 
 ### From source
 

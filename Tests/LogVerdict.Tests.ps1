@@ -426,6 +426,9 @@ Describe 'CI gate wiring' {
         $script:CiWorkflow | Should -Match 'PSUseConstrainedLanguageMode'
         $script:CiWorkflow | Should -Match 'name: Verify supply-chain metadata directly'
         $script:CiWorkflow | Should -Match 'Tools\\Test-LogVerdictSupplyChain\.ps1'
+        $script:CiWorkflow | Should -Match 'New-LogVerdictSupplyChain.ps1'
+        $script:CiWorkflow | Should -Match 'Test-LogVerdictSupplyChain.ps1.*-RequireModuleZip'
+        $script:CiWorkflow | Should -Match 'Test-LogVerdictRelease.ps1.*-RequireModuleZip'
         $script:CiWorkflow | Should -Match 'name: Run runtime-agnostic release gates'
         $script:CiWorkflow | Should -Match 'Tools\\Test-LogVerdictReleaseStatic\.ps1'
         $script:CiWorkflow | Should -Match 'name: Run Core schema release gates'
@@ -6037,6 +6040,49 @@ Describe 'Package-manager manifest generation' {
         $winget | Should -Match ("(?m)^PackageVersion: {0}\r?$" -f [regex]::Escape($version))
         $winget | Should -Match '(?m)^    InstallerSha256: [0-9A-Fa-f]{64}\r?$'
         $winget | Should -Not -Match '/releases/latest/'
+    }
+}
+
+Describe 'Module ZIP distribution' {
+    BeforeAll {
+        $root = Split-Path $PSScriptRoot -Parent
+        $script:ModuleZipTool = Join-Path $root 'Tools/New-LogVerdictModuleZip.ps1'
+        $script:ModuleZipRoot = $root
+        $script:ModuleZipVersion = (& (Join-Path $root 'Tools/Get-LogVerdictVersion.ps1')).Trim()
+    }
+
+    It 'copies exactly the module manifest FileList into a versioned archive' {
+        $zipPath = Join-Path $TestDrive ('LogVerdict-Module-v{0}.zip' -f $script:ModuleZipVersion)
+        $generated = & $script:ModuleZipTool -SourceDirectory $script:ModuleZipRoot `
+            -Version $script:ModuleZipVersion -OutputPath $zipPath
+
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $archive = [IO.Compression.ZipFile]::OpenRead($zipPath)
+        try {
+            $rootPath = ([IO.Path]::GetFullPath($script:ModuleZipRoot)).TrimEnd('\') + '\'
+            $manifest = Test-ModuleManifest -Path (Join-Path $script:ModuleZipRoot 'LogVerdict.psd1')
+            $expected = @($manifest.FileList | ForEach-Object {
+                    ([IO.Path]::GetFullPath([string]$_)).Substring($rootPath.Length).Replace('\', '/')
+                } | Sort-Object)
+            $actual = @($archive.Entries | Where-Object { -not ([string]$_.FullName).EndsWith('/') } |
+                ForEach-Object { ([string]$_.FullName).Replace('\', '/') } | Sort-Object)
+
+            $generated.Version | Should -BeExactly $script:ModuleZipVersion
+            $generated.FileCount | Should -Be $expected.Count
+            Test-Path -LiteralPath $zipPath -PathType Leaf | Should -BeTrue
+            $actual | Should -Be $expected
+            $actual | Should -Not -Contain 'Tests/LogVerdict.Tests.ps1'
+            $actual | Should -Not -Contain 'Tools/Build-LogVerdictExe.ps1'
+        } finally {
+            $archive.Dispose()
+        }
+    }
+
+    It 'keeps the build lane wired to the module ZIP producer' {
+        $build = Get-Content -LiteralPath (Join-Path $script:ModuleZipRoot 'Tools/Build-LogVerdictExe.ps1') -Raw
+        $build | Should -Match 'New-LogVerdictModuleZip\.ps1'
+        $build | Should -Match 'LogVerdict-Module-v\{0\}\.zip'
+        $build | Should -Match '\$Target -eq ''All'''
     }
 }
 

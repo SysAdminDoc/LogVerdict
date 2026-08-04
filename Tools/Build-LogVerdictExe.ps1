@@ -1,14 +1,17 @@
 <#
     .SYNOPSIS
-    Build the LogVerdict executables - single, unsigned, self-contained.
+    Build the LogVerdict release assets - unsigned executables and module zip.
 
     .DESCRIPTION
     Flattens the module into one script per target and compiles each with PS2EXE.
+    The same invocation also writes LogVerdict-Module-v<version>.zip from the manifest's
+    FileList, so the module and executable release assets come from one checkout.
 
-    Two artifacts, same scan engine:
+    Three artifacts, same scan engine:
 
       LogVerdict.exe      console. Prints a report, returns a meaningful exit code.
       LogVerdict-GUI.exe  windowed. The front end, with no console behind it.
+      LogVerdict-Module-v<version>.zip  source module tree, ready for Import-Module.
 
     Everything either one needs is compiled in, including the verdict database, so the
     .exe is the whole product: copy it to a broken machine and run it. Nothing is
@@ -21,13 +24,16 @@
     is "More info" then "Run anyway".
 
     .PARAMETER OutputDir
-    Where the executables land. Defaults to dist\ beside the repository.
+    Where the release assets land. Defaults to dist\ beside the repository.
 
     .PARAMETER Target
     Which executables to build. Default All.
 
     .PARAMETER KeepIntermediate
     Keep the generated standalone .ps1 files for inspection instead of deleting them.
+
+    .PARAMETER SkipModuleZip
+    Do not create the module ZIP when building all release targets.
 
     .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Build-LogVerdictExe.ps1
@@ -49,8 +55,10 @@
 [CmdletBinding()]
 param(
     [string]$OutputDir,
-    [ValidateSet('Console', 'Gui', 'All')][string]$Target = 'All',
-    [switch]$KeepIntermediate
+[ValidateSet('Console', 'Gui', 'All')][string]$Target = 'All',
+[switch]$KeepIntermediate,
+
+[switch]$SkipModuleZip
 )
 
 $ErrorActionPreference = 'Stop'
@@ -312,6 +320,20 @@ foreach ($t in $targets) {
         throw ("PS2EXE produced no output for {0}." -f $t.Name)
     }
     $built += (Get-Item -LiteralPath $exePath)
+}
+
+if ($Target -eq 'All' -and -not $SkipModuleZip) {
+    Write-Step 'Creating module ZIP distribution'
+    $moduleZipPath = Join-Path $OutputDir ('LogVerdict-Module-v{0}.zip' -f $version)
+    $moduleZipTool = Join-Path $PSScriptRoot 'New-LogVerdictModuleZip.ps1'
+    if (-not (Test-Path -LiteralPath $moduleZipTool -PathType Leaf)) {
+        throw ("Module ZIP tool not found: {0}" -f $moduleZipTool)
+    }
+    $moduleZip = & $moduleZipTool -SourceDirectory $repoRoot -Version $version -OutputPath $moduleZipPath
+    if (-not (Test-Path -LiteralPath $moduleZipPath -PathType Leaf)) {
+        throw ("Module ZIP tool produced no output: {0}" -f $moduleZipPath)
+    }
+    Write-Ok ("{0} ({1:N0} KB, {2} files)" -f $moduleZipPath, ((Get-Item -LiteralPath $moduleZipPath).Length / 1KB), $moduleZip.FileCount)
 }
 
 if (-not $KeepIntermediate) { Remove-Item -LiteralPath $objDir -Recurse -Force }

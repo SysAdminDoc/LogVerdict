@@ -6,6 +6,8 @@ Run the offline release integrity gates for LogVerdict.
 Checks the single version source against the module manifest, README badge,
 package metadata, typed error catalog, and verdict database. When -AssetDirectory
 is supplied, package hashes are checked against the exact built executables too.
+When -RequireModuleZip is supplied, the versioned module ZIP is required beside
+the executables and is checked by the supply-chain verifier.
 When -SupplyChainDirectory is supplied, the SPDX, CycloneDX 1.7, and provenance
 records in that directory are also checked offline against the source checkout and
 assets.
@@ -18,9 +20,11 @@ param(
     [string]$ManifestDirectory,
     [string]$AssetDirectory,
     [string]$SupplyChainDirectory,
+    [string]$ModuleZipPath,
     [string]$AdvisoryPath,
     [switch]$SkipSchemaValidation,
-    [switch]$ReleaseValidation
+    [switch]$ReleaseValidation,
+    [switch]$RequireModuleZip
 )
 
 $ErrorActionPreference = 'Stop'
@@ -620,12 +624,26 @@ if ($AssetDirectory) {
     if ($scoopHashes[0] -ine $consoleHash -or $scoopHashes[1] -ine $guiHash -or $wingetHash.Groups[1].Value -ine $consoleHash) {
         throw 'Package manifest hashes do not match the supplied release assets.'
     }
+    if ($RequireModuleZip) {
+        $moduleZipPath = if ($ModuleZipPath) { [IO.Path]::GetFullPath($ModuleZipPath) } else { Join-Path $AssetDirectory ('LogVerdict-Module-v{0}.zip' -f $version) }
+        if (-not (Test-Path -LiteralPath $moduleZipPath -PathType Leaf)) {
+            throw ("Required module ZIP release asset not found: {0}" -f $moduleZipPath)
+        }
+    }
 }
 if ($SupplyChainDirectory) {
     if (-not $AssetDirectory) {
         throw '-AssetDirectory is required when validating supply-chain metadata.'
     }
-    & (Join-Path $PSScriptRoot 'Test-LogVerdictSupplyChain.ps1') -Version $version -MetadataDirectory $SupplyChainDirectory -AssetDirectory $AssetDirectory -SourceDirectory $repoRoot
+    $supplyChainArguments = @{
+        Version = $version
+        MetadataDirectory = $SupplyChainDirectory
+        AssetDirectory = $AssetDirectory
+        SourceDirectory = $repoRoot
+    }
+    if ($ModuleZipPath) { $supplyChainArguments.ModuleZipPath = $ModuleZipPath }
+    if ($RequireModuleZip) { $supplyChainArguments.RequireModuleZip = $true }
+    & (Join-Path $PSScriptRoot 'Test-LogVerdictSupplyChain.ps1') @supplyChainArguments
     Write-Verbose 'Verified SPDX 2.3, CycloneDX 1.7, and unsigned provenance records for every release asset.'
 }
 

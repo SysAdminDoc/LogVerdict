@@ -252,7 +252,7 @@ jobs:
         run: |
           $root = (Get-Location).Path
           $version = (& .\Tools\Get-LogVerdictVersion.ps1).Trim()
-          .\Tools\New-LogVerdictSupplyChain.ps1 -Version $version -AssetDirectory (Join-Path $root 'dist') -OutputDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain') -SourceDirectory $root
+          .\Tools\New-LogVerdictSupplyChain.ps1 -Version $version -AssetDirectory (Join-Path $root 'dist') -OutputDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain') -SourceDirectory $root -RequireModuleZip
           if (-not $?) { exit 1 }
 
       - name: Verify supply-chain metadata directly
@@ -261,14 +261,14 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $root = (Get-Location).Path
           $version = (& .\Tools\Get-LogVerdictVersion.ps1).Trim()
-          .\Tools\Test-LogVerdictSupplyChain.ps1 -Version $version -MetadataDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain') -AssetDirectory (Join-Path $root 'dist') -SourceDirectory $root
+          .\Tools\Test-LogVerdictSupplyChain.ps1 -Version $version -MetadataDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain') -AssetDirectory (Join-Path $root 'dist') -SourceDirectory $root -RequireModuleZip
           if (-not $?) { exit 1 }
 
       - name: Validate package hashes and version provenance
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          .\Tools\Test-LogVerdictRelease.ps1 -ManifestDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging') -AssetDirectory (Join-Path (Get-Location).Path 'dist') -SupplyChainDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain') -ReleaseValidation
+          .\Tools\Test-LogVerdictRelease.ps1 -ManifestDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging') -AssetDirectory (Join-Path (Get-Location).Path 'dist') -SupplyChainDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain') -ReleaseValidation -RequireModuleZip
           if (-not $?) { exit 1 }
 
       - name: Launch packaged GUI smoke matrix

@@ -21,7 +21,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $releaseGate = Join-Path $PSScriptRoot 'Test-LogVerdictRelease.ps1'
 $arguments = @{}
-foreach ($name in @('ManifestDirectory', 'AssetDirectory', 'SupplyChainDirectory', 'AdvisoryPath', 'ReleaseValidation')) {
+foreach ($name in @('ManifestDirectory', 'AssetDirectory', 'SupplyChainDirectory', 'ModuleZipPath', 'AdvisoryPath', 'ReleaseValidation', 'RequireModuleZip')) {
     if ($PSBoundParameters.ContainsKey($name)) { $arguments[$name] = $PSBoundParameters[$name] }
 }
 $arguments.SkipSchemaValidation = $true

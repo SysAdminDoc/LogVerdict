@@ -23,7 +23,11 @@ param(
     [ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')]
     [string]$Repository = 'SysAdminDoc/LogVerdict',
 
-    [string]$SourceDirectory
+    [string]$SourceDirectory,
+
+    [string]$ModuleZipPath,
+
+    [switch]$RequireModuleZip
 )
 
 Set-StrictMode -Version 2.0
@@ -193,6 +197,28 @@ foreach ($name in $assetNames) {
     }
 }
 
+$moduleZipName = 'LogVerdict-Module-v{0}.zip' -f $Version
+$moduleZipAssetPath = $null
+if ($ModuleZipPath) {
+    $ModuleZipPath = [IO.Path]::GetFullPath($ModuleZipPath)
+    if (-not (Test-Path -LiteralPath $ModuleZipPath -PathType Leaf)) {
+        throw ("Module ZIP release asset not found: {0}" -f $ModuleZipPath)
+    }
+    if ([IO.Path]::GetFileName($ModuleZipPath) -cne $moduleZipName) {
+        throw ("Module ZIP must be named '{0}'." -f $moduleZipName)
+    }
+    $moduleZipAssetPath = $ModuleZipPath
+    $assetNames += [IO.Path]::GetFileName($ModuleZipPath)
+} else {
+    $defaultModuleZipPath = Join-Path $AssetDirectory $moduleZipName
+    if (Test-Path -LiteralPath $defaultModuleZipPath -PathType Leaf) {
+        $moduleZipAssetPath = $defaultModuleZipPath
+        $assetNames += $moduleZipName
+    } elseif ($RequireModuleZip) {
+        throw ("Required module ZIP release asset not found: {0}" -f $defaultModuleZipPath)
+    }
+}
+
 $sourceManifest = Get-LVSourceManifest -BasePath $SourceDirectory
 $sourceManifestPath = Join-Path $OutputDirectory 'source-manifest.json'
 Write-LVJsonFile -Path $sourceManifestPath -Value $sourceManifest
@@ -246,7 +272,7 @@ $sourceManifestHash = Get-LVFileSha256 -Path $sourceManifestPath
 $dependencyManifestHash = Get-LVFileSha256 -Path $dependencyManifestPath
 $assetRecords = @()
 foreach ($name in $assetNames) {
-    $assetPath = Join-Path $AssetDirectory $name
+    $assetPath = if ($name -ceq $moduleZipName -and $moduleZipAssetPath) { $moduleZipAssetPath } else { Join-Path $AssetDirectory $name }
     $assetHash = Get-LVFileSha256 -Path $assetPath
     $safeName = [IO.Path]::GetFileNameWithoutExtension($name)
     $spdxName = $safeName + '.spdx.json'
