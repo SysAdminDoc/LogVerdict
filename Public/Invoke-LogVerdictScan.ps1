@@ -216,6 +216,11 @@ function Invoke-LogVerdictScan {
         throw 'Choose only one broad channel mode: -AllChannels or -DiagnosticChannels.'
     }
 
+    $channelEnumerationFailed = $false
+    $channelEnumerationFailures = @()
+    $channelEnumerationErrorCount = 0
+    $channelEnumerationStatus = 'not-requested'
+
     # A named channel list is the most specific request. Keep it ahead of broad
     # switches so a wrapper can safely pass its defaults alongside an explicit list.
     $channelMetadata = $null
@@ -223,8 +228,13 @@ function Invoke-LogVerdictScan {
         $channels = $Channel
     } elseif ($AllChannels) {
         Write-LVLog -Level info -Message 'Enumerating populated channels...'
-        $channels = Get-LVPopulatedChannel
-        $channelMetadata = $script:LVChannelMetadata
+        $channelEnumeration = Get-LVPopulatedChannel
+        $channels = @($channelEnumeration.Channels)
+        $channelMetadata = $channelEnumeration.Metadata
+        $channelEnumerationErrorCount = [int]$channelEnumeration.MetadataErrorCount
+        $channelEnumerationFailures = @($channelEnumeration.Failures)
+        $channelEnumerationFailed = [bool]$channelEnumeration.EnumerationFailed
+        $channelEnumerationStatus = [string]$channelEnumeration.Status
         Write-LVLog -Level ok -Message ('{0} channel(s) hold records' -f $channels.Count)
     } elseif ($DiagnosticChannels) {
         $channels = Get-LVDiagnosticChannel
@@ -236,8 +246,6 @@ function Invoke-LogVerdictScan {
     # Probe before reading. The FilterHashtable path cannot tell a denied channel from
     # an empty one, so coverage has to be established with -LogName first or the scan
     # silently reports "nothing wrong" for channels it was never allowed to open.
-    $script:LVChannelMetadataErrorCount = 0
-    $script:LVChannelMetadataFailures = @()
     $script:LVDeniedChannel = @()
     $script:LVTruncatedChannel = @()
     $script:LVEventCoverage = @()
@@ -532,8 +540,11 @@ function Invoke-LogVerdictScan {
     if ($disabledChannels.Count -gt 0) {
         $coverageNotes.Add(('Event logging is disabled for {0} requested channel(s); they were not observed: {1}.' -f $disabledChannels.Count, ($disabledChannels -join ', '))) | Out-Null
     }
-    if ($script:LVChannelMetadataErrorCount -gt 0) {
-        $coverageNotes.Add(('{0} channel(s) would not report their metadata and were never enumerated. Elevation may reveal more.' -f $script:LVChannelMetadataErrorCount)) | Out-Null
+    if ($channelEnumerationErrorCount -gt 0) {
+        $coverageNotes.Add(('{0} channel(s) would not report their metadata and were never enumerated. Elevation may reveal more.' -f $channelEnumerationErrorCount)) | Out-Null
+        if ($channelEnumerationFailed) {
+            $coverageNotes.Add('Channel enumeration failed before a complete channel list could be read. This result is incomplete and cannot be treated as a clean machine.') | Out-Null
+        }
     }
     $missing = @($channelStatus.Values | Where-Object { $_.Access -eq 'missing' } | Select-Object -ExpandProperty Channel)
     if ($missing.Count -gt 0) {
@@ -577,10 +588,15 @@ function Invoke-LogVerdictScan {
     foreach ($entry in @($providerCoverage.ToArray())) {
         if ($entry) { $coverageSources.Add($entry) | Out-Null }
     }
-    if ($script:LVChannelMetadataErrorCount -gt 0) {
+    if ($channelEnumerationErrorCount -gt 0) {
+        $enumerationReason = if ($channelEnumerationFailed) {
+            'Channel enumeration failed before a complete channel list could be read.'
+        } else {
+            'Channel metadata could not be read, so those channels were not enumerated.'
+        }
         $coverageSources.Add((New-LVCoverageRecord -Source 'event' -Kind 'metadata' -Name 'channel enumeration' -Status 'not-observed' `
-            -Reason 'Channel metadata could not be read, so those channels were not enumerated.' `
-            -ParserError (($script:LVChannelMetadataFailures | Where-Object { $_ }) -join ' | ') -CollectionBudget $collectionBudget -Origin 'live')) | Out-Null
+            -Reason $enumerationReason `
+            -ParserError (($channelEnumerationFailures | Where-Object { $_ }) -join ' | ') -CollectionBudget $collectionBudget -Origin 'live')) | Out-Null
     }
     foreach ($note in $sequenceNotes) {
         $match = [regex]::Match([string]$note, "^Event channel '([^']+)' has")
@@ -625,6 +641,11 @@ function Invoke-LogVerdictScan {
     foreach ($f in @($findings) + @($correlations)) {
         if ((Get-LVVerdictRank -Verdict $f.Verdict) -gt (Get-LVVerdictRank -Verdict $worst)) { $worst = $f.Verdict }
     }
+    if ($channelEnumerationFailed -and (Get-LVVerdictRank -Verdict $worst) -lt (Get-LVVerdictRank -Verdict 'unknown')) {
+        # An incomplete channel list cannot support a benign conclusion. Preserve
+        # any more severe finding while making the coverage failure load-bearing.
+        $worst = 'unknown'
+    }
     $exitCode = 0
     switch ($worst) {
         'critical'    { $exitCode = 3 }
@@ -651,7 +672,10 @@ function Invoke-LogVerdictScan {
         ChannelStatus  = $channelStatus
         DeniedChannels = @($script:LVDeniedChannel)
         TruncatedChannels = @($script:LVTruncatedChannel)
-        MetadataUnreadableCount = [int]$script:LVChannelMetadataErrorCount
+        MetadataUnreadableCount = [int]$channelEnumerationErrorCount
+        ChannelEnumerationStatus = [string]$channelEnumerationStatus
+        ChannelEnumerationFailed = [bool]$channelEnumerationFailed
+        ChannelEnumerationFailures = @($channelEnumerationFailures)
         CoverageNotes  = @($coverageNotes)
         Coverage       = @($coverageSources.ToArray())
         PerformanceTelemetry = [bool]$PerformanceTelemetry

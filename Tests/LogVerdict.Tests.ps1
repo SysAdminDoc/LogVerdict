@@ -1450,7 +1450,63 @@ Describe 'Channel access classification' {
         InModuleScope LogVerdict {
             # Get-WinEvent -ListLog omits channels it cannot stat, so unelevated
             # Security disappears entirely. It must be unioned back in.
-            Get-LVPopulatedChannel | Should -Contain 'Security'
+            (Get-LVPopulatedChannel).Channels | Should -Contain 'Security'
+        }
+    }
+
+    It 'retains a restricted probe and records a failed channel enumeration' {
+        InModuleScope LogVerdict {
+            Mock Get-WinEvent { throw [InvalidOperationException]::new('channel list unavailable') } -ParameterFilter { $ListLog -eq '*' }
+
+            $enumeration = Get-LVPopulatedChannel
+            $enumeration.Channels | Should -Contain 'Security'
+            $enumeration.EnumerationFailed | Should -BeTrue
+            $enumeration.MetadataErrorCount | Should -BeGreaterThan 0
+            $enumeration.Status | Should -BeExactly 'not-observed'
+            ($enumeration.Failures -join ' | ') | Should -Match 'channel list unavailable'
+        }
+    }
+
+    It 'makes an all-channel enumeration failure non-benign' {
+        InModuleScope LogVerdict {
+            Mock Get-LVPopulatedChannel {
+                return [pscustomobject]@{
+                    Channels = @('Security')
+                    Metadata = @{}
+                    Status = 'not-observed'
+                    EnumerationFailed = $true
+                    MetadataErrorCount = 1
+                    Failures = @('channel list unavailable')
+                }
+            }
+            Mock Get-LVChannelStatus {
+                return @{ Security = [pscustomobject]@{ Channel='Security'; Access='missing'; IsEnabled=$null; Reason='not present' } }
+            }
+            Mock Get-LVEventRecord { return @() }
+            Mock Get-LVDiagnosticEvidence { return [pscustomobject]@{ Records=@(); Coverage=@(); HealthProfiles=@() } }
+
+            $result = Invoke-LogVerdictScan -AllChannels -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
+            $result.ChannelEnumerationFailed | Should -BeTrue
+            $result.ChannelEnumerationStatus | Should -BeExactly 'not-observed'
+            $result.ChannelEnumerationFailures | Should -Contain 'channel list unavailable'
+            $result.MetadataUnreadableCount | Should -Be 1
+            $result.WorstVerdict | Should -BeExactly 'unknown'
+            $result.ExitCode | Should -BeGreaterThan 0
+            $result.CoverageNotes -join ' ' | Should -Match 'enumeration failed.*incomplete'
+            $enumerationCoverage = @($result.Coverage | Where-Object { $_.Name -eq 'channel enumeration' })
+            $enumerationCoverage.Count | Should -Be 1
+            $enumerationCoverage[0].Status | Should -BeExactly 'not-observed'
+            $enumerationCoverage[0].Reason | Should -Match 'enumeration failed'
+        }
+    }
+
+    It 'keeps channels whose record count is unavailable in the enumeration plan' {
+        InModuleScope LogVerdict {
+            Mock Get-WinEvent { [pscustomobject]@{ LogName='UnknownCount'; RecordCount=$null } } -ParameterFilter { $ListLog -eq '*' }
+
+            $enumeration = Get-LVPopulatedChannel -MinimumRecords 1
+            $enumeration.Channels | Should -Contain 'UnknownCount'
+            $enumeration.Metadata['UnknownCount'].RecordCount | Should -BeNullOrEmpty
         }
     }
 

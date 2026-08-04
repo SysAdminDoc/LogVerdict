@@ -171,23 +171,44 @@ function Get-LVPopulatedChannel {
     $listErrors = $null
     $logs = @()
     $script:LVChannelMetadata = @{}
-    $script:LVChannelMetadataFailures = @()
+    $enumeration = [pscustomobject][ordered]@{
+        Channels = @()
+        Metadata = $script:LVChannelMetadata
+        Status = 'not-observed'
+        EnumerationFailed = $false
+        MetadataErrorCount = 0
+        Failures = @()
+    }
     try {
         $logs = Get-WinEvent -ListLog * -ErrorAction SilentlyContinue -ErrorVariable listErrors |
-            Where-Object { $_.RecordCount -ge $MinimumRecords }
+            Where-Object {
+                # A null RecordCount means the channel exists but its metadata did
+                # not expose a count. Keep it in the plan so the explicit probe can
+                # classify it instead of turning unknown retention into absence.
+                $_ -and $_.LogName -and ($null -eq $_.RecordCount -or $_.RecordCount -ge $MinimumRecords)
+            }
     } catch {
         Write-LVLog -Level warn -Message ("Channel enumeration failed: {0}" -f $_.Exception.Message)
-        $script:LVChannelMetadataFailures = @($_.Exception.Message)
-        return @()
+        $exceptionMessage = [string]$_.Exception.Message
+        $failureMessages = @($listErrors | ForEach-Object { if ($_.Exception) { $_.Exception.Message } else { [string]$_ } } | Where-Object { $_ })
+        if ($failureMessages -notcontains $exceptionMessage) { $failureMessages += $exceptionMessage }
+        # Keep restricted channels in the request even when the broad enumeration
+        # failed. Their explicit probe can still distinguish a readable channel from
+        # an ACL or missing-channel failure, and the result remains visibly incomplete.
+        $enumeration.Channels = @($script:LVAlwaysProbeChannel)
+        $enumeration.Status = 'not-observed'
+        $enumeration.EnumerationFailed = $true
+        $enumeration.MetadataErrorCount = [Math]::Max(1, $failureMessages.Count)
+        $enumeration.Failures = @($failureMessages)
+        return $enumeration
     }
 
-    $script:LVChannelMetadataErrorCount = @($listErrors).Count
-    $script:LVChannelMetadataFailures = @($listErrors | ForEach-Object { $_.Exception.Message })
+    $failureMessages = @($listErrors | ForEach-Object { if ($_.Exception) { $_.Exception.Message } else { [string]$_ } } | Where-Object { $_ })
     foreach ($log in @($logs | Where-Object { $_ -and $_.LogName })) {
         $script:LVChannelMetadata[[string]$log.LogName] = $log
     }
-    if ($script:LVChannelMetadataErrorCount -gt 0) {
-        Write-LVLog -Level warn -Message ("{0} channel(s) would not report their metadata and were not enumerated; elevation may reveal more." -f $script:LVChannelMetadataErrorCount)
+    if ($failureMessages.Count -gt 0) {
+        Write-LVLog -Level warn -Message ("{0} channel(s) would not report their metadata and were not enumerated; elevation may reveal more." -f $failureMessages.Count)
     }
 
     $names = @($logs | Sort-Object -Property RecordCount -Descending | Select-Object -ExpandProperty LogName)
@@ -196,7 +217,13 @@ function Get-LVPopulatedChannel {
     foreach ($ch in $script:LVAlwaysProbeChannel) {
         if ($names -notcontains $ch) { $names += $ch }
     }
-    return $names
+    $enumeration.Channels = @($names)
+    $enumeration.Metadata = $script:LVChannelMetadata
+    $enumeration.Status = if ($failureMessages.Count -gt 0) { 'not-observed' } elseif ($names.Count -eq 0) { 'empty' } else { 'readable' }
+    $enumeration.EnumerationFailed = ($failureMessages.Count -gt 0)
+    $enumeration.MetadataErrorCount = [int]$failureMessages.Count
+    $enumeration.Failures = @($failureMessages)
+    return $enumeration
 }
 
 function Get-LVEventRecord {

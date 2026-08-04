@@ -1096,7 +1096,8 @@ function Assert-LVRedactedResultShape {
     $allowed = @(
         'Tool', 'Version', 'Mode', 'Contract', 'MachineName', 'ScanTime', 'Duration',
         'DaysBack', 'Elevated', 'Offline', 'Channels', 'ChannelStatus', 'DeniedChannels',
-        'TruncatedChannels', 'MetadataUnreadableCount', 'CoverageNotes', 'Coverage',
+        'TruncatedChannels', 'MetadataUnreadableCount', 'ChannelEnumerationStatus', 'ChannelEnumerationFailed',
+        'ChannelEnumerationFailures', 'CoverageNotes', 'Coverage',
         'PerformanceTelemetry', 'Performance', 'HealthProfiles', 'ProviderExtensions',
         'ProviderProjections', 'Reduction', 'Findings', 'Correlations', 'CrashArtifacts',
         'SetupDiag', 'Horizon', 'HorizonWarning', 'Stability', 'ReliabilityAvailable',
