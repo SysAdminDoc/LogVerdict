@@ -89,7 +89,7 @@ The artifact carries stable unknown/candidate IDs, source/provider/event context
 - **Activity** shows the live collect, reduce, correlate, resolve and report stages, the full run transcript and a compact run summary.
 - **Save report** writes the same text, JSON and HTML bundle the console tool produces.
 - The scan runs on a background thread, so the window stays responsive. Overview shows a visible Cancel action, live elapsed time, and a realistic look-back-specific timing range; cancellation stops the worker, reports partial coverage, and saves no incomplete report.
-- Look-back, source switches, harmless-finding visibility, and window size are remembered per user in `%LOCALAPPDATA%\LogVerdict\settings.json`. A missing, corrupt, future, or unreadable settings file falls back to safe defaults.
+- Every visible Overview scan and report choice, named channel list, alternate database/report path, and window size is remembered per user in `%LOCALAPPDATA%\LogVerdict\settings.json`. A missing, corrupt, future, or unreadable settings file falls back to safe defaults. Older settings files gain safe defaults for fields introduced later.
 - Windows High Contrast changes the full interface to the active system colours, including verdict labels and keyboard focus, and switching it off restores the normal dark theme without restarting.
 
 Elevation is optional and never forced. Without it the Security channel and some setup logs are unreadable; the window says so in a banner and offers to restart elevated.
@@ -108,7 +108,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Default, focused, all, or named event channels | Focused/all switches or Named event channels | `-DiagnosticChannels`, `-AllChannels`, `-Channel` |
 | Setup logs, Reliability Monitor, harmless findings | Source switches | `-SkipTextLogs`, `-SkipReliability`, `-IncludeBenign` |
 | Alternate complete rule database | Rules path / picker | `-DatabasePath` |
-| Report destination, identifier masking, evidence bundle | Report controls | `-OutputDir`, `-Redact`, `-IncludeEvidence`, `-AllowRawEvidence` |
+| Report destination, identifier masking, evidence bundle | Report folder, masking toggle, and evidence toggle (raw event channels when masking is off) | `-OutputDir`, `-Redact`, `-IncludeEvidence`; `-AllowRawEvidence` remains an explicit console-only override |
 | Offline evidence re-evaluation | Console-only batch/review workflow | `-EvidencePath` |
 | Local-model draft and rule-authoring workflow | Deliberately console-only so model endpoint and local-rule writes remain explicit | `-ExplainUnknown`, `-OllamaModel`, `-OllamaEndpoint`, `-PromoteToRule`, `-LocalRulePath` |
 | Local baseline/history and trend signals | Console/report and module opt-in; local state is bounded and advisory only | `-HistoryPath`, `-HistoryWindowDays` |
@@ -499,7 +499,7 @@ Runs without admin; elevation unlocks the Security channel and some text logs.
 | SetupDiag | Persisted XML/registry results are read without elevation; otherwise only an existing Microsoft-signed executable is used, and built-in Panther rules remain active | Treat `artifact-read`, `executed`, rejected, missing, and unreadable states as explicit coverage evidence |
 | WEF | Optional, module-only health context; no fleet agent or remote connection is required | Use `Watch-LogVerdict -IncludeWEFHealth` when the Windows Event Collector service is in scope |
 | Accessibility | Normal and Windows High Contrast themes are covered at 125% display scaling; navigation and reset controls expose UI Automation names | Run `Tools\Test-LogVerdictGui.ps1 -Theme HighContrast -ScalePercent 125` |
-| GUI preferences | The Overview page's **Reset settings** button restores 30 days, focused defaults, a 1440x800 window, and clears transient source/report fields | If the GUI cannot open, remove `%LOCALAPPDATA%\LogVerdict\settings.json` and relaunch |
+| GUI preferences | The Overview page's **Reset settings** button restores 30 days, default event sources, a 1440x800 window, and clears named channels, alternate paths, masking, evidence, and other saved source/report fields | If the GUI cannot open, remove `%LOCALAPPDATA%\LogVerdict\settings.json` and relaunch |
 | Distribution | The module and unsigned packaged executables use the same engine and embedded data; no runtime package dependency is required | Run `Tools\Test-LogVerdictRelease.ps1` for offline version, catalog, manifest, and documentation checks |
 
 Every scan probes each channel for readability before reading it, and reports what it could **not** see under "what this scan could not see": channels denied by ACL, channels whose metadata would not enumerate, channels truncated at the per-channel record cap, and requested channels that do not exist. This matters because `Get-WinEvent -FilterHashtable` reports a denied channel identically to an empty one - a scan that trusts that path would tell you a channel is clean when it was never allowed to open it.

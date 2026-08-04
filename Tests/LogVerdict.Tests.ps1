@@ -4058,7 +4058,10 @@ Describe 'GUI settings persistence' {
             param($Root)
             $path = Join-Path $Root 'prefs/settings.json'
             $value = [pscustomobject]@{
-                DaysBack=14; AllChannels=$true; SkipTextLogs=$true; IncludeBenign=$true
+                DaysBack=14; AllChannels=$true; DiagnosticChannels=$true; SkipTextLogs=$true
+                SkipReliability=$true; IncludeBenign=$true; NamedChannels='System, Application'
+                DatabasePath='C:\rules\verdicts.json'; OutputDirectory='C:\reports'
+                Redact=$true; IncludeEvidence=$true
                 WindowWidth=1500.4; WindowHeight=820.4
             }
             Save-LVGuiSetting -Settings $value -Path $path | Should -BeTrue
@@ -4066,8 +4069,15 @@ Describe 'GUI settings persistence' {
             $read = Get-LVGuiSetting -Path $path
             $read.DaysBack | Should -Be 14
             $read.AllChannels | Should -BeTrue
+            $read.DiagnosticChannels | Should -BeTrue
             $read.SkipTextLogs | Should -BeTrue
+            $read.SkipReliability | Should -BeTrue
             $read.IncludeBenign | Should -BeTrue
+            $read.NamedChannels | Should -BeExactly 'System, Application'
+            $read.DatabasePath | Should -BeExactly 'C:\rules\verdicts.json'
+            $read.OutputDirectory | Should -BeExactly 'C:\reports'
+            $read.Redact | Should -BeTrue
+            $read.IncludeEvidence | Should -BeTrue
             $read.WindowWidth | Should -Be 1500
             $read.WindowHeight | Should -Be 820
 
@@ -4082,7 +4092,9 @@ Describe 'GUI settings persistence' {
             param($Root)
             $path = Join-Path $Root 'prefs/settings.json'
             Save-LVGuiSetting -Settings ([pscustomobject]@{
-                DaysBack=365; AllChannels=$true; SkipTextLogs=$true; IncludeBenign=$true
+                DaysBack=365; AllChannels=$true; DiagnosticChannels=$true; SkipTextLogs=$true
+                SkipReliability=$true; IncludeBenign=$true; NamedChannels='System'
+                DatabasePath='C:\rules.json'; OutputDirectory='C:\reports'; Redact=$true; IncludeEvidence=$true
                 WindowWidth=2200; WindowHeight=1200
             }) -Path $path | Should -BeTrue
 
@@ -4090,10 +4102,37 @@ Describe 'GUI settings persistence' {
             $read = Get-LVGuiSetting -Path $path
             $read.DaysBack | Should -Be 30
             $read.AllChannels | Should -BeFalse
+            $read.DiagnosticChannels | Should -BeFalse
             $read.SkipTextLogs | Should -BeFalse
+            $read.SkipReliability | Should -BeFalse
             $read.IncludeBenign | Should -BeFalse
+            $read.NamedChannels | Should -BeExactly ''
+            $read.DatabasePath | Should -BeExactly ''
+            $read.OutputDirectory | Should -BeExactly ''
+            $read.Redact | Should -BeFalse
+            $read.IncludeEvidence | Should -BeFalse
             $read.WindowWidth | Should -Be 1440
             $read.WindowHeight | Should -Be 800
+        }
+    }
+
+    It 'loads an older v1 settings file with safe defaults for newer options' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $path = Join-Path $Root 'legacy/settings.json'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+            '{"schemaVersion":1,"daysBack":21,"allChannels":false,"skipTextLogs":true,"includeBenign":false,"windowWidth":1440,"windowHeight":800}' |
+                Set-Content -LiteralPath $path -Encoding UTF8
+
+            $read = Get-LVGuiSetting -Path $path
+            $read.DaysBack | Should -Be 21
+            $read.DiagnosticChannels | Should -BeFalse
+            $read.SkipReliability | Should -BeFalse
+            $read.NamedChannels | Should -BeExactly ''
+            $read.DatabasePath | Should -BeExactly ''
+            $read.OutputDirectory | Should -BeExactly ''
+            $read.Redact | Should -BeFalse
+            $read.IncludeEvidence | Should -BeFalse
         }
     }
 
@@ -4104,7 +4143,8 @@ Describe 'GUI settings persistence' {
             foreach ($content in @(
                 '{ definitely not json',
                 '{"schemaVersion":2,"daysBack":30,"allChannels":false,"skipTextLogs":false,"includeBenign":false,"windowWidth":1440,"windowHeight":800}',
-                '{"schemaVersion":1,"daysBack":0,"allChannels":"false","skipTextLogs":false,"includeBenign":false,"windowWidth":100,"windowHeight":100}'
+                '{"schemaVersion":1,"daysBack":0,"allChannels":"false","skipTextLogs":false,"includeBenign":false,"windowWidth":100,"windowHeight":100}',
+                '{"schemaVersion":1,"daysBack":30,"allChannels":false,"skipTextLogs":false,"includeBenign":false,"diagnosticChannels":"false","windowWidth":1440,"windowHeight":800}'
             )) {
                 Set-Content -LiteralPath $path -Value $content -Encoding UTF8
                 { Get-LVGuiSetting -Path $path } | Should -Not -Throw
@@ -4166,6 +4206,8 @@ Describe 'GUI and console feature parity' {
         $text | Should -Match 'Redact\s*=\s*\[bool\]\$ui\.ChkOverviewRedact\.IsChecked'
         $text | Should -Match 'IncludeEvidence\s*=\s*\[bool\]\$ui\.ChkOverviewEvidence\.IsChecked'
         $text | Should -Match 'AllowRawEvidence\s*=\s*\[bool\]'
+        $xaml = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Private\50-LVGuiXaml.ps1') -Raw
+        $xaml | Should -Match 'raw channels if unredacted'
     }
 
     It 'keeps diagnostic performance telemetry opt-in and content-free on a live scan' {

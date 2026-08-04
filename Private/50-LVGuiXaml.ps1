@@ -759,7 +759,9 @@ function Get-LVGuiXaml {
                 </Grid>
                 <WrapPanel Margin="0,8,0,0">
                   <CheckBox x:Name="ChkOverviewRedact" Content="Redact reports and clipboard" Margin="0,0,20,6"/>
-                  <CheckBox x:Name="ChkOverviewEvidence" Content="Include evidence zip" Margin="0,0,0,6"/>
+                  <CheckBox x:Name="ChkOverviewEvidence" Content="Include evidence zip (raw channels if unredacted)"
+                            ToolTip="With redaction off, the evidence zip contains raw event-channel exports."
+                            Margin="0,0,0,6"/>
                 </WrapPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
                   <Button x:Name="BtnResetSettings" Style="{StaticResource BaseButton}" Content="Reset settings"

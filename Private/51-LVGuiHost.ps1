@@ -79,6 +79,13 @@ function Get-LVGuiSetting {
         foreach ($name in @('allChannels', 'skipTextLogs', 'includeBenign')) {
             if ($null -eq $data.PSObject.Properties[$name] -or $data.$name -isnot [bool]) { return $null }
         }
+        foreach ($name in @('diagnosticChannels', 'skipReliability', 'redact', 'includeEvidence')) {
+            if ($null -ne $data.PSObject.Properties[$name] -and $data.$name -isnot [bool]) { return $null }
+        }
+        foreach ($name in @('namedChannels', 'databasePath', 'outputDirectory')) {
+            if ($null -ne $data.PSObject.Properties[$name] -and
+                $null -ne $data.$name -and $data.$name -isnot [string]) { return $null }
+        }
         foreach ($name in @('windowWidth', 'windowHeight')) {
             if ($null -eq $data.PSObject.Properties[$name] -or $data.$name -is [string]) { return $null }
         }
@@ -95,8 +102,15 @@ function Get-LVGuiSetting {
         return [pscustomobject]@{
             DaysBack      = $days
             AllChannels   = [bool]$data.allChannels
+            DiagnosticChannels = if ($data.PSObject.Properties['diagnosticChannels']) { [bool]$data.diagnosticChannels } else { $false }
             SkipTextLogs  = [bool]$data.skipTextLogs
+            SkipReliability = if ($data.PSObject.Properties['skipReliability']) { [bool]$data.skipReliability } else { $false }
             IncludeBenign = [bool]$data.includeBenign
+            NamedChannels = if ($data.PSObject.Properties['namedChannels']) { [string]$data.namedChannels } else { '' }
+            DatabasePath = if ($data.PSObject.Properties['databasePath']) { [string]$data.databasePath } else { '' }
+            OutputDirectory = if ($data.PSObject.Properties['outputDirectory']) { [string]$data.outputDirectory } else { '' }
+            Redact = if ($data.PSObject.Properties['redact']) { [bool]$data.redact } else { $false }
+            IncludeEvidence = if ($data.PSObject.Properties['includeEvidence']) { [bool]$data.includeEvidence } else { $false }
             WindowWidth   = $width
             WindowHeight  = $height
         }
@@ -132,8 +146,15 @@ function Save-LVGuiSetting {
         schemaVersion = 1
         daysBack      = $days
         allChannels   = [bool]$Settings.AllChannels
+        diagnosticChannels = [bool]$Settings.DiagnosticChannels
         skipTextLogs  = [bool]$Settings.SkipTextLogs
+        skipReliability = [bool]$Settings.SkipReliability
         includeBenign = [bool]$Settings.IncludeBenign
+        namedChannels = ([string]$Settings.NamedChannels).Trim()
+        databasePath = ([string]$Settings.DatabasePath).Trim()
+        outputDirectory = ([string]$Settings.OutputDirectory).Trim()
+        redact = [bool]$Settings.Redact
+        includeEvidence = [bool]$Settings.IncludeEvidence
         windowWidth   = [Math]::Round($width, 0)
         windowHeight  = [Math]::Round($height, 0)
     }
@@ -179,8 +200,15 @@ function Reset-LVGuiSetting {
     return Save-LVGuiSetting -Settings ([pscustomobject]@{
         DaysBack      = 30
         AllChannels   = $false
+        DiagnosticChannels = $false
         SkipTextLogs  = $false
+        SkipReliability = $false
         IncludeBenign = $false
+        NamedChannels = ''
+        DatabasePath = ''
+        OutputDirectory = ''
+        Redact = $false
+        IncludeEvidence = $false
         WindowWidth   = 1440
         WindowHeight  = 800
     }) -Path $Path

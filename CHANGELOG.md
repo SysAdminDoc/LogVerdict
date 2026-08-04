@@ -37,6 +37,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Replaced the standard-export dispatch table with a versioned data-only template registry; custom single-document and line-oriented projections now work without module code changes, with atomic writes and guarded append mode.
 - Added UTC rule freshness policy and optional Windows build ranges, surfaced stale active rulings in reports and GUI Coverage, and made redacted unknown review artifacts carry a `status: test` contribution scaffold with mandatory `sources[].retrieved` metadata.
 - Reworked correlation matching to keep sliding-window pointers and merge intervals without repeatedly copying the active occurrence slice; the 4,000-occurrence regression stays within its budget.
+- Persisted every visible GUI Overview source and report choice, including diagnostic channels, named channels, alternate paths, Reliability Monitor, masking, and evidence; reset now clears the complete saved option set.
 
 - Added a user-visible GUI settings reset that atomically restores safe scan defaults,
   resets the window size and transient source/report fields, and reports persistence failures;

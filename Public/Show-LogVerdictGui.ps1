@@ -69,8 +69,15 @@ function Show-LogVerdictGui {
         $initialDays = $savedSettings.DaysBack
     }
     $initialAllChannels = $(if ($savedSettings) { $savedSettings.AllChannels } else { $false })
+    $initialDiagnosticChannels = $(if ($savedSettings) { $savedSettings.DiagnosticChannels } else { $false })
     $initialSkipText = $(if ($savedSettings) { $savedSettings.SkipTextLogs } else { $false })
+    $initialSkipReliability = $(if ($savedSettings) { $savedSettings.SkipReliability } else { $false })
     $initialIncludeBenign = $(if ($savedSettings) { $savedSettings.IncludeBenign } else { $false })
+    $initialNamedChannels = $(if ($savedSettings) { [string]$savedSettings.NamedChannels } else { '' })
+    $initialDatabasePath = $(if ($savedSettings) { [string]$savedSettings.DatabasePath } else { '' })
+    $initialOutputDirectory = $(if ($savedSettings) { [string]$savedSettings.OutputDirectory } else { '' })
+    $initialRedact = $(if ($savedSettings) { $savedSettings.Redact } else { $false })
+    $initialIncludeEvidence = $(if ($savedSettings) { $savedSettings.IncludeEvidence } else { $false })
 
     $window = [Windows.Markup.XamlReader]::Parse((Get-LVGuiXaml))
     if ($savedSettings) {
@@ -650,8 +657,15 @@ function Show-LogVerdictGui {
     $ui.TxtOverviewDays.Text = [string]$initialDays
     $ui.TxtOverviewTimingHint.Text = Get-LVGuiScanTimingHint -DaysBack $initialDays
     $ui.ChkOverviewAllChannels.IsChecked = $initialAllChannels
+    $ui.ChkOverviewDiagnosticChannels.IsChecked = $initialDiagnosticChannels
     $ui.ChkOverviewIncludeText.IsChecked = -not $initialSkipText
     $ui.ChkOverviewIncludeBenign.IsChecked = $initialIncludeBenign
+    $ui.TxtOverviewChannels.Text = $initialNamedChannels
+    $ui.TxtOverviewDatabase.Text = $initialDatabasePath
+    $ui.ChkOverviewSkipReliability.IsChecked = $initialSkipReliability
+    $ui.TxtOverviewOutputDir.Text = $initialOutputDirectory
+    $ui.ChkOverviewRedact.IsChecked = $initialRedact
+    $ui.ChkOverviewEvidence.IsChecked = $initialIncludeEvidence
     $ui.BtnFindingsSave.IsEnabled = $false
     $ui.BtnFindingsOpen.IsEnabled = $false
     $ui.BtnCopySummary.IsEnabled = $false
@@ -717,6 +731,7 @@ function Show-LogVerdictGui {
         $ui.TxtOverviewOutputDir.Text = ''
         $ui.ChkOverviewRedact.IsChecked = $false
         $ui.ChkOverviewEvidence.IsChecked = $false
+        & $syncOverviewOptions
         $window.WindowState = 'Normal'
         $window.Width = 1440
         $window.Height = 800
@@ -1167,8 +1182,15 @@ function Show-LogVerdictGui {
         $null = Save-LVGuiSetting -Settings ([pscustomobject]@{
             DaysBack      = $savedDays
             AllChannels   = [bool]$ui.ChkOverviewAllChannels.IsChecked
+            DiagnosticChannels = [bool]$ui.ChkOverviewDiagnosticChannels.IsChecked
             SkipTextLogs  = -not [bool]$ui.ChkOverviewIncludeText.IsChecked
+            SkipReliability = [bool]$ui.ChkOverviewSkipReliability.IsChecked
             IncludeBenign = [bool]$ui.ChkOverviewIncludeBenign.IsChecked
+            NamedChannels = $ui.TxtOverviewChannels.Text
+            DatabasePath = $ui.TxtOverviewDatabase.Text
+            OutputDirectory = $ui.TxtOverviewOutputDir.Text
+            Redact = [bool]$ui.ChkOverviewRedact.IsChecked
+            IncludeEvidence = [bool]$ui.ChkOverviewEvidence.IsChecked
             WindowWidth   = $bounds.Width
             WindowHeight  = $bounds.Height
         })
