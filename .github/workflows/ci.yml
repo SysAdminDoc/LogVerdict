@@ -125,7 +125,14 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1 -EnableExit
 
-      - name: Run offline release gates
+      - name: Run runtime-agnostic release gates
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\Tools\Test-LogVerdictReleaseStatic.ps1
+          if (-not $?) { exit 1 }
+
+      - name: Run Core schema release gates
         if: matrix.shell == 'pwsh'
         shell: ${{ matrix.shell }}
         run: |

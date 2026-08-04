@@ -54,6 +54,18 @@ function Assert-LVEqual {
     if ([string]$Actual -cne [string]$Expected) { throw ("{0}: expected '{1}', got '{2}'." -f $Message, $Expected, $Actual) }
 }
 
+function Assert-LVHasProperty {
+    param(
+        [Parameter(Mandatory)]$Object,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Message
+    )
+
+    if ($null -eq $Object -or -not $Object.PSObject.Properties[$Name]) {
+        throw ("{0}: required property '{1}' is missing." -f $Message, $Name)
+    }
+}
+
 function Get-LVRelativePath {
     param([Parameter(Mandatory)][string]$BasePath, [Parameter(Mandatory)][string]$Path)
     $baseUri = New-Object Uri (([IO.Path]::GetFullPath($BasePath).TrimEnd('\') + '\'))
@@ -61,9 +73,35 @@ function Get-LVRelativePath {
     return [Uri]::UnescapeDataString($baseUri.MakeRelativeUri($pathUri).ToString()).Replace('\', '/')
 }
 
+function Get-LVTrackedSourcePath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$BasePath)
+
+    $output = @(& git -c safe.directory='*' -C $BasePath ls-files 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to enumerate tracked source files with git.' }
+    return @($output | Where-Object {
+            $_ -and $_ -notmatch '^(?i)(?:dist|obj)/' -and $_ -notmatch '^(?i)\.git/'
+        } | ForEach-Object { ([string]$_).Replace('\', '/') } | Sort-Object -Unique)
+}
+
+function Invoke-LVGitText {
+    param([Parameter(Mandatory)][string]$BasePath, [Parameter(Mandatory)][string[]]$ArgumentList)
+
+    $output = @(& git -c safe.directory='*' -C $BasePath @ArgumentList 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw ("git {0} failed." -f ($ArgumentList -join ' ')) }
+    return (($output | Where-Object { $_ }) -join "`n").Trim()
+}
+
 function Get-LVManifestTreeHash {
     param([Parameter(Mandatory)]$Manifest, [Parameter(Mandatory)][string]$BasePath)
 
+    $manifestPaths = @($Manifest.files | ForEach-Object { ([string]$_.path).Replace('\', '/') })
+    if ($manifestPaths.Count -ne @($manifestPaths | Sort-Object -Unique).Count) { throw 'Source manifest contains duplicate file paths.' }
+    $trackedPaths = @(Get-LVTrackedSourcePath -BasePath $BasePath)
+    $missing = @($trackedPaths | Where-Object { $manifestPaths -notcontains $_ })
+    $unexpected = @($manifestPaths | Where-Object { $trackedPaths -notcontains $_ })
+    if ($missing.Count -gt 0) { throw ("Source manifest is missing tracked file(s): {0}" -f ($missing -join ', ')) }
+    if ($unexpected.Count -gt 0) { throw ("Source manifest contains file(s) that are not tracked: {0}" -f ($unexpected -join ', ')) }
     foreach ($record in @($Manifest.files)) {
         $path = Join-Path $BasePath ($record.path -replace '/', '\')
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw ("Source file missing: {0}" -f $record.path) }
@@ -90,6 +128,11 @@ $index = Read-LVJson -Path $indexPath
 Assert-LVEqual -Actual $index.schemaVersion -Expected 1 -Message 'Supply-chain schema version'
 Assert-LVEqual -Actual $index.name -Expected 'LogVerdict.ReleaseSupplyChain' -Message 'Supply-chain name'
 Assert-LVEqual -Actual $index.version -Expected $Version -Message 'Supply-chain version'
+Assert-LVHasProperty -Object $index -Name 'sourceDirty' -Message 'Supply-chain index'
+Assert-LVHasProperty -Object $index -Name 'sourceRevision' -Message 'Supply-chain index'
+Assert-LVEqual -Actual ([bool]$index.sourceDirty) -Expected $false -Message 'Source checkout dirty state'
+$headRevision = Invoke-LVGitText -BasePath $SourceDirectory -ArgumentList @('rev-parse', 'HEAD')
+Assert-LVEqual -Actual $index.sourceRevision -Expected $headRevision -Message 'Source revision'
 $assets = @($index.assets)
 if ($assets.Count -ne 2) { throw ("Supply-chain index must contain two assets; found {0}." -f $assets.Count) }
 
@@ -99,13 +142,30 @@ $sourceManifest = Read-LVJson -Path $sourceManifestPath
 Assert-LVEqual -Actual $sourceManifest.schemaVersion -Expected 1 -Message 'Source manifest schema version'
 Get-LVManifestTreeHash -Manifest $sourceManifest -BasePath $SourceDirectory | Out-Null
 
+$pinnedDependencyPath = Join-Path $SourceDirectory 'Data/build-dependencies.json'
+$pinnedDependencies = Read-LVJson -Path $pinnedDependencyPath
+Assert-LVEqual -Actual $pinnedDependencies.schemaVersion -Expected 1 -Message 'Pinned dependency schema version'
+Assert-LVEqual -Actual $pinnedDependencies.name -Expected 'LogVerdict.BuildDependencies' -Message 'Pinned dependency name'
+
 $dependencyManifestPath = Join-Path $MetadataDirectory ([string]$index.dependencyManifest)
 Assert-LVEqual -Actual (Get-LVFileSha256 -Path $dependencyManifestPath) -Expected $index.dependencyManifestSha256 -Message 'Dependency manifest hash'
 $dependencyManifest = Read-LVJson -Path $dependencyManifestPath
 Assert-LVEqual -Actual $dependencyManifest.schemaVersion -Expected 1 -Message 'Dependency manifest schema version'
+$pinnedDependencySpecs = @($pinnedDependencies.dependencies | Where-Object { $_ })
+if ($pinnedDependencySpecs.Count -ne @($dependencyManifest.dependencies).Count) {
+    throw ("Dependency manifest contains {0} entries, but the tracked pin file contains {1}." -f
+        @($dependencyManifest.dependencies).Count, $pinnedDependencySpecs.Count)
+}
 foreach ($dependency in @($dependencyManifest.dependencies)) {
     if ([string]$dependency.contentSha256 -notmatch '^[0-9a-f]{64}$') { throw ("Dependency {0} has no content hash." -f $dependency.name) }
     Get-LVDependencyTreeHash -Dependency $dependency | Out-Null
+    $pin = @($pinnedDependencies.dependencies | Where-Object { $_.name -eq $dependency.name -and $_.version -eq $dependency.version })
+    if ($pin.Count -ne 1) { throw ("Dependency {0} v{1} is not present exactly once in the tracked pin file." -f $dependency.name, $dependency.version) }
+    Assert-LVEqual -Actual $dependency.source -Expected $pin[0].source -Message ("Dependency source {0}" -f $dependency.name)
+    Assert-LVEqual -Actual $dependency.hashKind -Expected $pin[0].hashKind -Message ("Dependency hash kind {0}" -f $dependency.name)
+    Assert-LVEqual -Actual $dependency.contentSha256 -Expected $pin[0].contentSha256 -Message ("Pinned dependency hash {0}" -f $dependency.name)
+    Assert-LVEqual -Actual ([int]$dependency.fileCount) -Expected ([int]$pin[0].fileCount) -Message ("Pinned dependency file count {0}" -f $dependency.name)
+    Assert-LVEqual -Actual ([int64]$dependency.totalBytes) -Expected ([int64]$pin[0].totalBytes) -Message ("Pinned dependency byte count {0}" -f $dependency.name)
 }
 
 foreach ($asset in $assets) {
@@ -138,6 +198,12 @@ foreach ($asset in $assets) {
     Assert-LVEqual -Actual $provenance.subject[0].digest.sha256 -Expected $asset.sha256 -Message ("Provenance asset hash {0}" -f $asset.name)
     Assert-LVEqual -Actual $provenance.verification.artifactSha256 -Expected $asset.sha256 -Message ("Provenance verification hash {0}" -f $asset.name)
     Assert-LVEqual -Actual $provenance.source.version -Expected $Version -Message ("Provenance version {0}" -f $asset.name)
+    Assert-LVHasProperty -Object $provenance.source -Name 'revision' -Message ("Provenance source {0}" -f $asset.name)
+    Assert-LVHasProperty -Object $provenance.source -Name 'dirty' -Message ("Provenance source {0}" -f $asset.name)
+    Assert-LVHasProperty -Object $provenance.source -Name 'sourceTreeSha256' -Message ("Provenance source {0}" -f $asset.name)
+    Assert-LVEqual -Actual $provenance.source.revision -Expected $index.sourceRevision -Message ("Provenance source revision {0}" -f $asset.name)
+    Assert-LVEqual -Actual ([bool]$provenance.source.dirty) -Expected $false -Message ("Provenance source dirty state {0}" -f $asset.name)
+    Assert-LVEqual -Actual $provenance.source.sourceTreeSha256 -Expected $sourceManifest.sourceTreeSha256 -Message ("Provenance source tree {0}" -f $asset.name)
     Assert-LVEqual -Actual $provenance.source.manifestSha256 -Expected $index.sourceManifestSha256 -Message ("Provenance source manifest {0}" -f $asset.name)
     Assert-LVEqual -Actual $provenance.dependencyManifestSha256 -Expected $index.dependencyManifestSha256 -Message ("Provenance dependency manifest {0}" -f $asset.name)
     Assert-LVEqual -Actual $provenance.sbom.sha256 -Expected $asset.sbomSha256 -Message ("Provenance SBOM hash {0}" -f $asset.name)

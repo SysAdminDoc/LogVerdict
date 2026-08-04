@@ -127,7 +127,10 @@ function Get-LVSourceManifest {
 function Get-LVModuleManifest {
     param(
         [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][string]$ExpectedVersion
+        [Parameter(Mandatory)][string]$ExpectedVersion,
+        [Parameter(Mandatory)][ValidatePattern('^(?i:[0-9a-f]{64})$')][string]$ExpectedContentSha256,
+        [Parameter(Mandatory)][int]$ExpectedFileCount,
+        [Parameter(Mandatory)][int64]$ExpectedTotalBytes
     )
 
     $module = @(Get-Module -ListAvailable -Name $Name | Where-Object { $_.Version.ToString() -eq $ExpectedVersion } | Select-Object -First 1)
@@ -145,13 +148,25 @@ function Get-LVModuleManifest {
         }
     }
     $canonical = (($records | ForEach-Object { '{0}|{1}|{2}' -f $_.path, $_.sha256, $_.bytes }) -join "`n") + "`n"
+    $contentSha256 = Get-LVTextSha256 -Text $canonical
+    if ($contentSha256 -ine $ExpectedContentSha256) {
+        throw ("Pinned dependency {0} v{1} content hash mismatch. Expected {2}, got {3}." -f $Name, $ExpectedVersion, $ExpectedContentSha256, $contentSha256)
+    }
+    if ($records.Count -ne $ExpectedFileCount) {
+        throw ("Pinned dependency {0} v{1} file count mismatch. Expected {2}, got {3}." -f $Name, $ExpectedVersion, $ExpectedFileCount, $records.Count)
+    }
+    $totalBytes = [int64](($records | Measure-Object -Property bytes -Sum).Sum)
+    if ($totalBytes -ne $ExpectedTotalBytes) {
+        throw ("Pinned dependency {0} v{1} byte count mismatch. Expected {2}, got {3}." -f $Name, $ExpectedVersion, $ExpectedTotalBytes, $totalBytes)
+    }
     return [ordered]@{
         name = $Name
         version = $ExpectedVersion
         source = 'PowerShell Gallery'
         hashKind = 'module-file-manifest'
-        contentSha256 = Get-LVTextSha256 -Text $canonical
+        contentSha256 = $contentSha256
         fileCount = $records.Count
+        totalBytes = $totalBytes
         files = $records
     }
 }
@@ -178,14 +193,26 @@ $sourceManifest = Get-LVSourceManifest -BasePath $SourceDirectory
 $sourceManifestPath = Join-Path $OutputDirectory 'source-manifest.json'
 Write-LVJsonFile -Path $sourceManifestPath -Value $sourceManifest
 
-$dependencySpecs = @(
-    [ordered]@{ name = 'Pester'; version = '5.9.0'; purpose = 'test' }
-    [ordered]@{ name = 'PSScriptAnalyzer'; version = '1.25.0'; purpose = 'quality-gate' }
-    [ordered]@{ name = 'ps2exe'; version = '1.0.18'; purpose = 'executable-builder' }
-)
+$pinnedDependencyPath = Join-Path $repoRoot 'Data/build-dependencies.json'
+if (-not (Test-Path -LiteralPath $pinnedDependencyPath -PathType Leaf)) { throw 'Tracked build dependency pin file is missing.' }
+$pinnedDependencies = Get-Content -LiteralPath $pinnedDependencyPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([int]$pinnedDependencies.schemaVersion -ne 1 -or [string]$pinnedDependencies.name -ne 'LogVerdict.BuildDependencies') {
+    throw 'Tracked build dependency pin file has an unsupported contract.'
+}
+$dependencySpecs = @($pinnedDependencies.dependencies | Where-Object { $_ })
+if ($dependencySpecs.Count -ne 3) { throw ("Tracked build dependency pin file must contain three dependencies; found {0}." -f $dependencySpecs.Count) }
 $dependencies = @()
 foreach ($spec in $dependencySpecs) {
-    $dependency = Get-LVModuleManifest -Name $spec.name -ExpectedVersion $spec.version
+    foreach ($propertyName in @('name', 'version', 'purpose', 'source', 'hashKind', 'contentSha256', 'fileCount', 'totalBytes')) {
+        if (-not $spec.PSObject.Properties[$propertyName] -or [string]::IsNullOrWhiteSpace([string]$spec.$propertyName)) {
+            throw ("Tracked build dependency {0} is missing '{1}'." -f $spec.name, $propertyName)
+        }
+    }
+    if ([string]$spec.source -cne 'PowerShell Gallery' -or [string]$spec.hashKind -cne 'module-file-manifest') {
+        throw ("Tracked build dependency {0} has unsupported provenance metadata." -f $spec.name)
+    }
+    $dependency = Get-LVModuleManifest -Name ([string]$spec.name) -ExpectedVersion ([string]$spec.version) `
+        -ExpectedContentSha256 ([string]$spec.contentSha256) -ExpectedFileCount ([int]$spec.fileCount) -ExpectedTotalBytes ([int64]$spec.totalBytes)
     $dependency.purpose = $spec.purpose
     $dependencies += $dependency
 }
@@ -197,7 +224,7 @@ $dependencyManifestPath = Join-Path $OutputDirectory 'dependency-manifest.json'
 Write-LVJsonFile -Path $dependencyManifestPath -Value $dependencyManifest -Depth 30
 
 $revision = Invoke-LVGit -ArgumentList @('rev-parse', 'HEAD')
-$status = Invoke-LVGit -ArgumentList @('status', '--porcelain', '--untracked-files=no')
+$status = Invoke-LVGit -ArgumentList @('status', '--porcelain', '--untracked-files=all')
 $sourceDirty = -not [string]::IsNullOrWhiteSpace($status)
 $createdAt = [DateTime]::UtcNow.ToString('o')
 $runtimeOs = ''

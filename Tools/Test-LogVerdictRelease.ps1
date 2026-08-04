@@ -1,5 +1,3 @@
-#requires -Version 5.1
-
 <#
 .SYNOPSIS
 Run the offline release integrity gates for LogVerdict.
@@ -17,7 +15,8 @@ param(
     [string]$ManifestDirectory,
     [string]$AssetDirectory,
     [string]$SupplyChainDirectory,
-    [string]$AdvisoryPath
+    [string]$AdvisoryPath,
+    [switch]$SkipSchemaValidation
 )
 
 $ErrorActionPreference = 'Stop'
@@ -153,15 +152,16 @@ if ($PSVersionTable.PSVersion -lt [version]'5.1') {
     throw ("Unsupported PowerShell runtime {0}; LogVerdict requires 5.1 or newer." -f $PSVersionTable.PSVersion)
 }
 
-$pester = @(Get-Module -ListAvailable Pester | Sort-Object Version -Descending | Select-Object -First 1)
-if ($pester.Count -eq 0) {
-    Write-Warning 'Pester is not installed; CI must install the pinned test dependency before running the suite.'
-} elseif ($pester[0].Version.Major -ge 6) {
-    Write-Warning ("Pester {0} is newer than the pinned Pester 5 test contract; CI uses Pester 5.9.0." -f $pester[0].Version)
-}
-$analyzer = @(Get-Module -ListAvailable PSScriptAnalyzer | Sort-Object Version -Descending | Select-Object -First 1)
-if ($analyzer.Count -eq 0) {
-    Write-Warning 'PSScriptAnalyzer is not installed; CI must install the pinned analyzer dependency before release.'
+foreach ($requiredTool in @(
+        [pscustomobject]@{ Name = 'Pester'; Version = '5.9.0' }
+        [pscustomobject]@{ Name = 'PSScriptAnalyzer'; Version = '1.25.0' }
+        [pscustomobject]@{ Name = 'ps2exe'; Version = '1.0.18' }
+    )) {
+    $installed = @(Get-Module -ListAvailable -Name $requiredTool.Name |
+        Where-Object { $_.Version.ToString() -eq $requiredTool.Version } | Select-Object -First 1)
+    if ($installed.Count -ne 1) {
+        throw ("Pinned release dependency {0} v{1} is not installed." -f $requiredTool.Name, $requiredTool.Version)
+    }
 }
 
 $manifest = Test-ModuleManifest -Path (Join-Path $repoRoot 'LogVerdict.psd1')
@@ -318,7 +318,9 @@ if ([int]$exportTemplateSchema.properties.schemaVersion.const -ne 1 -or
     [string]$exportTemplateSchema.properties.name.const -ne 'LogVerdict.ExportTemplates') {
     throw 'Export template schema is not pinned at version 1.'
 }
-Test-LVReleaseJsonSchema -Path $exportTemplatePath -SchemaPath $exportTemplateSchemaPath -Label 'export templates'
+if (-not $SkipSchemaValidation) {
+    Test-LVReleaseJsonSchema -Path $exportTemplatePath -SchemaPath $exportTemplateSchemaPath -Label 'export templates'
+}
 $exportTemplates = Get-Content -LiteralPath $exportTemplatePath -Raw -Encoding UTF8 | ConvertFrom-Json
 $reservedExportProjections = [ordered]@{
     Ecs            = [pscustomobject]@{ Projection = 'builtin:ecs'; Kind = 'line'; Source = 'findings' }
@@ -342,9 +344,10 @@ foreach ($builtInFormat in @($reservedExportProjections.Keys)) {
     }
 }
 
-$releaseSchemaRoot = Join-Path ([IO.Path]::GetTempPath()) ('LogVerdict-release-schema-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $releaseSchemaRoot -Force | Out-Null
-try {
+if (-not $SkipSchemaValidation) {
+    $releaseSchemaRoot = Join-Path ([IO.Path]::GetTempPath()) ('LogVerdict-release-schema-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $releaseSchemaRoot -Force | Out-Null
+    try {
     $releaseScanTime = Get-Date
     $releaseResult = [pscustomobject][ordered]@{
         Tool = 'LogVerdict'
@@ -561,9 +564,10 @@ try {
         if (-not $observed.created -or -not $observed.modified -or [int64]$observed.number_observed -lt 1 -or
             @($observed.object_refs).Count -lt 1) { throw 'STIX observed-data is missing its 2.1 required fields.' }
     }
-} finally {
-    if (Test-Path -LiteralPath $releaseSchemaRoot) {
-        Remove-Item -LiteralPath $releaseSchemaRoot -Recurse -Force -ErrorAction SilentlyContinue
+    } finally {
+        if (Test-Path -LiteralPath $releaseSchemaRoot) {
+            Remove-Item -LiteralPath $releaseSchemaRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 $localization = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/localization.json') -Raw -Encoding UTF8 | ConvertFrom-Json

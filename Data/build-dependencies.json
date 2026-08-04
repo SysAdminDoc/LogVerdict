@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "name": "LogVerdict.BuildDependencies",
+  "dependencies": [
+    {
+      "name": "Pester",
+      "version": "5.9.0",
+      "purpose": "test",
+      "source": "PowerShell Gallery",
+      "hashKind": "module-file-manifest",
+      "contentSha256": "f5dcee019795b826340c76ae9ddfd0192bd31ab20eca75c444d107f50e6cf57d",
+      "fileCount": 18,
+      "totalBytes": 1145464
+    },
+    {
+      "name": "PSScriptAnalyzer",
+      "version": "1.25.0",
+      "purpose": "quality-gate",
+      "source": "PowerShell Gallery",
+      "hashKind": "module-file-manifest",
+      "contentSha256": "9f229aa67862e620721de59f722bce48b190a8aef324504504e95735008cd0c3",
+      "fileCount": 50,
+      "totalBytes": 347230050
+    },
+    {
+      "name": "ps2exe",
+      "version": "1.0.18",
+      "purpose": "executable-builder",
+      "source": "PowerShell Gallery",
+      "hashKind": "module-file-manifest",
+      "contentSha256": "af634f6646edc5d6f9ba00c8fa7d52f7e670f72c277cf7f999ca87d60ad85c6f",
+      "fileCount": 5,
+      "totalBytes": 176175
+    }
+  ]
+}

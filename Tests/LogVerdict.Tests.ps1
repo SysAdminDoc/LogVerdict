@@ -403,6 +403,9 @@ Describe 'CI gate wiring' {
         $script:CiWorkflow | Should -Not -Match 'name: Run analyzer\r?\n\s+if:'
         $script:CiWorkflow | Should -Match 'name: Verify supply-chain metadata directly'
         $script:CiWorkflow | Should -Match 'Tools\\Test-LogVerdictSupplyChain\.ps1'
+        $script:CiWorkflow | Should -Match 'name: Run runtime-agnostic release gates'
+        $script:CiWorkflow | Should -Match 'Tools\\Test-LogVerdictReleaseStatic\.ps1'
+        $script:CiWorkflow | Should -Match 'name: Run Core schema release gates'
         $script:CiWorkflow | Should -Match 'if \(-not \$\?\) \{ exit 1 \}'
         $script:CiWorkflow | Should -Match 'probeExit = if \(\$LASTEXITCODE\)'
         $script:CiWorkflow | Should -Match 'reportExit = \[int\]\$LASTEXITCODE'
@@ -5824,6 +5827,8 @@ Describe 'Release supply-chain metadata' {
 
         $index = Get-Content -LiteralPath (Join-Path $metadataDirectory 'logverdict-supply-chain.json') -Raw | ConvertFrom-Json
         @($index.assets).Count | Should -Be 2
+        $index.sourceDirty | Should -BeFalse
+        $index.sourceRevision | Should -Match '^[0-9a-f]{40}$'
         $index.sourceManifestSha256 | Should -Match '^[0-9a-f]{64}$'
         $index.dependencyManifestSha256 | Should -Match '^[0-9a-f]{64}$'
         foreach ($asset in @($index.assets)) {
@@ -5837,6 +5842,44 @@ Describe 'Release supply-chain metadata' {
             $provenance.build.unsigned | Should -BeTrue
         }
         $generated.AssetCount | Should -Be 2
+    }
+
+    It 'rejects provenance generated from a dirty checkout' {
+        $assetDirectory = Join-Path $TestDrive 'dirty-assets'
+        $metadataDirectory = Join-Path $TestDrive 'dirty-metadata'
+        $null = New-Item -ItemType Directory -Path $assetDirectory
+        [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'LogVerdict.exe'), [byte[]](1, 2))
+        [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'LogVerdict-GUI.exe'), [byte[]](3, 4))
+        & $script:SupplyChainTool -Version $script:SupplyChainVersion -AssetDirectory $assetDirectory -OutputDirectory $metadataDirectory | Out-Null
+        $indexPath = Join-Path $metadataDirectory 'logverdict-supply-chain.json'
+        $index = Get-Content -LiteralPath $indexPath -Raw | ConvertFrom-Json
+        $index.sourceDirty = $true
+        $index | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $indexPath -Encoding UTF8
+        { & $script:SupplyChainVerifier -Version $script:SupplyChainVersion -MetadataDirectory $metadataDirectory -AssetDirectory $assetDirectory } |
+            Should -Throw '*Source checkout dirty state*'
+    }
+
+    It 'rejects a source manifest that omits a tracked file' {
+        $assetDirectory = Join-Path $TestDrive 'missing-source-assets'
+        $metadataDirectory = Join-Path $TestDrive 'missing-source-metadata'
+        $null = New-Item -ItemType Directory -Path $assetDirectory
+        [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'LogVerdict.exe'), [byte[]](1, 2))
+        [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'LogVerdict-GUI.exe'), [byte[]](3, 4))
+        & $script:SupplyChainTool -Version $script:SupplyChainVersion -AssetDirectory $assetDirectory -OutputDirectory $metadataDirectory | Out-Null
+        $manifestPath = Join-Path $metadataDirectory 'source-manifest.json'
+        $indexPath = Join-Path $metadataDirectory 'logverdict-supply-chain.json'
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $manifest.files = @($manifest.files | Select-Object -Skip 1)
+        $canonical = ((@($manifest.files) | ForEach-Object { '{0}|{1}|{2}' -f $_.path, $_.sha256, $_.bytes }) -join "`n") + "`n"
+        $hash = [Security.Cryptography.SHA256]::Create()
+        try { $manifest.sourceTreeSha256 = ([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)))).Replace('-', '').ToLowerInvariant() } finally { $hash.Dispose() }
+        $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+        $index = Get-Content -LiteralPath $indexPath -Raw | ConvertFrom-Json
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $index.sourceManifestSha256 = ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($manifestPath)))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+        $index | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $indexPath -Encoding UTF8
+        { & $script:SupplyChainVerifier -Version $script:SupplyChainVersion -MetadataDirectory $metadataDirectory -AssetDirectory $assetDirectory } |
+            Should -Throw '*Source manifest is missing tracked file*'
     }
 
     It 'rejects a release asset whose bytes no longer match the provenance record' {

@@ -70,6 +70,7 @@
         'Public\Watch-LogVerdict.ps1'
         'Data\advisories.json'
         'Data\advisories.schema.json'
+        'Data\build-dependencies.json'
         'Data\case-profile.schema.json'
         'Data\error-codes.json'
         'Data\error-codes.schema.json'
