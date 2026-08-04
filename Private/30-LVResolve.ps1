@@ -148,6 +148,83 @@ function Test-LVWindowsBuildMatch {
     return $true
 }
 
+function Get-LVSignatureInstalledKbs {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Signature)
+
+    $values = New-Object System.Collections.Generic.List[object]
+    foreach ($propertyName in @('InstalledKbs', 'InstalledKBs', 'HotFixIds', 'HotFixes')) {
+        if (-not $Signature.PSObject.Properties[$propertyName]) { continue }
+        foreach ($value in @($Signature.$propertyName)) {
+            if ($null -eq $value) { continue }
+            if ($value -is [string]) {
+                $values.Add($value) | Out-Null
+                continue
+            }
+            foreach ($field in @('HotFixID', 'HotFixId', 'KB', 'Kb', 'Id')) {
+                if ($value.PSObject.Properties[$field] -and $value.$field) {
+                    $values.Add([string]$value.$field) | Out-Null
+                    break
+                }
+            }
+        }
+    }
+
+    return @($values.ToArray() |
+        ForEach-Object { [string]$_ -replace '^\s+', '' -replace '\s+$', '' } |
+        Where-Object { $_ -match '^KB\d{5,}$' } |
+        ForEach-Object { $_.ToUpperInvariant() } |
+        Select-Object -Unique)
+}
+
+function Get-LVInstalledKbInventory {
+    [CmdletBinding()]
+    param()
+
+    $raw = @()
+    $queried = $false
+    if (Get-Command -Name Get-HotFix -ErrorAction SilentlyContinue) {
+        try {
+            $raw = @(Get-HotFix -ErrorAction Stop)
+            $queried = $true
+        } catch {
+            $raw = @()
+        }
+    }
+    if (-not $queried -and (Get-Command -Name Get-CimInstance -ErrorAction SilentlyContinue)) {
+        try {
+            $raw = @(Get-CimInstance -ClassName Win32_QuickFixEngineering -ErrorAction Stop)
+            $queried = $true
+        } catch {
+            $raw = @()
+        }
+    }
+    if (-not $queried) {
+        # Patch inventory is advisory context. A provider failure must not turn a
+        # scan into a guessed expiry decision; an empty inventory leaves the rule
+        # eligible and the finding explicit.
+        return @()
+    }
+
+    return @(Get-LVSignatureInstalledKbs -Signature ([pscustomobject]@{ HotFixes = $raw }))
+}
+
+function Test-LVRuleKbExpiry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Rule,
+        [Parameter(Mandatory)]$Signature
+    )
+
+    if (-not $Rule.PSObject.Properties['expiresWithKb'] -or -not $Rule.expiresWithKb) { return $true }
+    $installed = @(Get-LVSignatureInstalledKbs -Signature $Signature)
+    # Missing patch inventory is not evidence that the KB is installed. Keep the
+    # ruling eligible and let the report remain honest about the evidence it has.
+    if ($installed.Count -eq 0) { return $true }
+    $expiryKb = ([string]$Rule.expiresWithKb).ToUpperInvariant()
+    return ($installed -notcontains $expiryKb)
+}
+
 function Test-LVDatabaseProvenance {
     <#
         A live rule must be checkable by a reader. References and source records are
@@ -318,6 +395,23 @@ function Get-LVDatabaseTrustProblem {
                 $problems.Add([pscustomobject]@{ RuleId=$id; Problem='staleAfterDays must be a positive integer' }) | Out-Null
             }
         }
+        if (-not $rule.PSObject.Properties['modified'] -or [string]::IsNullOrWhiteSpace([string]$rule.modified)) {
+            if ([int]$Database.schemaVersion -ge 7) {
+                $problems.Add([pscustomobject]@{ RuleId=$id; Problem='schemaVersion 7 rules require modified date' }) | Out-Null
+            }
+        } else {
+            $modifiedOn = [datetime]::MinValue
+            $modifiedParsed = [datetime]::TryParseExact(
+                [string]$rule.modified, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::None, [ref]$modifiedOn)
+            if (-not $modifiedParsed) {
+                $problems.Add([pscustomobject]@{ RuleId=$id; Problem='modified must be an ISO date (yyyy-MM-dd)' }) | Out-Null
+            }
+        }
+        if ($rule.PSObject.Properties['expiresWithKb'] -and
+            [string]$rule.expiresWithKb -notmatch '^KB\d{5,}$') {
+            $problems.Add([pscustomobject]@{ RuleId=$id; Problem='expiresWithKb must be a KB identifier such as KB5062660' }) | Out-Null
+        }
         if ($rule.PSObject.Properties['windowsBuild']) {
             if (-not $rule.windowsBuild) {
                 $problems.Add([pscustomobject]@{ RuleId=$id; Problem='windowsBuild must declare min or max' }) | Out-Null
@@ -445,6 +539,24 @@ function Get-LVDatabaseTrustProblem {
         }
     }
 
+    foreach ($rule in @($Database.rules | Where-Object { $_ })) {
+        foreach ($related in @($rule.related | Where-Object { $_ })) {
+            $targetId = [string]$related.id
+            if (-not $targetId) {
+                $problems.Add([pscustomobject]@{ RuleId=[string]$rule.id; Problem='related entry requires a target id' }) | Out-Null
+            } elseif (-not $allIds.ContainsKey($targetId)) {
+                $problems.Add([pscustomobject]@{ RuleId=[string]$rule.id; Problem=("related target '{0}' is not a rule or correlation" -f $targetId) }) | Out-Null
+            } elseif ($targetId -eq [string]$rule.id) {
+                $problems.Add([pscustomobject]@{ RuleId=[string]$rule.id; Problem='related entry cannot point to itself' }) | Out-Null
+            }
+            if (-not $related.PSObject.Properties['type'] -or [string]::IsNullOrWhiteSpace([string]$related.type)) {
+                $problems.Add([pscustomobject]@{ RuleId=[string]$rule.id; Problem='related entry requires a type' }) | Out-Null
+            } elseif (@('derived', 'obsolete', 'merged', 'renamed', 'similar') -notcontains [string]$related.type) {
+                $problems.Add([pscustomobject]@{ RuleId=[string]$rule.id; Problem=("related type '{0}' is not supported" -f $related.type) }) | Out-Null
+            }
+        }
+    }
+
     return @($problems.ToArray())
 }
 
@@ -515,6 +627,8 @@ function Test-LVRuleMatch {
     # can be added later through the normal database path, but an extension never
     # gets a verdict merely because it happens to share an event ID or source.
     if ($Signature.PSObject.Properties['ProviderExtension'] -and $Signature.ProviderExtension) { return $false }
+
+    if (-not (Test-LVRuleKbExpiry -Rule $Rule -Signature $Signature)) { return $false }
 
     if (-not (Test-LVWindowsBuildMatch -Rule $Rule)) { return $false }
 

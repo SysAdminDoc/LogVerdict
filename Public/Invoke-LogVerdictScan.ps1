@@ -480,6 +480,15 @@ function Invoke-LogVerdictScan {
     $db = Get-LogVerdictDatabase -Path $DatabasePath
     $databaseFreshness = Get-LVDatabaseFreshnessSummary -Database $db -AsOf ([datetime]::UtcNow.Date)
     Write-LVLog -Level info -Message ('Applying {0} rule(s) from the verdict database...' -f @($db.rules).Count)
+    $installedKbs = @()
+    if (@($db.rules | Where-Object { $_.expiresWithKb }).Count -gt 0) {
+        $installedKbs = @(Get-LVInstalledKbInventory)
+        if ($installedKbs.Count -gt 0) {
+            foreach ($signature in @($signatures)) {
+                $signature | Add-Member -NotePropertyName 'InstalledKbs' -NotePropertyValue $installedKbs -Force
+            }
+        }
+    }
     $findings = Resolve-LVVerdict -Signature $signatures -Database $db
     $currentWindowsBuild = Get-LVCurrentWindowsBuild
     $suppressionSet = Import-LVSuppressionSet -Path $SuppressionPath
@@ -750,6 +759,7 @@ function Invoke-LogVerdictScan {
         DatabaseDate   = $db.updated
         RuleCount      = @($db.rules).Count
         DatabaseFreshness = $databaseFreshness
+        InstalledKbs   = @($installedKbs)
         ScanOptions    = [ordered]@{
             channelMode = $channelMode
             channels = @($channels)

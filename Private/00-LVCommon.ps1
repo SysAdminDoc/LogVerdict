@@ -16,7 +16,7 @@ $script:LVVerdictRank = @{
 # than the code knows about is a hard failure, not a best effort: silently mis-reading
 # rules would produce confident rulings from fields the code never looked at.
 $script:LVSchemaVersionMin = 1
-$script:LVSchemaVersionMax = 6
+$script:LVSchemaVersionMax = 7
 
 # How many occurrence timestamps a single signature retains for correlation. Past
 # this the signature is a continuous stream rather than a set of incidents, and
@@ -142,7 +142,7 @@ $script:LVShortHashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
 # A ruling that asserts "Microsoft says ignore this" is only as good as the day it was
 # checked. Rules older than this without re-verification are reported as stale.
 $script:LVVerificationMaxAgeMonths = 24
-$script:LVDefaultStaleAfterDays = 730
+$script:LVDefaultStaleAfterDays = 180
 
 # The machine's UI language, captured once. Rules whose messagePattern is matched
 # against localized event text declare the locale they were written for, and are
@@ -1153,6 +1153,7 @@ function Assert-LVRedactedResultShape {
         'SuppressionStatus',
         'SetupDiag', 'Horizon', 'HorizonWarning', 'Stability', 'ReliabilityAvailable',
         'DatabaseName', 'DatabaseDate', 'RuleCount', 'DatabaseFreshness', 'ScanOptions',
+        'InstalledKbs',
         'CollectionBudget', 'CaseProfile', 'ModelExplanationsEnabled', 'ModelExplanationCount',
         'PromotedDraftRules', 'History', 'AdvisoryStatus', 'AdvisoryCache', 'Advisories',
         'WorstVerdict', 'ExitCode', 'EvidencePath', 'EvidenceManifest', 'Records',

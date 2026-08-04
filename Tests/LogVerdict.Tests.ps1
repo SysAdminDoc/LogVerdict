@@ -1013,12 +1013,13 @@ Describe 'Verdict database' {
         foreach ($rule in (Get-LogVerdictDatabase).rules) {
             $rule.status | Should -Not -BeNullOrEmpty -Because "rule $($rule.id) must declare its lifecycle"
             $rule.verified | Should -Match '^\d{4}-\d{2}-\d{2}$' -Because "rule $($rule.id) must record when its guidance was last checked"
+            $rule.modified | Should -Match '^\d{4}-\d{2}-\d{2}$' -Because "rule $($rule.id) must record when its content last changed"
         }
     }
 
     It 'declares the freshness policy and supports per-rule build and age bounds' {
         $database = Get-LogVerdictDatabase
-        $database.freshness.maxAgeDays | Should -Be 730
+        $database.freshness.maxAgeDays | Should -Be 180
         $database.freshness.dateBasis | Should -BeExactly 'UTC'
 
         InModuleScope LogVerdict {
@@ -1033,8 +1034,8 @@ Describe 'Verdict database' {
                 references = @('https://example.invalid/freshness')
             }
             $db = [pscustomobject]@{
-                schemaVersion = 6; name = 'freshness'; updated = $today.ToString('yyyy-MM-dd')
-                freshness = [pscustomobject]@{ maxAgeDays = 730; dateBasis = 'UTC' }
+                schemaVersion = 7; name = 'freshness'; updated = $today.ToString('yyyy-MM-dd')
+                freshness = [pscustomobject]@{ maxAgeDays = 180; dateBasis = 'UTC' }
                 rules = @($rule); correlations = @()
             }
             $summary = Get-LVDatabaseFreshnessSummary -Database $db -AsOf $today
@@ -1053,6 +1054,58 @@ Describe 'Verdict database' {
             $outOfRange.Verdict | Should -BeExactly 'unknown'
             $outOfRange.RuleId | Should -BeNullOrEmpty
         }
+    }
+
+    It 'expires a pre-fix benign ruling when its resolving KB is present' {
+        InModuleScope LogVerdict {
+            $database = Get-LogVerdictDatabase
+            $rule = @($database.rules | Where-Object id -eq 'LV-0341')[0]
+            $signature = [pscustomobject]@{
+                Key = 'event|Microsoft-Windows-Windows Firewall With Advanced Security|2042'
+                Source = 'event'; Channel = 'System'
+                Provider = 'Microsoft-Windows-Windows Firewall With Advanced Security'; Id = 2042
+                SampleMessage = 'Config Read Failed: the firewall policy could not be read.'
+                Count = 1; PerDay = 1; InstalledKbs = @()
+            }
+            $ruleDb = [pscustomobject]@{ rules = @($rule); correlations = @(); freshness = $database.freshness }
+            $before = @(Resolve-LVVerdict -Signature @($signature) -Database $ruleDb)[0]
+            $before.RuleId | Should -BeExactly 'LV-0341'
+            $before.Verdict | Should -BeExactly 'benign'
+
+            $signature.InstalledKbs = @('KB5062660')
+            $after = @(Resolve-LVVerdict -Signature @($signature) -Database $ruleDb)[0]
+            $after.RuleId | Should -BeNullOrEmpty
+            $after.Verdict | Should -BeExactly 'unknown'
+        }
+    }
+
+    It 'reports a backdated shipped rule before a clean freshness run is trusted' {
+        InModuleScope LogVerdict {
+            $raw = Get-Content -LiteralPath (Join-Path $script:LVDataDir 'verdicts.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            $candidate = @($raw.rules | Where-Object { Test-LVRuleActive -Rule $_ } | Select-Object -First 1)[0]
+            $candidate.verified = '2000-01-01'
+            $path = Join-Path $TestDrive 'backdated-verdicts.json'
+            $raw | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
+
+            $problems = @(Test-LogVerdictDatabase -Path $path -SkipFixture)
+            @($problems | Where-Object { $_.RuleId -eq $candidate.id -and $_.Problem -like '*older than*' }).Count | Should -Be 1
+
+            $loaded = Get-LogVerdictDatabase -Path $path
+            $freshness = Get-LVDatabaseFreshnessSummary -Database $loaded -AsOf ([datetime]::UtcNow.Date)
+            $freshness.StaleRuleCount | Should -Be 1
+            $freshness.StaleRules[0].RuleId | Should -BeExactly $candidate.id
+        }
+    }
+
+    It 'requires lifecycle metadata and resolves typed supersession links' {
+        $database = Get-LogVerdictDatabase
+        @($database.rules | Where-Object { -not $_.modified }).Count | Should -Be 0
+        @($database.rules | Where-Object { $_.staleAfterDays }).Count | Should -BeGreaterThan 0
+        @($database.rules | Where-Object { $_.windowsBuild }).Count | Should -BeGreaterThan 0
+        @($database.rules | Where-Object status -eq 'experimental').Count | Should -BeGreaterThan 0
+        @($database.rules | Where-Object status -eq 'deprecated').Count | Should -BeGreaterThan 0
+        @($database.rules | Where-Object related).Count | Should -BeGreaterThan 0
+        @(Test-LogVerdictDatabase | Where-Object { $_.Problem -like '*related*' }).Count | Should -Be 0
     }
 
     It 'refuses a schema version this build does not understand' {
@@ -1111,6 +1164,9 @@ Describe 'Verdict database' {
         $schema.properties.freshness.properties.dateBasis.const | Should -BeExactly 'UTC'
         $schema.definitions.rule.properties.staleAfterDays.minimum | Should -Be 1
         $schema.definitions.rule.properties.windowsBuild.properties.min.minimum | Should -Be 1
+        $schema.definitions.rule.properties.modified.description | Should -Match 'title.*detection.*deprecated'
+        $schema.definitions.rule.properties.related.items.properties.type.enum | Should -Contain 'obsolete'
+        $schema.definitions.rule.properties.expiresWithKb.pattern | Should -BeExactly '^KB\d{5,}$'
 
         InModuleScope LogVerdict -Parameters @{ sv = $schemaVerdicts; ss = $schemaStatuses; sc = $schemaConfidence } {
             param($sv, $ss, $sc)

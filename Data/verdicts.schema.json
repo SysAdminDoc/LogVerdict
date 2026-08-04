@@ -15,8 +15,8 @@
     "schemaVersion": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 6,
-      "description": "Loading a version this build does not understand is a hard failure, not a best effort. v3 adds per-rule sources[] so attribution obligations travel with the rule. v4 adds the 'reliability' match source, v5 adds correlations[], and v6 adds the bounded structured EventData/UserData condition subset."
+      "maximum": 7,
+      "description": "Loading a version this build does not understand is a hard failure, not a best effort. v3 adds per-rule sources[] so attribution obligations travel with the rule. v4 adds the 'reliability' match source, v5 adds correlations[], v6 adds the bounded structured EventData/UserData condition subset, and v7 adds lifecycle modified dates, typed supersession links, and resolving-KB expiry."
     },
     "name": {
       "type": "string",
@@ -79,6 +79,11 @@
         "verified": {
           "type": "string",
           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "modified": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "Last content change date. Bump this when title, detection, verdict level, logsource/match, or status changes to deprecated; a verification-only review changes verified instead."
         },
         "correlation": {
           "$ref": "#/definitions/correlation"
@@ -195,6 +200,11 @@
           "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
           "description": "When this ruling was last checked against reality. Guidance ages; the validator reports rules older than the declared freshness threshold."
         },
+        "modified": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "Last content change date. Bump this when title, detection, verdict level, logsource/match, or status changes to deprecated; a verification-only review changes verified instead."
+        },
         "staleAfterDays": {
           "type": "integer",
           "minimum": 1,
@@ -209,6 +219,11 @@
             "min": { "type": "integer", "minimum": 1 },
             "max": { "type": "integer", "minimum": 1 }
           }
+        },
+        "expiresWithKb": {
+          "type": "string",
+          "pattern": "^KB\\d{5,}$",
+          "description": "Optional resolving-KB expiry. When the scan evidence includes this installed KB, the rule is no longer eligible to assert its pre-fix ruling."
         },
         "locale": {
           "type": "string",
@@ -279,6 +294,7 @@
         },
         "related": {
           "type": "array",
+          "description": "Typed supersession graph. Keep a retired id and point it at the replacement with derived, obsolete, merged, renamed, or similar rather than silently reusing the id.",
           "items": {
             "type": "object",
             "required": [

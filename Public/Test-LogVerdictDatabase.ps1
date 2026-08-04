@@ -70,6 +70,7 @@ function Test-LogVerdictDatabase {
     # Provenance is only required from the schema version that introduced it, so a
     # hand-written v1 local database keeps validating.
     if ($schemaVersion -ge 2) { $required += @('status', 'verified') }
+    if ($schemaVersion -ge 7) { $required += @('modified') }
 
     foreach ($rule in $db.rules) {
         $id = $rule.id
@@ -156,6 +157,22 @@ function Test-LogVerdictDatabase {
                     $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("last verified {0}, older than the {1}-day freshness threshold; re-verify or mark deprecated" -f $rule.verified, $freshness.StaleAfterDays) }) | Out-Null
                 }
             }
+        }
+
+        if ($rule.PSObject.Properties['modified']) {
+            $modifiedOn = [datetime]::MinValue
+            $modifiedParsed = [datetime]::TryParseExact(
+                [string]$rule.modified, 'yyyy-MM-dd',
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::None, [ref]$modifiedOn)
+            if (-not $modifiedParsed) {
+                $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("modified '{0}' is not an ISO date (yyyy-MM-dd)" -f $rule.modified) }) | Out-Null
+            }
+        }
+
+        if ($rule.PSObject.Properties['expiresWithKb'] -and
+            [string]$rule.expiresWithKb -notmatch '^KB\d{5,}$') {
+            $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'expiresWithKb must be a KB identifier such as KB5062660' }) | Out-Null
         }
 
         if ($null -ne $rule.falsepositives -and $rule.falsepositives -isnot [array] -and $rule.falsepositives -isnot [System.Collections.IEnumerable]) {

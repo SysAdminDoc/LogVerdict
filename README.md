@@ -509,11 +509,15 @@ redacted artifact. A freshness-qualified report also gives every unknown item a 
 or an automatic promotion. `Tools\Import-LogVerdictReviewArtifact.ps1` validates that
 contract and emits a diff only; it does not promote accepted material automatically.
 
-Rule freshness is explicit and UTC-based. `Data\verdicts.json` declares a 730-day default through `freshness.maxAgeDays`;
-a rule may override it with `staleAfterDays` and may restrict matching to an inclusive `windowsBuild.min` / `windowsBuild.max`
-range. Stale active rules remain visible and continue to match, but the console/HTML report and GUI Coverage page call
-out that their guidance needs re-verification. The contribution issue form is YAML-only and requires a source URI and
-retrieval date before a test rule can be proposed.
+Rule freshness is explicit and UTC-based. `Data\verdicts.json` declares a 180-day default through `freshness.maxAgeDays`;
+volatile rules override it with `staleAfterDays`, and build-specific rulings declare an inclusive `windowsBuild.min` /
+`windowsBuild.max` range. Every shipped rule records both `verified` and `modified`: bump `modified` when title, detection,
+verdict level, logsource/match, or deprecation changes, and bump `verified` after an individual reality check. Typed
+`related` links preserve supersession without reusing an id. A ruling may declare `expiresWithKb`; when the scan or offline
+evidence carries that installed update, the ruling is no longer eligible to assert its pre-fix explanation. Stale active
+rules remain visible and continue to match, but the console/HTML report and GUI Coverage page call out that their guidance
+needs re-verification. The contribution issue form is YAML-only and requires a source URI and retrieval date before a test
+rule can be proposed.
 
 `match` accepts `source`, `channel`, `provider` (trailing `*` wildcard allowed), `eventId`, `messagePattern` (regex), and `eventData`. Prefer `eventData` whenever the ruling depends on a payload field: rendered Windows messages can be localized while XML values such as HRESULTs remain stable. A structured condition looks like `{"all":[{"field":"EventData.Image","endswith":"\\\\powershell.exe"}]}`; supported modifiers are `equals`, `contains`, `startswith`, `endswith`, and `regex`, combined through bounded `all`, `any`, and `not` conditions. Unsupported Sigma modifiers remain inactive importer candidates. More match keys means higher specificity, and the most specific matching rule wins.
 
@@ -570,7 +574,7 @@ Invoke-Pester -Path .\Tests
 
 ## Honest limitations
 
-- **Coverage is the roadmap.** 192 rules ship, alongside a 3,157-entry typed Microsoft error and stop-code catalog. A first scan will still report `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
+- **Coverage is the roadmap.** 194 rules ship, alongside a 3,157-entry typed Microsoft error and stop-code catalog. A first scan will still report `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
 - **Crash-stack analysis is bounded.** LogVerdict reads the bug-check code and four parameters from supported kernel dump headers, but naming the responsible driver still needs a debugger and symbols. Unsupported, truncated or access-controlled dumps remain inventoried with the reason they were not decoded.
 - **A clean result is not proof of health.** An in-place upgrade or a cleared log resets the event channels, so the report states each channel's oldest surviving record and warns when that horizon falls inside the requested window.
 - Offline review is bounded by what the bundle captured. Exported event channels are re-read in full, while text logs and Reliability Monitor are re-evaluated from the signature summaries in the source report rather than copied wholesale.

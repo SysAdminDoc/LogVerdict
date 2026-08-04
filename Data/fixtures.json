@@ -2440,6 +2440,18 @@
         "Id": 2004,
         "SampleMessage": "Windows successfully diagnosed a low virtual memory condition."
       }
+    },
+    {
+      "ruleId": "LV-0341",
+      "origin": "constructed",
+      "expect": "benign",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-Windows Firewall With Advanced Security",
+        "Id": 2042,
+        "SampleMessage": "Config Read Failed: the firewall policy could not be read."
+      }
     }
   ]
 }

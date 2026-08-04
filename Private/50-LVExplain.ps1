@@ -284,6 +284,7 @@ function ConvertTo-LVModelDraftRule {
         id             = ('LOCAL-DRAFT-{0}' -f (Get-LVShortHash -Text ([string]$Finding.Key))).ToUpperInvariant()
         status         = 'unsupported'
         verified       = (Get-Date).ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        modified       = (Get-Date).ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
         match          = $match
         verdict        = 'unknown'
         title          = ('[DRAFT] {0}' -f $Finding.Key)

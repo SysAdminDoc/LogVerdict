@@ -725,6 +725,13 @@ function Invoke-LVOfflineScan {
         $db = Get-LogVerdictDatabase -Path $DatabasePath
         $databaseFreshness = Get-LVDatabaseFreshnessSummary -Database $db -AsOf ([datetime]::UtcNow.Date)
         Write-LVLog -Level info -Message ('Applying {0} rule(s) from the verdict database...' -f @($db.rules).Count)
+        $offlineInstalledKbs = @()
+        if ($sourceReport -and $sourceReport.PSObject.Properties['InstalledKbs'] -and $sourceReport.InstalledKbs) {
+            $offlineInstalledKbs = @(Get-LVSignatureInstalledKbs -Signature ([pscustomobject]@{ InstalledKbs = $sourceReport.InstalledKbs }))
+            foreach ($signature in @($signatures)) {
+                $signature | Add-Member -NotePropertyName 'InstalledKbs' -NotePropertyValue $offlineInstalledKbs -Force
+            }
+        }
         $findings = @(Resolve-LVVerdict -Signature $signatures -Database $db)
         $evidenceMachine = '(offline evidence)'
         if ($sourceReport -and $sourceReport.MachineName) { $evidenceMachine = [string]$sourceReport.MachineName }
@@ -938,6 +945,7 @@ function Invoke-LVOfflineScan {
             DatabaseDate   = $db.updated
             RuleCount      = @($db.rules).Count
             DatabaseFreshness = $databaseFreshness
+            InstalledKbs   = @($offlineInstalledKbs)
             ScanOptions    = [ordered]@{
                 channels = @($channels)
                 skipTextLogs = [bool]$SkipTextLogs
