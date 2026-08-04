@@ -164,6 +164,24 @@ Describe 'Case profiles and responder handoffs' {
     }
 }
 
+Describe 'CI gate wiring' {
+    BeforeAll {
+        $root = Split-Path $PSScriptRoot -Parent
+        $script:CiWorkflow = Get-Content -LiteralPath (Join-Path $root '.github\workflows\ci.yml') -Raw
+    }
+
+    It 'pins actions, runs analyzer on both quality legs, and verifies supply-chain metadata directly' {
+        $script:CiWorkflow | Should -Not -Match 'actions/(checkout|upload-artifact)@v\d'
+        ([regex]::Matches($script:CiWorkflow, 'actions/checkout@[0-9a-f]{40}')).Count | Should -Be 2
+        ([regex]::Matches($script:CiWorkflow, 'actions/upload-artifact@[0-9a-f]{40}')).Count | Should -Be 3
+        $script:CiWorkflow | Should -Match 'name: Run analyzer\r?\n\s+shell: \$\{\{ matrix\.shell \}\}'
+        $script:CiWorkflow | Should -Not -Match 'name: Run analyzer\r?\n\s+if:'
+        $script:CiWorkflow | Should -Match 'name: Verify supply-chain metadata directly'
+        $script:CiWorkflow | Should -Match 'Tools\\Test-LogVerdictSupplyChain\.ps1'
+        $script:CiWorkflow | Should -Match 'if \(-not \$\?\) \{ exit 1 \}'
+    }
+}
+
 
 Describe 'Module surface' {
     It 'exports exactly the documented public functions' {

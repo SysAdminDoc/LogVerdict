@@ -105,6 +105,7 @@ function Show-LogVerdictGui {
         Timer      = $null
         Sink       = $null
         SmokeHoldUntil = $null
+        ScanStartedAt = $null
         Search     = ''
         ReportDir  = $null
         HtmlPath   = $null
@@ -353,6 +354,7 @@ function Show-LogVerdictGui {
         param($Result)
 
         $state.Result = $Result
+        $state.ScanStartedAt = $null
         $state.FindingStore = @($Result.Findings)
         $ui.BtnCopySummary.IsEnabled = $true
         $correlationIdsByKey = @{}
@@ -621,6 +623,7 @@ function Show-LogVerdictGui {
     $ui.ChkIncludeBenign.IsChecked = $initialIncludeBenign
     $ui.TxtSideMachine.Text = $env:COMPUTERNAME
     $ui.TxtOverviewDays.Text = [string]$initialDays
+    $ui.TxtOverviewTimingHint.Text = Get-LVGuiScanTimingHint -DaysBack $initialDays
     $ui.ChkOverviewAllChannels.IsChecked = $initialAllChannels
     $ui.ChkOverviewIncludeText.IsChecked = -not $initialSkipText
     $ui.ChkOverviewIncludeBenign.IsChecked = $initialIncludeBenign
@@ -667,6 +670,10 @@ function Show-LogVerdictGui {
 
     $syncOverviewOptions = {
         $ui.TxtDays.Text = $ui.TxtOverviewDays.Text
+        $hintDays = 30
+        if ([int]::TryParse($ui.TxtOverviewDays.Text.Trim(), [ref]$hintDays) -and $hintDays -ge 1 -and $hintDays -le 3650) {
+            $ui.TxtOverviewTimingHint.Text = Get-LVGuiScanTimingHint -DaysBack $hintDays
+        }
         $ui.ChkAllChannels.IsChecked = [bool]$ui.ChkOverviewAllChannels.IsChecked
         $ui.ChkSkipText.IsChecked = -not [bool]$ui.ChkOverviewIncludeText.IsChecked
         $ui.ChkIncludeBenign.IsChecked = [bool]$ui.ChkOverviewIncludeBenign.IsChecked
@@ -674,6 +681,7 @@ function Show-LogVerdictGui {
 
     $resetOverviewOptions = {
         $ui.TxtOverviewDays.Text = '30'
+        $ui.TxtOverviewTimingHint.Text = Get-LVGuiScanTimingHint -DaysBack 30
         $ui.ChkOverviewAllChannels.IsChecked = $false
         $ui.ChkOverviewIncludeText.IsChecked = $true
         $ui.ChkOverviewDiagnosticChannels.IsChecked = $false
@@ -933,6 +941,8 @@ function Show-LogVerdictGui {
         $ui.BtnActivitySave.IsEnabled = $false
         $ui.TxtActivityReportState.Text = 'Not saved yet'
         $ui.PnlEmpty.Visibility = 'Collapsed'
+        $state.Result = $null
+        $state.ScanStartedAt = $null
 
         $scanArgs = @{
             DaysBack      = $days
@@ -966,6 +976,7 @@ function Show-LogVerdictGui {
 
         try {
             $state.Job = Start-LVScanJob -ScanArgs $scanArgs -LogSink $state.Sink
+            $state.ScanStartedAt = Get-Date
             $state.SmokeHoldUntil = $null
             $holdMilliseconds = 0
             if ([int]::TryParse([string]$env:LOGVERDICT_GUI_SMOKE_HOLD_MS, [ref]$holdMilliseconds) -and $holdMilliseconds -gt 0) {
@@ -975,6 +986,7 @@ function Show-LogVerdictGui {
                 $state.SmokeHoldUntil = (Get-Date).AddMilliseconds([Math]::Min(30000, $holdMilliseconds))
             }
         } catch {
+            $state.ScanStartedAt = $null
             & $setStatus ('Could not start the scan: {0}' -f $_.Exception.Message)
             return
         }
@@ -987,13 +999,21 @@ function Show-LogVerdictGui {
 
     $ui.BtnCancel.Add_Click({
         if (-not $state.Scanning) { return }
+        $elapsed = if ($state.ScanStartedAt) { ((Get-Date) - $state.ScanStartedAt).TotalSeconds } else { 0 }
         $state.Timer.Stop()
         Stop-LVScanJob -Job $state.Job -Confirm:$false
         $state.Job = $null
+        $state.ScanStartedAt = $null
+        & $drainLog
         & $setScanning $false
-        & $setStatus 'Scan cancelled. Nothing on this machine was changed.'
-        $ui.TxtActivityState.Text = 'Cancelled'
-        $ui.TxtActivityHeadline.Text = 'The scan was cancelled. Nothing was changed.'
+        & $appendLog 'warn' ('{0:yyyy-MM-dd HH:mm:ss}' -f (Get-Date)) ('Scan cancelled after {0:N1}s; coverage is partial and no report was saved.' -f $elapsed)
+        & $setStatus 'Scan cancelled. Partial coverage is shown in Activity; nothing on this machine was changed.'
+        $ui.TxtActivityState.Text = 'Cancelled - partial coverage'
+        $ui.TxtActivityHeadline.Text = 'The scan was cancelled before completion. Partial coverage is shown; nothing was changed.'
+        $ui.TxtActivityDuration.Text = '{0:N1}s (cancelled)' -f $elapsed
+        $ui.TxtOverviewScanTime.Text = 'Cancelled after {0:N1}s; partial coverage' -f $elapsed
+        $ui.TxtOverviewCoverage.Text = 'Partial coverage - cancelled before completion; no report was saved.'
+        $ui.TxtActivityReportState.Text = 'Not saved - scan cancelled'
     })
 
     $ui.BtnSaveReport.Add_Click({
@@ -1073,6 +1093,11 @@ function Show-LogVerdictGui {
     $timer.Add_Tick({
         & $drainLog
 
+        if ($state.Scanning -and $state.ScanStartedAt) {
+            $elapsed = ((Get-Date) - $state.ScanStartedAt).TotalSeconds
+            $ui.TxtActivityDuration.Text = '{0:N1}s (running)' -f $elapsed
+            $ui.TxtOverviewScanTime.Text = 'Running for {0:N1}s...' -f $elapsed
+        }
         if ($null -eq $state.Job) { $timer.Stop(); return }
         if (-not $state.Job.Async.IsCompleted) { return }
         if ($state.SmokeHoldUntil -and (Get-Date) -lt $state.SmokeHoldUntil) { return }
@@ -1093,6 +1118,7 @@ function Show-LogVerdictGui {
             & $drainLog
             & $setScanning $false
             & $appendLog 'error' ('{0:yyyy-MM-dd HH:mm:ss}' -f (Get-Date)) ([string]$_.Exception.Message)
+            $state.ScanStartedAt = $null
             & $setStatus ('Scan failed: {0}' -f $_.Exception.Message)
             $ui.TxtActivityState.Text = 'Failed'
             $ui.TxtActivityHeadline.Text = 'The scan did not finish'
@@ -1126,6 +1152,7 @@ function Show-LogVerdictGui {
             Stop-LVScanJob -Job $state.Job -Confirm:$false
             $state.Job = $null
         }
+        $state.ScanStartedAt = $null
     })
 
     if ($AutoScan) {

@@ -17,6 +17,28 @@ $script:LVVerdictPalette = @{
 # Chip order in the sidebar, worst first, matching the report's ordering.
 $script:LVVerdictDisplayOrder = @('critical', 'actionable', 'investigate', 'unknown', 'informational', 'benign')
 
+function Get-LVGuiScanTimingHint {
+    <#
+        Return honest, look-back-specific scan guidance for the Overview page.
+        Collection is bounded and read-only, but all-channel sweeps can still take
+        longer than a focused one-day run; the copy should set that expectation before
+        the operator presses Run scan.
+    #>
+    [CmdletBinding()]
+    param([ValidateRange(1, 3650)][int]$DaysBack = 30)
+
+    $range = if ($DaysBack -le 1) {
+        'under 30 seconds'
+    } elseif ($DaysBack -le 7) {
+        '30-90 seconds'
+    } elseif ($DaysBack -le 30) {
+        '1-3 minutes'
+    } else {
+        '2-5 minutes'
+    }
+    return ('Typical {0}-day scan: {1}. All-channel sweeps can take longer.' -f $DaysBack, $range)
+}
+
 function Get-LVGuiSettingsPath {
     <#
         .SYNOPSIS
@@ -360,7 +382,7 @@ $script:LVGuiElement = @(
     'TxtOverviewOutputDir', 'BtnOverviewBrowseOutput', 'ChkOverviewRedact',
     'ChkOverviewEvidence', 'BtnResetSettings', 'TxtSettingsStatus',
     'BtnOverviewScan', 'BtnOverviewCancel',
-    'TxtOverviewLastVerdict', 'TxtOverviewFindingCount', 'TxtOverviewScanTime',
+    'TxtOverviewLastVerdict', 'TxtOverviewFindingCount', 'TxtOverviewScanTime', 'TxtOverviewTimingHint',
     'PnlOverviewSummary', 'TxtOverviewRecords', 'TxtOverviewSignatures',
     'TxtOverviewReduction', 'TxtOverviewRules',
     'TxtOverviewCritical', 'TxtOverviewActionable', 'TxtOverviewInvestigate',

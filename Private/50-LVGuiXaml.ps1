@@ -774,8 +774,9 @@ function Get-LVGuiXaml {
                           Padding="18,9"/>
                   <Button x:Name="BtnOverviewCancel" Style="{StaticResource BaseButton}" Content="Cancel"
                           Margin="9,0,0,0" Visibility="Collapsed"/>
-                  <TextBlock Text="Usually completes in a few moments" Margin="14,0,0,0"
-                             VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}" FontSize="11"/>
+                  <TextBlock x:Name="TxtOverviewTimingHint" Text="Typical 30-day scan: 1-3 minutes. All-channel sweeps can take longer."
+                             Margin="14,0,0,0" VerticalAlignment="Center"
+                             Foreground="{DynamicResource TextMuted}" FontSize="11"/>
                 </StackPanel>
               </StackPanel>
             </Border>
