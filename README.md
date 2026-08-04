@@ -110,6 +110,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Default, focused, all, or named event channels | Focused/all switches or Named event channels | `-DiagnosticChannels`, `-AllChannels`, `-Channel` |
 | Setup logs, Reliability Monitor, harmless findings | Source switches | `-SkipTextLogs`, `-SkipReliability`, `-IncludeBenign` |
 | Rule-level incidents and confidence gate | Incidents group matching signatures; low-confidence rulings stay hidden unless requested | `-IncludeLowConfidence` |
+| Expiring suppression expectations | Per-machine, build/app-scoped expectations keep findings counted, distinguish hide from downgrade, and report unmatched or review-due entries | `-SuppressionPath`, `-SuppressedOnly` |
 | Alternate complete rule database | Rules path / picker | `-DatabasePath` |
 | Report destination, identifier masking, evidence bundle | Report folder, masking toggle, and evidence toggle (raw event channels when masking is off) | `-OutputDir`, `-Redact`, `-IncludeEvidence`; `-AllowRawEvidence` remains an explicit console-only override |
 | Offline evidence re-evaluation | Console-only batch/review workflow | `-EvidencePath` |
@@ -141,6 +142,8 @@ LogVerdict.exe -DiagnosticChannels              add six focused operational chan
 LogVerdict.exe -DaysBack 7 -AllChannels         narrower window, every populated channel
 LogVerdict.exe -IncludeBenign                   show the signatures ruled harmless too
 LogVerdict.exe -IncludeLowConfidence             include curated low-confidence rulings
+LogVerdict.exe -SuppressionPath C:\Temp\lv\suppressions.json  apply scoped expectations with 90-day review
+LogVerdict.exe -SuppressedOnly -SuppressionPath C:\Temp\lv\suppressions.json  print the validated expectation set
 LogVerdict.exe -NoReport                        console only, write nothing
 LogVerdict.exe -OutputDir C:\Temp\lv             choose where reports land
 LogVerdict.exe -Redact                          mask identifiers before writing
@@ -162,6 +165,28 @@ LogVerdict.exe -AdvisoryPackage PowerShell -AdvisoryVersion 7.4.0  match the shi
 `-Format Markdown` writes `LogVerdict-Ticket-Summary.md`, a bounded paste-ready handoff that leads with the worst verdict, the records-to-signatures suppression count, incident suppression, incidents needing attention and their one-line actions, the tool/rule-database versions, and coverage caveats. The Findings page has **Copy summary for ticket**, which uses the same projection; its redaction state follows the **Redact reports and clipboard** toggle. The summary contains no raw evidence and stays below 24 MiB even when fed an unusually large result object.
 
 Resolved signatures remain in `$r.Findings` for compatibility and correlation analysis. Reader-facing output uses `$r.Incidents`: signatures sharing a `RuleId` become one incident with constituent keys, combined occurrence count, and distinct result/extend/error codes. `$r.IncidentSummary.SuppressionRatio` is the fraction of signatures grouped into incidents. Low-confidence rules are excluded from the default scan result; pass `-IncludeLowConfidence` when reviewing them explicitly. Unknown signatures have confidence `none` and are never hidden by this gate.
+
+Suppression expectations are a local, reviewable baseline rather than a mute switch. `-SuppressionPath` loads a `LogVerdict.Suppressions` JSON document (or the per-user `%LOCALAPPDATA%\LogVerdict\suppressions.json` when present). Each entry must include an `id`, a narrower scope containing the SHA-256 of the finding `Key`, the machine name, and either the Windows build or app version, a plain-language `statement`, and `created`. `action: "hide"` removes a finding from reader-facing incident lists but leaves it in `$r.Findings`, signature totals, JSON, and standard exports with `Suppressed: true`; `action: "downgrade"` keeps it visible and lowers the verdict. An omitted `expiresOn` becomes a 90-day review deadline, while a malformed date is a hard validation error. Every report lists active entries that matched nothing and entries that expired or reached review. Use `-SuppressedOnly` to validate and print the set without collecting logs.
+
+Example shape (replace the placeholder hash with the lowercase SHA-256 of the exact finding `Key`):
+
+```json
+{
+  "schemaVersion": 1,
+  "name": "LogVerdict.Suppressions",
+  "entries": [
+    {
+      "id": "SUP-2026-001",
+      "scope": { "signatureHash": "0000000000000000000000000000000000000000000000000000000000000000", "machine": "HELPDESK-01", "windowsBuild": "26100" },
+      "action": "downgrade",
+      "downgradeTo": "informational",
+      "statement": "Approved vendor noise during the signed agent upgrade.",
+      "created": "2026-08-03T00:00:00Z",
+      "expiresOn": "2026-11-01T00:00:00Z"
+    }
+  ]
+}
+```
 
 `-HistoryPath` opts into a local JSON history containing at most 30 recent scan summaries. It stores stable signature keys, counts, rates, verdict labels, and rule ids, not messages, paths, machine names, or account identifiers. `-HistoryWindowDays` bounds which prior scans are compared (default 30). Reports state the baseline method, comparison window, thresholds, missing-history state, and false-positive caveat. A trend signal is advisory only: it cannot raise a finding's verdict, `WorstVerdict`, or exit code.
 
@@ -325,6 +350,9 @@ Import-Module .\LogVerdict.psd1
 $r = Invoke-LogVerdictScan -DaysBack 30
 $focused = Invoke-LogVerdictScan -DaysBack 30 -DiagnosticChannels
 $withLowConfidence = Invoke-LogVerdictScan -DaysBack 30 -IncludeLowConfidence
+$suppressed = Invoke-LogVerdictScan -DaysBack 30 -SuppressionPath "$env:LOCALAPPDATA\LogVerdict\suppressions.json"
+$expectations = Invoke-LogVerdictScan -SuppressedOnly -SuppressionPath "$env:LOCALAPPDATA\LogVerdict\suppressions.json"
+$validatedExpectations = Get-LogVerdictSuppression -Path "$env:LOCALAPPDATA\LogVerdict\suppressions.json"
 $drafted = Invoke-LogVerdictScan -DaysBack 30 -ExplainUnknown -OllamaModel llama3.2
 $historical = Invoke-LogVerdictScan -DaysBack 30 -HistoryPath "$env:LOCALAPPDATA\LogVerdict\history.json"
 $advisories = Get-LogVerdictAdvisory -Package PowerShell -Version 7.4.0
@@ -367,6 +395,9 @@ with `level`, `message`, `occurrenceCount`, and `partialFingerprints` keyed by t
 LogVerdict signature. Event findings use `logicalLocations`; CBS and DISM findings use
 the corresponding log file with a matched-line `region`. Scan coverage, privacy,
 health, advisory, and correlation context remains available in SARIF property bags.
+Suppressed findings also carry SARIF `suppressions[]`, an `unchanged` `baselineState`,
+and the expectation id/action/statement. `expiresOn` and the 90-day review date are
+stored under suppression properties because SARIF defines no expiry field.
 
 `-Format Jsonl` uses the same versioned privacy and provenance envelope but writes a
 streaming timeline instead of an adapter document. It includes metadata, normalized event
@@ -394,6 +425,10 @@ Compare-LogVerdictScan `
   -Before .\before\LogVerdict-Report.json `
   -After  .\after\LogVerdict-Report.json
 ```
+
+The comparison also emits `suppressed`, `unsuppressed`, and `downgraded` transitions
+when an expectation changes the same stable signature, so a baseline change is visible
+without treating it as a resolved event.
 
 WPF needs a single-threaded apartment. Windows PowerShell is STA by default; `pwsh` is not, so `LogVerdict-GUI.ps1` relaunches itself under `powershell.exe -STA`. Calling `Show-LogVerdictGui` directly from `pwsh` throws and tells you why.
 

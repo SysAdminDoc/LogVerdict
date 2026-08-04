@@ -28,6 +28,13 @@
     .PARAMETER IncludeLowConfidence
     Show curated low-confidence rulings. Off by default; unknown signatures remain visible.
 
+    .PARAMETER SuppressionPath
+    Optional operator-owned suppression expectation JSON. Defaults to the per-user
+    LogVerdict suppression file when present.
+
+    .PARAMETER SuppressedOnly
+    Print the validated suppression set without scanning logs.
+
     .PARAMETER OutputDir
     Report destination. Defaults to a timestamped folder on the Desktop.
 
@@ -120,6 +127,8 @@ param(
     [switch]$PerformanceTelemetry,
     [switch]$IncludeBenign,
     [switch]$IncludeLowConfidence,
+    [string]$SuppressionPath,
+    [switch]$SuppressedOnly,
     [string]$OutputDir,
     [switch]$NoReport,
     [switch]$Redact,
@@ -184,6 +193,17 @@ function Test-LVLaunchedInteractively {
     }
 }
 
+if ($SuppressedOnly) {
+    try {
+        $set = Get-LogVerdictSuppression -Path $SuppressionPath
+        $set.entries | ConvertTo-Json -Depth 20
+        exit 0
+    } catch {
+        Write-Host ('[x] Suppression set failed validation: {0}' -f $_.Exception.Message) -ForegroundColor Red
+        exit 4
+    }
+}
+
 try {
     $scanArgs = @{
         IncludeBenign   = $IncludeBenign
@@ -193,6 +213,7 @@ try {
         AllChannels     = $AllChannels
         DiagnosticChannels = $DiagnosticChannels
         IncludeLowConfidence = $IncludeLowConfidence
+        SuppressionPath = $SuppressionPath
         Redact          = $Redact
         ExplainUnknown  = $ExplainUnknown
         OllamaModel     = $OllamaModel

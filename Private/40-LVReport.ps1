@@ -76,11 +76,39 @@ function Get-LVReportIncident {
         reports written before incident grouping existed.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)]$Result)
+    param(
+        [Parameter(Mandatory)]$Result,
+        [switch]$IncludeSuppressed
+    )
 
     $property = $Result.PSObject.Properties['Incidents']
-    if ($property) { return ConvertTo-LVArrayOutput -Value @($property.Value | Where-Object { $_ }) }
-    return ConvertTo-LVArrayOutput -Value @($Result.Findings | Where-Object { $_ })
+    $items = if ($property) { @($property.Value | Where-Object { $_ }) } else { @($Result.Findings | Where-Object { $_ }) }
+    if (-not $IncludeSuppressed) {
+        $items = @($items | Where-Object { -not ($_.PSObject.Properties['Suppressed'] -and $_.Suppressed -and $_.SuppressionAction -eq 'hide') })
+    }
+    return ConvertTo-LVArrayOutput -Value $items
+}
+
+function Get-LVReportSuppressionStatus {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Result)
+
+    $property = $Result.PSObject.Properties['SuppressionStatus']
+    if ($property -and $property.Value) { return $property.Value }
+    return [pscustomobject][ordered]@{
+        Path = $null
+        Status = 'not-requested'
+        EntryCount = 0
+        ActiveCount = 0
+        MatchedCount = 0
+        UnmatchedCount = 0
+        ExpiredCount = 0
+        SuppressedFindingCount = 0
+        Entries = @()
+        Matched = @()
+        Unmatched = @()
+        Expired = @()
+    }
 }
 
 function Get-LVReportIncidentSummary {
@@ -90,7 +118,7 @@ function Get-LVReportIncidentSummary {
     $property = $Result.PSObject.Properties['IncidentSummary']
     if ($property -and $property.Value) { return $property.Value }
     $signatureCount = @($Result.Findings | Where-Object { $_ }).Count
-    $incidentCount = @(Get-LVReportIncident -Result $Result).Count
+    $incidentCount = @(Get-LVReportIncident -Result $Result -IncludeSuppressed).Count
     $suppressed = [Math]::Max(0, $signatureCount - $incidentCount)
     $ratio = if ($signatureCount -gt 0) { $suppressed / [double]$signatureCount } else { 0 }
     return [pscustomobject]@{
@@ -165,6 +193,7 @@ function ConvertTo-LVTicketSummary {
         @{ Expression = { [int64]$_.Count }; Descending = $true }, Title)
     $reduction = $resolved.Reduction
     $incidentSummary = Get-LVReportIncidentSummary -Result $resolved
+    $suppressionStatus = Get-LVReportSuppressionStatus -Result $resolved
     $recordCount = if ($reduction) { [int64]$reduction.RecordCount } else { 0 }
     $signatureCount = if ($reduction) { [int64]$reduction.SignatureCount } else { 0 }
     $suppressed = [Math]::Max(0, $recordCount - $signatureCount)
@@ -179,7 +208,27 @@ function ConvertTo-LVTicketSummary {
     & $add ('- **Rule database:** {0}, updated {1}' -f (& $clean $databaseName), (& $clean $databaseDate))
     & $add ('- **Suppressed repeats:** {0:N0} record(s) reduced to {1:N0} signature(s) ({2}:1)' -f $suppressed, $signatureCount, (& $clean $ratio))
     & $add ('- **Incident suppression:** {0:P0} ({1:N0} of {2:N0} signatures grouped)' -f $incidentSummary.SuppressionRatio, $incidentSummary.SuppressedSignatureCount, $incidentSummary.SignatureCount)
+    & $add ('- **Suppression expectations:** {0:N0} signature(s) suppressed; {1:N0} matched nothing; {2:N0} expired or due for review' -f $suppressionStatus.SuppressedFindingCount, $suppressionStatus.UnmatchedCount, $suppressionStatus.ExpiredCount)
     & $add ('- **Incidents needing attention:** {0}' -f $findings.Count)
+    & $add ''
+
+    & $add '## Suppression expectations'
+    if ($suppressionStatus.Status -eq 'not-requested' -or $suppressionStatus.EntryCount -eq 0) {
+        & $add '- No operator suppression expectation file was loaded.'
+    } else {
+        & $add ('- File: `{0}`; {1} active entry/entries, {2} matched this run.' -f (& $clean $suppressionStatus.Path), $suppressionStatus.ActiveCount, $suppressionStatus.MatchedCount)
+        if ($suppressionStatus.UnmatchedCount -eq 0) {
+            & $add '- No active suppression matched nothing in this run.'
+        } else {
+            & $add '- **Matched nothing this run:**'
+            foreach ($entry in @($suppressionStatus.Unmatched | Select-Object -First 20)) {
+                & $add ('  - `{0}` ({1}) - {2}' -f (& $clean $entry.id), (& $clean $entry.action), (& $clean $entry.statement))
+            }
+        }
+        foreach ($entry in @($suppressionStatus.Expired | Select-Object -First 20)) {
+            & $add ('- **Expired/review due:** `{0}` since {1}' -f (& $clean $entry.id), (& $clean $entry.reviewDueOn))
+        }
+    }
     & $add ''
 
     & $add '## Incidents needing attention'
@@ -267,6 +316,7 @@ function Write-LVConsoleReport {
     $stat = $Result.Reduction
     $displayFindings = @(Get-LVReportIncident -Result $Result)
     $incidentSummary = Get-LVReportIncidentSummary -Result $Result
+    $suppressionStatus = Get-LVReportSuppressionStatus -Result $Result
     Write-Host ''
     Write-LVLog -Level step -Message ('LogVerdict {0} - {1}' -f $script:LVVersion, $Result.MachineName)
     Write-Host ''
@@ -275,6 +325,8 @@ function Write-LVConsoleReport {
     Write-Host ('  Signatures      : {0}  (reduction {1}:1)' -f $stat.SignatureCount, $stat.Ratio)
     Write-Host ('  Incident suppression: {0:P0}  ({1} incident(s) from {2} signature(s))' -f `
         $incidentSummary.SuppressionRatio, $incidentSummary.IncidentCount, $incidentSummary.SignatureCount)
+    Write-Host ('  Expectations     : {0} signature(s) suppressed; {1} matched nothing; {2} expired/review due' -f `
+        $suppressionStatus.SuppressedFindingCount, $suppressionStatus.UnmatchedCount, $suppressionStatus.ExpiredCount)
     Write-Host ('  Needs attention : {0} incident(s)' -f @($displayFindings | Where-Object {
             (Get-LVVerdictRank -Verdict $_.Verdict) -ge (Get-LVVerdictRank -Verdict 'unknown')
         }).Count)
@@ -299,6 +351,17 @@ function Write-LVConsoleReport {
         Write-Host ('  NOT SCANNED     : {0}' -f $note) -ForegroundColor Yellow
     }
     if (@($Result.CoverageNotes).Count -gt 0) { Write-Host '' }
+
+    if ($suppressionStatus.UnmatchedCount -gt 0 -or $suppressionStatus.ExpiredCount -gt 0) {
+        Write-Host '  SUPPRESSION EXPECTATIONS NEEDING REVIEW' -ForegroundColor Yellow
+        foreach ($entry in @($suppressionStatus.Unmatched | Select-Object -First 20)) {
+            Write-Host ('    - {0} matched nothing: {1}' -f $entry.id, $entry.statement) -ForegroundColor Yellow
+        }
+        foreach ($entry in @($suppressionStatus.Expired | Select-Object -First 20)) {
+            Write-Host ('    - {0} expired/review due {1}' -f $entry.id, $entry.reviewDueOn) -ForegroundColor Yellow
+        }
+        Write-Host ''
+    }
 
     $coverageGaps = @($Result.Coverage | Where-Object { $_ -and $_.Status -in @('disabled', 'policy-disabled', 'provider-absent') })
     if ($coverageGaps.Count -gt 0) {
@@ -514,6 +577,11 @@ function ConvertTo-LVFlatFindingRow {
             ErrorPhase        = $finding.ErrorPhase
             ErrorOperation    = $finding.ErrorOperation
             Reference         = $finding.Reference
+            Suppressed        = if ($finding.PSObject.Properties['Suppressed']) { [bool]$finding.Suppressed } else { $false }
+            SuppressionAction = if ($finding.PSObject.Properties['SuppressionAction']) { $finding.SuppressionAction } else { $null }
+            SuppressionId     = if ($finding.PSObject.Properties['SuppressionId']) { $finding.SuppressionId } else { $null }
+            SuppressionStatement = if ($finding.PSObject.Properties['SuppressionStatement']) { $finding.SuppressionStatement } else { $null }
+            OriginalVerdict   = if ($finding.PSObject.Properties['OriginalVerdict']) { $finding.OriginalVerdict } else { $null }
             Burst             = if ($finding.PSObject.Properties['Burst']) { $finding.Burst } else { $false }
             BurstOnset        = if ($finding.PSObject.Properties['BurstOnset']) { ConvertTo-LVUtcTimestamp $finding.BurstOnset } else { $null }
             BurstCount        = if ($finding.PSObject.Properties['BurstCount']) { $finding.BurstCount } else { $null }
@@ -734,6 +802,7 @@ function ConvertTo-LVTextReport {
     $sb = New-Object System.Text.StringBuilder
     $displayFindings = @(Get-LVReportIncident -Result $Result)
     $incidentSummary = Get-LVReportIncidentSummary -Result $Result
+    $suppressionStatus = Get-LVReportSuppressionStatus -Result $Result
 
     Add-LVLine $sb ('LogVerdict {0} report' -f $Result.Version)
     Add-LVLine $sb ('=' * 78)
@@ -746,6 +815,8 @@ function ConvertTo-LVTextReport {
     Add-LVLine $sb ('Signatures    : {0} (reduction {1}:1)' -f $Result.Reduction.SignatureCount, $Result.Reduction.Ratio)
     Add-LVLine $sb ('Incident suppression: {0:P0} ({1} incident(s) from {2} signature(s))' -f `
         $incidentSummary.SuppressionRatio, $incidentSummary.IncidentCount, $incidentSummary.SignatureCount)
+    Add-LVLine $sb ('Suppression expectations: {0} signature(s) suppressed; {1} matched nothing; {2} expired/review due' -f `
+        $suppressionStatus.SuppressedFindingCount, $suppressionStatus.UnmatchedCount, $suppressionStatus.ExpiredCount)
     Add-LVLine $sb ('Needs attention: {0} incident(s)' -f @($displayFindings | Where-Object {
             (Get-LVVerdictRank -Verdict $_.Verdict) -ge (Get-LVVerdictRank -Verdict 'unknown')
         }).Count)
@@ -764,6 +835,17 @@ function ConvertTo-LVTextReport {
     if ($Result.PSObject.Properties['SetupDiag'] -and $Result.SetupDiag) {
         Add-LVLine $sb ('SetupDiag     : {0} - {1}' -f $Result.SetupDiag.Status, $Result.SetupDiag.Message)
     }
+    if ($suppressionStatus.UnmatchedCount -gt 0 -or $suppressionStatus.ExpiredCount -gt 0) {
+        Add-LVLine $sb 'SUPPRESSION EXPECTATIONS NEEDING REVIEW:'
+        foreach ($entry in @($suppressionStatus.Unmatched | Select-Object -First 20)) {
+            Add-LVLine $sb ('  - {0} matched nothing: {1}' -f $entry.id, $entry.statement)
+        }
+        foreach ($entry in @($suppressionStatus.Expired | Select-Object -First 20)) {
+            Add-LVLine $sb ('  - {0} expired/review due {1}' -f $entry.id, $entry.reviewDueOn)
+        }
+        Add-LVLine $sb
+    }
+
     if ($Result.PSObject.Properties['Redacted'] -and $Result.Redacted) {
         Add-LVLine $sb 'Redacted      : yes - account, machine, profile paths, SIDs and mail addresses were masked in the evidence below. Identifiers Windows wrote in a form this tool does not recognize may remain, so read before sending.'
     }
@@ -971,6 +1053,9 @@ function ConvertTo-LVTextReport {
         }
         if ($f.FallbackMessage) { Add-LVLine $sb ('  Fallback text: {0}' -f $f.FallbackMessage) }
         Add-LVLine $sb ('  Rule        : {0} (confidence: {1}{2})' -f $f.RuleId, $f.Confidence, $(if ($f.Verified) { ', verified ' + $f.Verified } else { '' }))
+        if ($f.PSObject.Properties['Suppressed'] -and $f.Suppressed) {
+            Add-LVLine $sb ('  Suppression : {0} via {1} ({2})' -f $f.SuppressionAction, $f.SuppressionId, $f.SuppressionStatement)
+        }
         foreach ($fp in @($f.FalsePositives)) {
             Add-LVLine $sb ('  Not this if : {0}' -f $fp)
         }
@@ -1029,6 +1114,7 @@ function ConvertTo-LVHtmlReport {
     $sb = New-Object System.Text.StringBuilder
     $displayFindings = @(Get-LVReportIncident -Result $Result)
     $incidentSummary = Get-LVReportIncidentSummary -Result $Result
+    $suppressionStatus = Get-LVReportSuppressionStatus -Result $Result
 
     $reportLocale = Get-LVLocalizationLocale
     Add-LVLine $sb ('<!DOCTYPE html><html lang="{0}"><head><meta charset="utf-8">' -f (ConvertTo-LVHtmlEncoded $reportLocale))
@@ -1177,6 +1263,7 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
     Add-LVLine $sb ('<div class="stat"><div class="k">Signatures</div><div class="v">{0}</div></div>' -f $Result.Reduction.SignatureCount)
     Add-LVLine $sb ('<div class="stat"><div class="k">Noise removed</div><div class="v">{0}:1</div></div>' -f $Result.Reduction.Ratio)
     Add-LVLine $sb ('<div class="stat"><div class="k">Incident suppression</div><div class="v">{0:P0}</div></div>' -f $incidentSummary.SuppressionRatio)
+    Add-LVLine $sb ('<div class="stat"><div class="k">Suppressed expectations</div><div class="v">{0}</div></div>' -f $suppressionStatus.SuppressedFindingCount)
     Add-LVLine $sb ('<div class="stat"><div class="k">Incidents</div><div class="v">{0}</div></div>' -f $incidentSummary.IncidentCount)
     Add-LVLine $sb ('<div class="stat"><div class="k">Needs attention</div><div class="v">{0}</div></div>' -f $needsAttention)
     if ($Result.Stability) {
@@ -1200,6 +1287,17 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
 
     if ($Result.HorizonWarning) {
         Add-LVLine $sb ('<div class="warn"><strong>Coverage warning.</strong> {0}</div>' -f (ConvertTo-LVHtmlEncoded $Result.HorizonWarning))
+    }
+
+    if ($suppressionStatus.UnmatchedCount -gt 0 -or $suppressionStatus.ExpiredCount -gt 0) {
+        Add-LVLine $sb '<div class="warn"><strong>Suppression expectations needing review.</strong><ul>'
+        foreach ($entry in @($suppressionStatus.Unmatched | Select-Object -First 20)) {
+            Add-LVLine $sb ('<li><code>{0}</code> matched nothing this run: {1}</li>' -f (ConvertTo-LVHtmlEncoded $entry.id), (ConvertTo-LVHtmlEncoded $entry.statement))
+        }
+        foreach ($entry in @($suppressionStatus.Expired | Select-Object -First 20)) {
+            Add-LVLine $sb ('<li><code>{0}</code> expired or reached its review date {1}</li>' -f (ConvertTo-LVHtmlEncoded $entry.id), (ConvertTo-LVHtmlEncoded $entry.reviewDueOn))
+        }
+        Add-LVLine $sb '</ul></div>'
     }
 
     if (@($Result.CoverageNotes).Count -gt 0) {
@@ -1412,6 +1510,10 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             $(if ($f.SignatureCount) { $f.SignatureCount } else { 1 }), $findingRuleIdHtml, $findingConfidenceHtml, $findingVerifiedHtml, $findingStale)
         if ($f.IncidentNote) {
             Add-LVLine $sb ('<div class="row"><div class="lbl">Incident</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.IncidentNote))
+        }
+        if ($f.PSObject.Properties['Suppressed'] -and $f.Suppressed) {
+            Add-LVLine $sb ('<div class="row"><div class="lbl">Suppression</div><div>{0} via {1}: {2}</div></div>' -f `
+                (ConvertTo-LVHtmlEncoded $f.SuppressionAction), (ConvertTo-LVHtmlEncoded $f.SuppressionId), (ConvertTo-LVHtmlEncoded $f.SuppressionStatement))
         }
         if (@($f.SignatureKeys | Where-Object { $_ }).Count -gt 0) {
             Add-LVLine $sb ('<div class="row"><div class="lbl">Signatures</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded ((@($f.SignatureKeys) -join ', '))))

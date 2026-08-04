@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [0.8.2] - 2026-08-02
 
+- Added scoped suppression expectations with explicit hide/downgrade actions, Windows build or app-version scope, 90-day review deadlines, unmatched/expired report warnings, `-SuppressedOnly`, GUI path wiring, and SARIF suppression/baseline metadata while retaining suppressed findings in corpus totals.
 - Added rule-level incidents to the console, text, HTML, JSON, ticket-summary, and GUI projections: signatures sharing a rule now carry constituent keys, combined counts, and distinct diagnostic codes, while the report headline exposes incident suppression. Low-confidence rulings are excluded by default and opt in through `-IncludeLowConfidence`; removed the no-op LV-0072 escalation.
 - Made CI execute the packaged console twice, reject vacuous GUI filters with a deliberate renamed-suite probe, and drive coverage fixtures through the real event, text-log, and offline collectors; refreshed stale GUI fixture names and removed an unearned keyboard check.
 - Closed generated-document injection paths: HTML formatting now encodes by default, localization is encoded, CSV cells are formula-safe, and case-profile prose/recipes reject or quote directive-breaking input.

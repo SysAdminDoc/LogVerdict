@@ -43,6 +43,13 @@ function Invoke-LogVerdictScan {
         Keep curated low-confidence rulings in the result. Off by default so a weak
         ruling cannot crowd the report; unknown signatures remain visible.
 
+        .PARAMETER SuppressionPath
+        Optional operator-owned suppression expectation JSON. Without it, the
+        per-user %LOCALAPPDATA%\LogVerdict\suppressions.json file is used when present.
+
+        .PARAMETER SuppressedOnly
+        Return the validated suppression set without collecting or scanning logs.
+
         .PARAMETER Redact
         Return a redacted result with account, machine, profile-path, SID, address,
         token, and secret identifiers masked. This applies to the result object itself;
@@ -117,6 +124,8 @@ function Invoke-LogVerdictScan {
         [switch]$PerformanceTelemetry,
         [switch]$IncludeBenign,
         [switch]$IncludeLowConfidence,
+        [string]$SuppressionPath,
+        [switch]$SuppressedOnly,
         [string]$DatabasePath,
         [string]$EvidencePath,
         [switch]$Redact,
@@ -138,6 +147,12 @@ function Invoke-LogVerdictScan {
         [ValidateRange(1, 86400)][int]$MaxCollectionSeconds = 600
     )
 
+    if ($SuppressedOnly) {
+        if ($EvidencePath) { throw '-SuppressedOnly cannot be combined with -EvidencePath.' }
+        $set = Get-LogVerdictSuppression -Path $SuppressionPath
+        return ConvertTo-LVArrayOutput -Value @($set.entries)
+    }
+
     $collectionBudget = New-LVCollectionBudget -MaxBytes $MaxCollectionBytes -MaxRecords $MaxCollectionRecords -MaxSeconds $MaxCollectionSeconds
     $caseProfile = if ($CaseProfilePath) { Read-LVCaseProfile -Path $CaseProfilePath } else { $null }
     if ($EvidencePath) {
@@ -150,6 +165,7 @@ function Invoke-LogVerdictScan {
             PerformanceTelemetry = $PerformanceTelemetry
             IncludeBenign  = $IncludeBenign
             IncludeLowConfidence = $IncludeLowConfidence
+            SuppressionPath = $SuppressionPath
             DatabasePath   = $DatabasePath
             Redact         = $Redact
             ExplainUnknown = $ExplainUnknown
@@ -465,11 +481,23 @@ function Invoke-LogVerdictScan {
     $databaseFreshness = Get-LVDatabaseFreshnessSummary -Database $db -AsOf ([datetime]::UtcNow.Date)
     Write-LVLog -Level info -Message ('Applying {0} rule(s) from the verdict database...' -f @($db.rules).Count)
     $findings = Resolve-LVVerdict -Signature $signatures -Database $db
+    $currentWindowsBuild = Get-LVCurrentWindowsBuild
+    $suppressionSet = Import-LVSuppressionSet -Path $SuppressionPath
+    $suppressionApplied = Apply-LVSuppression -Finding @($findings) -SuppressionSet $suppressionSet `
+        -MachineName $env:COMPUTERNAME -WindowsBuild ([string]$currentWindowsBuild) -AppVersion $script:LVVersion
+    $findings = @($suppressionApplied.Findings)
+    $suppressionSummary = $suppressionApplied.Summary
+    if ($suppressionSummary.UnmatchedCount -gt 0) {
+        Write-LVLog -Level warn -Message ('{0} active suppression expectation(s) matched nothing in this scan.' -f $suppressionSummary.UnmatchedCount)
+    }
+    if ($suppressionSummary.ExpiredCount -gt 0) {
+        Write-LVLog -Level warn -Message ('{0} suppression expectation(s) passed their expiry or 90-day review date and were not applied.' -f $suppressionSummary.ExpiredCount)
+    }
 
     $lowConfidenceSuppressed = 0
     if (-not $IncludeLowConfidence) {
         $beforeLowConfidence = @($findings).Count
-        $findings = @($findings | Where-Object { Test-LVConfidenceIncluded -Finding $_ })
+        $findings = @($findings | Where-Object { (Test-LVConfidenceIncluded -Finding $_) -or $_.Suppressed })
         $lowConfidenceSuppressed = $beforeLowConfidence - @($findings).Count
         if ($lowConfidenceSuppressed -gt 0) {
             Write-LVLog -Level ok -Message ('{0} low-confidence ruling(s) hidden (use -IncludeLowConfidence to see them)' -f $lowConfidenceSuppressed)
@@ -480,7 +508,8 @@ function Invoke-LogVerdictScan {
     # evidence of when something happened, and dropping it here would silently break any
     # pairing that involves one - the correlation would stop firing for a reason nothing
     # in the output could explain.
-    $correlations = @(Resolve-LVCorrelation -Finding @($findings) -Database $db)
+    $correlationFindings = @($findings | Where-Object { -not ($_.Suppressed -and $_.SuppressionAction -eq 'hide') })
+    $correlations = @(Resolve-LVCorrelation -Finding @($correlationFindings) -Database $db)
     if ($correlations.Count -gt 0) {
         Write-LVLog -Level warn -Message ('{0} correlated finding(s): signatures that occurred together and mean more than they do apart' -f $correlations.Count)
     }
@@ -493,7 +522,7 @@ function Invoke-LogVerdictScan {
 
     if (-not $IncludeBenign) {
         $before = @($findings).Count
-        $findings = @($findings | Where-Object { $_.Verdict -ne 'benign' })
+        $findings = @($findings | Where-Object { $_.Verdict -ne 'benign' -or $_.Suppressed })
         $removed = $before - @($findings).Count
         if ($removed -gt 0) {
             Write-LVLog -Level ok -Message ('{0} signature(s) ruled benign and suppressed (use -IncludeBenign to see them)' -f $removed)
@@ -657,7 +686,8 @@ function Invoke-LogVerdictScan {
     # of its parts is the whole reason it exists, and an exit code that ignored it would
     # under-report the machine.
     $worst = 'benign'
-    foreach ($f in @($findings) + @($correlations)) {
+    $visibleFindings = @($findings | Where-Object { -not ($_.Suppressed -and $_.SuppressionAction -eq 'hide') })
+    foreach ($f in @($visibleFindings) + @($correlations)) {
         if ((Get-LVVerdictRank -Verdict $f.Verdict) -gt (Get-LVVerdictRank -Verdict $worst)) { $worst = $f.Verdict }
     }
     if ($channelEnumerationFailed -and (Get-LVVerdictRank -Verdict $worst) -lt (Get-LVVerdictRank -Verdict 'unknown')) {
@@ -683,6 +713,7 @@ function Invoke-LogVerdictScan {
         Version        = $script:LVVersion
         Contract       = New-LVReportContract -Result ([pscustomobject]@{ ScanTime = $started; Offline = $false })
         MachineName    = $env:COMPUTERNAME
+        WindowsBuild   = $currentWindowsBuild
         ScanTime       = $started
         Duration       = ((Get-Date) - $started)
         DaysBack       = $DaysBack
@@ -707,6 +738,7 @@ function Invoke-LogVerdictScan {
         Incidents      = @($incidents)
         IncidentSummary = $incidentReduction.Summary
         LowConfidenceSuppressedCount = $lowConfidenceSuppressed
+        SuppressionStatus = $suppressionSummary
         Correlations   = @($correlations)
         CrashArtifacts = @($crash)
         SetupDiag      = $setupDiagStatus
@@ -728,6 +760,7 @@ function Invoke-LogVerdictScan {
             performanceTelemetry = [bool]$PerformanceTelemetry
             includeBenign = [bool]$IncludeBenign
             includeLowConfidence = [bool]$IncludeLowConfidence
+            suppressionPath = $suppressionSummary.Path
             explainUnknown = [bool]$ExplainUnknown
             promoteToRule = [bool]$PromoteToRule
             evidencePath = $false

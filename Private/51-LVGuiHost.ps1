@@ -82,7 +82,7 @@ function Get-LVGuiSetting {
         foreach ($name in @('diagnosticChannels', 'skipReliability', 'redact', 'includeEvidence', 'includeLowConfidence')) {
             if ($null -ne $data.PSObject.Properties[$name] -and $data.$name -isnot [bool]) { return $null }
         }
-        foreach ($name in @('namedChannels', 'databasePath', 'outputDirectory')) {
+        foreach ($name in @('namedChannels', 'databasePath', 'suppressionPath', 'outputDirectory')) {
             if ($null -ne $data.PSObject.Properties[$name] -and
                 $null -ne $data.$name -and $data.$name -isnot [string]) { return $null }
         }
@@ -109,6 +109,7 @@ function Get-LVGuiSetting {
             IncludeLowConfidence = if ($data.PSObject.Properties['includeLowConfidence']) { [bool]$data.includeLowConfidence } else { $false }
             NamedChannels = if ($data.PSObject.Properties['namedChannels']) { [string]$data.namedChannels } else { '' }
             DatabasePath = if ($data.PSObject.Properties['databasePath']) { [string]$data.databasePath } else { '' }
+            SuppressionPath = if ($data.PSObject.Properties['suppressionPath']) { [string]$data.suppressionPath } else { '' }
             OutputDirectory = if ($data.PSObject.Properties['outputDirectory']) { [string]$data.outputDirectory } else { '' }
             Redact = if ($data.PSObject.Properties['redact']) { [bool]$data.redact } else { $false }
             IncludeEvidence = if ($data.PSObject.Properties['includeEvidence']) { [bool]$data.includeEvidence } else { $false }
@@ -154,6 +155,7 @@ function Save-LVGuiSetting {
         includeLowConfidence = [bool]$Settings.IncludeLowConfidence
         namedChannels = ([string]$Settings.NamedChannels).Trim()
         databasePath = ([string]$Settings.DatabasePath).Trim()
+        suppressionPath = ([string]$Settings.SuppressionPath).Trim()
         outputDirectory = ([string]$Settings.OutputDirectory).Trim()
         redact = [bool]$Settings.Redact
         includeEvidence = [bool]$Settings.IncludeEvidence
@@ -209,6 +211,7 @@ function Reset-LVGuiSetting {
         IncludeLowConfidence = $false
         NamedChannels = ''
         DatabasePath = ''
+        SuppressionPath = ''
         OutputDirectory = ''
         Redact = $false
         IncludeEvidence = $false
@@ -409,7 +412,7 @@ $script:LVGuiElement = @(
     'TxtSideDbTitle', 'TxtSideDbMeta', 'TxtSideDbUpdated',
     'TxtOverviewDays', 'ChkOverviewAllChannels', 'ChkOverviewDiagnosticChannels',
     'ChkOverviewIncludeText', 'ChkOverviewIncludeBenign', 'ChkOverviewIncludeLowConfidence', 'TxtOverviewChannels',
-    'TxtOverviewDatabase', 'BtnOverviewBrowseDatabase', 'ChkOverviewSkipReliability',
+    'TxtOverviewDatabase', 'BtnOverviewBrowseDatabase', 'TxtOverviewSuppression', 'BtnOverviewBrowseSuppression', 'ChkOverviewSkipReliability',
     'TxtOverviewOutputDir', 'BtnOverviewBrowseOutput', 'ChkOverviewRedact',
     'ChkOverviewEvidence', 'BtnResetSettings', 'TxtSettingsStatus',
     'BtnOverviewScan', 'BtnOverviewCancel',
@@ -533,7 +536,8 @@ function ConvertTo-LVGuiRow {
         }
 
         $haystack = (@($f.Title, $f.Provider, $f.Channel, $f.Id, $f.SampleMessage, $f.RuleId, $f.Key,
-                $f.IncidentId, $f.IncidentNote, $f.SignatureKeys, $f.DistinctCodes) -join ' ').ToLowerInvariant()
+                $f.IncidentId, $f.IncidentNote, $f.SignatureKeys, $f.DistinctCodes,
+                $f.SuppressionId, $f.SuppressionAction, $f.SuppressionStatement) -join ' ').ToLowerInvariant()
 
         # Sorting keys are separate from display strings on purpose. Sorting the grid
         # on "3 days ago" or on "CRITICAL" would order it alphabetically, which is
@@ -561,8 +565,11 @@ function ConvertTo-LVGuiRow {
         # column, so the verdict is spoken rather than merely shown.
         $spokenWhen = Format-LVGuiWhen -When $f.LastSeen
         $signatureCount = if ($f.PSObject.Properties['SignatureCount'] -and $f.SignatureCount) { [int]$f.SignatureCount } else { 1 }
-        $automationName = '{0}. {1}. Seen {2} time(s) across {3} signature(s), {4:0.00} per day, last {5}. Source {6}.' -f `
-            $style.Label, $f.Title, $f.Count, $signatureCount, $f.PerDay, $spokenWhen, $origin
+        $suppressionNote = if ($f.PSObject.Properties['Suppressed'] -and $f.Suppressed) {
+            ' Suppression expectation {0} ({1}).' -f $f.SuppressionId, $f.SuppressionAction
+        } else { '' }
+        $automationName = '{0}. {1}. Seen {2} time(s) across {3} signature(s), {4:0.00} per day, last {5}. Source {6}.{7}' -f `
+            $style.Label, $f.Title, $f.Count, $signatureCount, $f.PerDay, $spokenWhen, $origin, $suppressionNote
 
         [pscustomobject]@{
             Verdict      = $f.Verdict
@@ -581,6 +588,10 @@ function ConvertTo-LVGuiRow {
             SignatureCount = $signatureCount
             SignatureKeys  = @($f.SignatureKeys)
             DistinctCodes  = @($f.DistinctCodes)
+            Suppressed     = [bool]($f.PSObject.Properties['Suppressed'] -and $f.Suppressed)
+            SuppressionAction = if ($f.PSObject.Properties['SuppressionAction']) { [string]$f.SuppressionAction } else { '' }
+            SuppressionId  = if ($f.PSObject.Properties['SuppressionId']) { [string]$f.SuppressionId } else { '' }
+            SuppressionStatement = if ($f.PSObject.Properties['SuppressionStatement']) { [string]$f.SuppressionStatement } else { '' }
             Title        = $f.Title
             Count        = $f.Count
             PerDay       = $f.PerDay
@@ -801,6 +812,9 @@ function ConvertTo-LVGuiDetail {
     if (@($Finding.DistinctCodes | Where-Object { $_ }).Count -gt 0) {
         $meta.Add(('codes {0}' -f (@($Finding.DistinctCodes) -join ', ')))
     }
+    if ($Finding.PSObject.Properties['Suppressed'] -and $Finding.Suppressed) {
+        $meta.Add(('suppressed by {0} ({1})' -f $Finding.SuppressionId, $Finding.SuppressionAction))
+    }
 
     $falsePositive = @($Finding.FalsePositives | Where-Object { $_ })
     $reference = @(@(@($Finding.References) + @($Finding.Sources | ForEach-Object { $_.uri })) |
@@ -841,6 +855,11 @@ function ConvertTo-LVGuiDetail {
         Plain         = [string]$Finding.Plain
         Why           = [string]$Finding.Why
         Action        = [string]$Finding.Action
+        Suppressed    = [bool]($Finding.PSObject.Properties['Suppressed'] -and $Finding.Suppressed)
+        SuppressionAction = if ($Finding.PSObject.Properties['SuppressionAction']) { [string]$Finding.SuppressionAction } else { '' }
+        SuppressionId = if ($Finding.PSObject.Properties['SuppressionId']) { [string]$Finding.SuppressionId } else { '' }
+        SuppressionStatement = if ($Finding.PSObject.Properties['SuppressionStatement']) { [string]$Finding.SuppressionStatement } else { '' }
+        OriginalVerdict = if ($Finding.PSObject.Properties['OriginalVerdict']) { [string]$Finding.OriginalVerdict } else { '' }
         FalsePositive = [string[]]$falsePositive
         Reference     = [string[]]$reference
         SampleText    = (@($sample | Select-Object -Unique) -join ([Environment]::NewLine * 2))

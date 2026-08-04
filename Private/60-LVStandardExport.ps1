@@ -643,6 +643,19 @@ function ConvertTo-LVStandardFinding {
 
     $first = ConvertTo-LVStandardTimestamp $Finding.FirstSeen
     $last = ConvertTo-LVStandardTimestamp $Finding.LastSeen
+    $suppressed = [bool]($Finding.PSObject.Properties['Suppressed'] -and $Finding.Suppressed)
+    $suppression = if ($suppressed) {
+        [pscustomobject][ordered]@{
+            id = if ($Finding.PSObject.Properties['SuppressionId'] -and $null -ne $Finding.SuppressionId) { [string]$Finding.SuppressionId } else { $null }
+            action = if ($Finding.PSObject.Properties['SuppressionAction'] -and $null -ne $Finding.SuppressionAction) { [string]$Finding.SuppressionAction } else { $null }
+            statement = if ($Finding.PSObject.Properties['SuppressionStatement'] -and $null -ne $Finding.SuppressionStatement) { [string]$Finding.SuppressionStatement } else { $null }
+            created = if ($Finding.PSObject.Properties['SuppressionCreated'] -and $null -ne $Finding.SuppressionCreated) { [string]$Finding.SuppressionCreated } else { $null }
+            expiresOn = if ($Finding.PSObject.Properties['SuppressionExpiresOn'] -and $null -ne $Finding.SuppressionExpiresOn) { [string]$Finding.SuppressionExpiresOn } else { $null }
+            reviewDueOn = if ($Finding.PSObject.Properties['SuppressionReviewDueOn'] -and $null -ne $Finding.SuppressionReviewDueOn) { [string]$Finding.SuppressionReviewDueOn } else { $null }
+            status = if ($Finding.PSObject.Properties['SuppressionStatus'] -and $null -ne $Finding.SuppressionStatus) { [string]$Finding.SuppressionStatus } else { $null }
+            signatureHash = if ($Finding.PSObject.Properties['SuppressionSignatureHash'] -and $null -ne $Finding.SuppressionSignatureHash) { [string]$Finding.SuppressionSignatureHash } else { $null }
+        }
+    } else { $null }
     $eventRecord = [ordered]@{
         source = $Finding.Source
         channel = $Finding.Channel
@@ -683,10 +696,63 @@ function ConvertTo-LVStandardFinding {
         }
         references = @(Get-LVStandardReference -Finding $Finding)
         event = [pscustomobject]$eventRecord
+        originalVerdict = if ($Finding.PSObject.Properties['OriginalVerdict']) { $Finding.OriginalVerdict } else { $null }
+        suppressed = $suppressed
+        suppression = $suppression
+        signatureCount = if ($Finding.PSObject.Properties['SignatureCount']) { $Finding.SignatureCount } else { 1 }
+        signatureKeys = if ($Finding.PSObject.Properties['SignatureKeys']) { @($Finding.SignatureKeys) } else { @($Finding.Key) }
+        distinctCodes = if ($Finding.PSObject.Properties['DistinctCodes']) { @($Finding.DistinctCodes) } else { @() }
         burst = if ($Finding.PSObject.Properties['Burst']) { [bool]$Finding.Burst } else { $false }
         burstOnset = if ($Finding.PSObject.Properties['BurstOnset']) { ConvertTo-LVStandardTimestamp $Finding.BurstOnset } else { $null }
         burstCount = if ($Finding.PSObject.Properties['BurstCount']) { $Finding.BurstCount } else { $null }
         burstWindowMinutes = if ($Finding.PSObject.Properties['BurstWindowMinutes']) { $Finding.BurstWindowMinutes } else { $null }
+    }
+}
+
+function ConvertTo-LVStandardSuppressionStatus {
+    param([AllowNull()]$Status)
+
+    if ($null -eq $Status) {
+        return [pscustomobject][ordered]@{
+            path = $null; status = 'not-requested'; entryCount = 0; activeCount = 0; matchedCount = 0
+            unmatchedCount = 0; expiredCount = 0; suppressedFindingCount = 0; asOf = $null
+            entries = @(); matched = @(); unmatched = @(); expired = @()
+        }
+    }
+    $projectEntry = {
+        param($Entry)
+        if ($null -eq $Entry) { return $null }
+        [pscustomobject][ordered]@{
+            id = $Entry.id
+            scope = [pscustomobject][ordered]@{
+                signatureHash = $Entry.scope.signatureHash
+                machine = $Entry.scope.machine
+                windowsBuild = $Entry.scope.windowsBuild
+                appVersion = $Entry.scope.appVersion
+            }
+            action = $Entry.action
+            downgradeTo = $Entry.downgradeTo
+            statement = $Entry.statement
+            created = $Entry.created
+            expiresOn = $Entry.expiresOn
+            reviewDueOn = $Entry.reviewDueOn
+            status = $Entry.status
+        }
+    }
+    return [pscustomobject][ordered]@{
+        path = $Status.Path
+        status = $Status.Status
+        entryCount = [int]$Status.EntryCount
+        activeCount = [int]$Status.ActiveCount
+        matchedCount = [int]$Status.MatchedCount
+        unmatchedCount = [int]$Status.UnmatchedCount
+        expiredCount = [int]$Status.ExpiredCount
+        suppressedFindingCount = [int]$Status.SuppressedFindingCount
+        asOf = ConvertTo-LVStandardTimestamp $Status.AsOf
+        entries = @($Status.Entries | Where-Object { $_ } | ForEach-Object { & $projectEntry $_ })
+        matched = @($Status.Matched | Where-Object { $_ } | ForEach-Object { & $projectEntry $_ })
+        unmatched = @($Status.Unmatched | Where-Object { $_ } | ForEach-Object { & $projectEntry $_ })
+        expired = @($Status.Expired | Where-Object { $_ } | ForEach-Object { & $projectEntry $_ })
     }
 }
 
@@ -780,7 +846,10 @@ function Get-LVStandardContext {
             daysBack = $Result.DaysBack
             elevated = $Result.Elevated
             channels = @($Result.Channels)
+            windowsBuild = if ($Result.PSObject.Properties['WindowsBuild']) { $Result.WindowsBuild } else { $null }
             worstVerdict = $Result.WorstVerdict
+            signatureCount = if ($Result.Reduction) { $Result.Reduction.SignatureCount } else { $null }
+            incidentSummary = if ($Result.PSObject.Properties['IncidentSummary']) { $Result.IncidentSummary } else { $null }
             exitCode = $Result.ExitCode
             performanceTelemetry = if ($Result.PSObject.Properties['PerformanceTelemetry']) { [bool]$Result.PerformanceTelemetry } else { $false }
             performance = @(ConvertTo-LVStandardPerformance -Performance $(if ($Result.PSObject.Properties['Performance']) { $Result.Performance } else { @() }))
@@ -795,6 +864,7 @@ function Get-LVStandardContext {
             status = if ($Result.PSObject.Properties['AdvisoryStatus']) { $Result.AdvisoryStatus } else { 'not-requested' }
             cache = if ($Result.PSObject.Properties['AdvisoryCache']) { $Result.AdvisoryCache } else { $null }
         }
+        suppression = ConvertTo-LVStandardSuppressionStatus -Status $(if ($Result.PSObject.Properties['SuppressionStatus']) { $Result.SuppressionStatus } else { $null })
     }
 }
 
@@ -849,6 +919,8 @@ function ConvertTo-LVTimelineLine {
         elevated = $Result.Elevated
         worstVerdict = $Result.WorstVerdict
         exitCode = $Result.ExitCode
+        windowsBuild = if ($Result.PSObject.Properties['WindowsBuild']) { $Result.WindowsBuild } else { $null }
+        suppression = ConvertTo-LVStandardSuppressionStatus -Status $(if ($Result.PSObject.Properties['SuppressionStatus']) { $Result.SuppressionStatus } else { $null })
         caseProfileId = if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) { [string]$Result.CaseProfile.profileId } else { $null }
     }
     $line = [ordered]@{
@@ -892,6 +964,7 @@ function Get-LVTimelineLine {
     foreach ($finding in @($Result.Findings | Where-Object { $_ } | Sort-Object FirstSeen, Source, Channel, Provider, Id, Key)) {
         $first = ConvertTo-LVStandardTimestamp $finding.FirstSeen
         $last = ConvertTo-LVStandardTimestamp $finding.LastSeen
+        $standardFinding = ConvertTo-LVStandardFinding -Finding $finding
         $samples = @($finding.Samples | Where-Object { $null -ne $_ })
         $message = if ($samples.Count -gt 0) { [string]$samples[0] } else { [string]$finding.SampleMessage }
         $eventPayload = [ordered]@{
@@ -935,6 +1008,9 @@ function Get-LVTimelineLine {
             plain = [string]$finding.Plain
             why = [string]$finding.Why
             action = [string]$finding.Action
+            originalVerdict = $standardFinding.originalVerdict
+            suppressed = $standardFinding.suppressed
+            suppression = $standardFinding.suppression
             references = @(Get-LVStandardReference -Finding $finding)
             provenance = [pscustomobject][ordered]@{
                 ruleId = if ($finding.PSObject.Properties['RuleId']) { $finding.RuleId } else { $null }
@@ -1314,9 +1390,31 @@ function ConvertTo-LVSarifResult {
         'logverdict.confidence' = [string]$Finding.confidence
         'logverdict.redacted' = [bool]$Context.privacy.redacted
         'logverdict.references' = @($Finding.references)
+        'logverdict.suppressed' = [bool]$Finding.suppressed
     }
     if ($Finding.ruleId) { $properties['logverdict.ruleId'] = [string]$Finding.ruleId }
     if ($Finding.action) { $properties['logverdict.action'] = [string]$Finding.action }
+    if ($Finding.originalVerdict) { $properties['logverdict.originalVerdict'] = [string]$Finding.originalVerdict }
+    if ($Finding.suppressed -and $Finding.suppression) {
+        $result.baselineState = 'unchanged'
+        $properties['logverdict.suppressionId'] = [string]$Finding.suppression.id
+        $properties['logverdict.suppressionAction'] = [string]$Finding.suppression.action
+        $properties['logverdict.suppressionStatement'] = [string]$Finding.suppression.statement
+        if ($Finding.suppression.expiresOn) { $properties['logverdict.expiresOn'] = [string]$Finding.suppression.expiresOn }
+        if ($Finding.suppression.reviewDueOn) { $properties['logverdict.reviewDueOn'] = [string]$Finding.suppression.reviewDueOn }
+        $result.suppressions = @([pscustomobject][ordered]@{
+            kind = 'external'
+            justification = [string]$Finding.suppression.statement
+            properties = [pscustomobject][ordered]@{
+                'logverdict.suppressionId' = [string]$Finding.suppression.id
+                'logverdict.action' = [string]$Finding.suppression.action
+                'logverdict.expiresOn' = if ($Finding.suppression.expiresOn) { [string]$Finding.suppression.expiresOn } else { $null }
+                'logverdict.reviewDueOn' = [string]$Finding.suppression.reviewDueOn
+            }
+        })
+    } else {
+        $result.baselineState = 'new'
+    }
     $result.properties = [pscustomobject]$properties
     return [pscustomobject]$result
 }
@@ -1345,6 +1443,7 @@ function ConvertTo-LVSarifExport {
         'logverdict.healthProfiles' = @($Model.Context.healthProfiles)
         'logverdict.advisories' = @($Model.Advisories)
         'logverdict.correlations' = @($Model.Correlations)
+        'logverdict.suppressions' = $Model.Context.suppression
     }
     $invocation = [ordered]@{ executionSuccessful = $true }
     if ($Model.Context.scan.started) { $invocation.startTimeUtc = [string]$Model.Context.scan.started }

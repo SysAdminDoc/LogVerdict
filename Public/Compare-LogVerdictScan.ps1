@@ -65,6 +65,9 @@ function Compare-LogVerdictScan {
             $changes.Add([pscustomobject]@{
                 Change = 'new'; Key = $key; Title = $afterFinding.Title
                 BeforeVerdict = $null; AfterVerdict = $afterFinding.Verdict
+                BeforeSuppressed = $false; AfterSuppressed = [bool]($afterFinding.PSObject.Properties['Suppressed'] -and $afterFinding.Suppressed)
+                SuppressionId = if ($afterFinding.PSObject.Properties['SuppressionId']) { $afterFinding.SuppressionId } else { $null }
+                SuppressionAction = if ($afterFinding.PSObject.Properties['SuppressionAction']) { $afterFinding.SuppressionAction } else { $null }
                 BeforeCount = $null; AfterCount = $afterFinding.Count
                 BeforePerDay = $null; AfterPerDay = $afterFinding.PerDay
                 RateDelta = $null; Reason = 'Signature did not appear in the before scan.'
@@ -75,6 +78,54 @@ function Compare-LogVerdictScan {
         }
 
         $beforeFinding = $beforeMap[$key]
+        $beforeSuppressed = [bool]($beforeFinding.PSObject.Properties['Suppressed'] -and $beforeFinding.Suppressed)
+        $afterSuppressed = [bool]($afterFinding.PSObject.Properties['Suppressed'] -and $afterFinding.Suppressed)
+        $suppressionId = if ($afterSuppressed -and $afterFinding.PSObject.Properties['SuppressionId']) {
+            [string]$afterFinding.SuppressionId
+        } elseif ($beforeFinding.PSObject.Properties['SuppressionId']) {
+            [string]$beforeFinding.SuppressionId
+        } else { $null }
+        $suppressionAction = if ($afterSuppressed -and $afterFinding.PSObject.Properties['SuppressionAction']) {
+            [string]$afterFinding.SuppressionAction
+        } elseif ($beforeFinding.PSObject.Properties['SuppressionAction']) {
+            [string]$beforeFinding.SuppressionAction
+        } else { $null }
+        if ($beforeSuppressed -ne $afterSuppressed) {
+            $change = if ($afterSuppressed) { 'suppressed' } else { 'unsuppressed' }
+            $reason = if ($afterSuppressed) {
+                'Suppression expectation {0} matched this signature.' -f $suppressionId
+            } else {
+                'Suppression expectation no longer matched this signature.'
+            }
+            $changes.Add([pscustomobject]@{
+                Change = $change; Key = $key; Title = $afterFinding.Title
+                BeforeVerdict = $beforeFinding.Verdict; AfterVerdict = $afterFinding.Verdict
+                BeforeSuppressed = $beforeSuppressed; AfterSuppressed = $afterSuppressed
+                SuppressionId = $suppressionId; SuppressionAction = $suppressionAction
+                BeforeCount = $beforeFinding.Count; AfterCount = $afterFinding.Count
+                BeforePerDay = $beforeFinding.PerDay; AfterPerDay = $afterFinding.PerDay
+                RateDelta = [Math]::Round([double]$afterFinding.PerDay - [double]$beforeFinding.PerDay, 2)
+                Reason = $reason
+                BeforeScanTime = $beforeReport.ScanTime; AfterScanTime = $afterReport.ScanTime
+                Before = $beforeFinding; After = $afterFinding
+            }) | Out-Null
+            continue
+        }
+        if ($afterSuppressed -and $suppressionAction -eq 'downgrade' -and [string]$beforeFinding.Verdict -ne [string]$afterFinding.Verdict) {
+            $changes.Add([pscustomobject]@{
+                Change = 'downgraded'; Key = $key; Title = $afterFinding.Title
+                BeforeVerdict = $beforeFinding.Verdict; AfterVerdict = $afterFinding.Verdict
+                BeforeSuppressed = $beforeSuppressed; AfterSuppressed = $afterSuppressed
+                SuppressionId = $suppressionId; SuppressionAction = $suppressionAction
+                BeforeCount = $beforeFinding.Count; AfterCount = $afterFinding.Count
+                BeforePerDay = $beforeFinding.PerDay; AfterPerDay = $afterFinding.PerDay
+                RateDelta = [Math]::Round([double]$afterFinding.PerDay - [double]$beforeFinding.PerDay, 2)
+                Reason = ('Suppression expectation {0} downgraded the verdict from {1} to {2}.' -f $suppressionId, $beforeFinding.Verdict, $afterFinding.Verdict)
+                BeforeScanTime = $beforeReport.ScanTime; AfterScanTime = $afterReport.ScanTime
+                Before = $beforeFinding; After = $afterFinding
+            }) | Out-Null
+            continue
+        }
         $beforeRank = Get-LVVerdictRank -Verdict $beforeFinding.Verdict
         $afterRank = Get-LVVerdictRank -Verdict $afterFinding.Verdict
         $beforeRate = [double]$beforeFinding.PerDay
@@ -92,6 +143,8 @@ function Compare-LogVerdictScan {
             $changes.Add([pscustomobject]@{
                 Change = 'worsening'; Key = $key; Title = $afterFinding.Title
                 BeforeVerdict = $beforeFinding.Verdict; AfterVerdict = $afterFinding.Verdict
+                BeforeSuppressed = $beforeSuppressed; AfterSuppressed = $afterSuppressed
+                SuppressionId = $suppressionId; SuppressionAction = $suppressionAction
                 BeforeCount = $beforeFinding.Count; AfterCount = $afterFinding.Count
                 BeforePerDay = $beforeRate; AfterPerDay = $afterRate
                 RateDelta = $rateDelta; Reason = $reason
@@ -107,6 +160,9 @@ function Compare-LogVerdictScan {
         $changes.Add([pscustomobject]@{
             Change = 'resolved'; Key = $key; Title = $beforeFinding.Title
             BeforeVerdict = $beforeFinding.Verdict; AfterVerdict = $null
+            BeforeSuppressed = [bool]($beforeFinding.PSObject.Properties['Suppressed'] -and $beforeFinding.Suppressed); AfterSuppressed = $false
+            SuppressionId = if ($beforeFinding.PSObject.Properties['SuppressionId']) { $beforeFinding.SuppressionId } else { $null }
+            SuppressionAction = if ($beforeFinding.PSObject.Properties['SuppressionAction']) { $beforeFinding.SuppressionAction } else { $null }
             BeforeCount = $beforeFinding.Count; AfterCount = $null
             BeforePerDay = $beforeFinding.PerDay; AfterPerDay = $null
             RateDelta = $null; Reason = 'Signature did not appear in the after scan.'
@@ -115,7 +171,7 @@ function Compare-LogVerdictScan {
         }) | Out-Null
     }
 
-    $order = @{ worsening = 0; new = 1; resolved = 2 }
+    $order = @{ worsening = 0; downgraded = 1; suppressed = 2; unsuppressed = 3; new = 4; resolved = 5 }
     $sorted = @($changes.ToArray() | Sort-Object `
         @{ Expression = { $order[$_.Change] }; Ascending = $true }, `
         @{ Expression = {

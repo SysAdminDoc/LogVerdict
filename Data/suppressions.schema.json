@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/SysAdminDoc/LogVerdict/blob/main/Data/suppressions.schema.json",
+  "title": "LogVerdict suppression expectations",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name", "entries"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "name": { "const": "LogVerdict.Suppressions" },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "scope", "action", "statement", "created"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$" },
+          "scope": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["signatureHash", "machine"],
+            "properties": {
+              "signatureHash": { "type": "string", "pattern": "^[0-9A-Fa-f]{64}$" },
+              "machine": { "type": "string", "minLength": 1, "maxLength": 255 },
+              "windowsBuild": { "type": "string", "pattern": "^\\d{1,10}$" },
+              "appVersion": { "type": "string", "minLength": 1, "maxLength": 64 }
+            },
+            "anyOf": [
+              { "required": ["windowsBuild"] },
+              { "required": ["appVersion"] }
+            ]
+          },
+          "action": { "enum": ["hide", "downgrade"] },
+          "downgradeTo": { "enum": ["benign", "informational", "unknown", "investigate", "actionable"] },
+          "statement": { "type": "string", "minLength": 1, "maxLength": 4000 },
+          "created": { "type": "string", "format": "date-time" },
+          "expiresOn": { "type": "string", "format": "date-time" }
+        },
+        "oneOf": [
+          {
+            "properties": { "action": { "const": "hide" } },
+            "not": { "required": ["downgradeTo"] }
+          },
+          {
+            "required": ["downgradeTo"],
+            "properties": { "action": { "const": "downgrade" } }
+          }
+        ]
+      }
+    }
+  }
+}

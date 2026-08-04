@@ -34,6 +34,7 @@
     },
     "Tool": { "const": "LogVerdict" },
     "Version": { "type": "string" },
+    "WindowsBuild": { "type": ["integer", "string", "null"] },
     "ScanTime": { "type": "string", "format": "date-time", "pattern": "Z$" },
     "Duration": { "type": ["string", "null"], "pattern": "^P" },
     "DaysBack": { "type": "integer", "minimum": 1, "maximum": 3650 },
@@ -66,7 +67,17 @@
           "FirstSeen": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
           "LastSeen": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
           "BurstOnset": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
-          "Times": { "type": "array", "items": { "type": "string", "format": "date-time", "pattern": "Z$" } }
+          "Times": { "type": "array", "items": { "type": "string", "format": "date-time", "pattern": "Z$" } },
+          "Suppressed": { "type": "boolean" },
+          "SuppressionAction": { "type": ["string", "null"] },
+          "SuppressionId": { "type": ["string", "null"] },
+          "SuppressionStatement": { "type": ["string", "null"] },
+          "SuppressionCreated": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
+          "SuppressionExpiresOn": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
+          "SuppressionReviewDueOn": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
+          "SuppressionStatus": { "type": ["string", "null"] },
+          "SuppressionSignatureHash": { "type": ["string", "null"], "pattern": "^[0-9a-fA-F]{64}$" },
+          "OriginalVerdict": { "type": ["string", "null"] }
         }
       }
     },
@@ -108,6 +119,25 @@
       }
     },
     "LowConfidenceSuppressedCount": { "type": "integer", "minimum": 0 },
+    "SuppressionStatus": {
+      "type": "object",
+      "required": ["EntryCount", "MatchedCount", "UnmatchedCount", "ExpiredCount", "SuppressedFindingCount"],
+      "properties": {
+        "Path": { "type": ["string", "null"] },
+        "Status": { "type": "string" },
+        "EntryCount": { "type": "integer", "minimum": 0 },
+        "ActiveCount": { "type": "integer", "minimum": 0 },
+        "MatchedCount": { "type": "integer", "minimum": 0 },
+        "UnmatchedCount": { "type": "integer", "minimum": 0 },
+        "ExpiredCount": { "type": "integer", "minimum": 0 },
+        "SuppressedFindingCount": { "type": "integer", "minimum": 0 },
+        "AsOf": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
+        "Entries": { "type": "array" },
+        "Matched": { "type": "array" },
+        "Unmatched": { "type": "array" },
+        "Expired": { "type": "array" }
+      }
+    },
     "Correlations": {
       "type": "array",
       "items": {

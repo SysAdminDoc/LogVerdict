@@ -703,6 +703,18 @@ function Get-LVGuiXaml {
                   <Button x:Name="BtnOverviewBrowseDatabase" Grid.Column="1" Style="{StaticResource BaseButton}"
                           Content="Rules..." Margin="7,0,0,0" Padding="11,6"/>
                 </Grid>
+                <TextBlock Text="Suppression expectations" Foreground="{DynamicResource Subtext0}" FontSize="11"
+                           Margin="0,8,0,4"/>
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <TextBox x:Name="TxtOverviewSuppression" AutomationProperties.Name="Suppression expectations"
+                           ToolTip="Optional scoped expectations JSON. Matched findings remain counted and are marked suppressed."/>
+                  <Button x:Name="BtnOverviewBrowseSuppression" Grid.Column="1" Style="{StaticResource BaseButton}"
+                          Content="Expectations..." Margin="7,0,0,0" Padding="11,6"/>
+                </Grid>
                 <WrapPanel Margin="0,8,0,0">
                   <CheckBox x:Name="ChkOverviewSkipReliability" Content="Skip Reliability Monitor" Margin="0,0,20,6"/>
                 </WrapPanel>

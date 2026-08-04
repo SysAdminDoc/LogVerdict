@@ -1108,9 +1108,10 @@ function Assert-LVRedactedResultShape {
         'Tool', 'Version', 'Mode', 'Contract', 'MachineName', 'ScanTime', 'Duration',
         'DaysBack', 'Elevated', 'Offline', 'Channels', 'ChannelStatus', 'DeniedChannels',
         'TruncatedChannels', 'MetadataUnreadableCount', 'ChannelEnumerationStatus', 'ChannelEnumerationFailed',
-        'ChannelEnumerationFailures', 'CoverageNotes', 'Coverage',
+        'ChannelEnumerationFailures', 'CoverageNotes', 'Coverage', 'WindowsBuild',
         'PerformanceTelemetry', 'Performance', 'HealthProfiles', 'ProviderExtensions',
         'ProviderProjections', 'Reduction', 'Findings', 'Incidents', 'IncidentSummary', 'LowConfidenceSuppressedCount', 'Correlations', 'CrashArtifacts',
+        'SuppressionStatus',
         'SetupDiag', 'Horizon', 'HorizonWarning', 'Stability', 'ReliabilityAvailable',
         'DatabaseName', 'DatabaseDate', 'RuleCount', 'DatabaseFreshness', 'ScanOptions',
         'CollectionBudget', 'CaseProfile', 'ModelExplanationsEnabled', 'ModelExplanationCount',
@@ -1166,6 +1167,9 @@ function ConvertTo-LVRedactedResult {
         }
         if ($c.PSObject.Properties['SampleMessage']) {
             $c.SampleMessage = ConvertTo-LVRedactedText -Text $c.SampleMessage -MachineName $machine
+        }
+        if ($c.PSObject.Properties['SuppressionStatement'] -and $c.SuppressionStatement) {
+            $c.SuppressionStatement = ConvertTo-LVRedactedText -Text ([string]$c.SuppressionStatement) -MachineName $machine
         }
         if ($c.PSObject.Properties['FallbackMessage']) {
             $c.FallbackMessage = ConvertTo-LVRedactedText -Text $c.FallbackMessage -MachineName $machine

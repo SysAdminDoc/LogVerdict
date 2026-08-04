@@ -76,6 +76,7 @@ function Show-LogVerdictGui {
     $initialIncludeLowConfidence = $(if ($savedSettings) { $savedSettings.IncludeLowConfidence } else { $false })
     $initialNamedChannels = $(if ($savedSettings) { [string]$savedSettings.NamedChannels } else { '' })
     $initialDatabasePath = $(if ($savedSettings) { [string]$savedSettings.DatabasePath } else { '' })
+    $initialSuppressionPath = $(if ($savedSettings) { [string]$savedSettings.SuppressionPath } else { '' })
     $initialOutputDirectory = $(if ($savedSettings) { [string]$savedSettings.OutputDirectory } else { '' })
     $initialRedact = $(if ($savedSettings) { $savedSettings.Redact } else { $false })
     $initialIncludeEvidence = $(if ($savedSettings) { $savedSettings.IncludeEvidence } else { $false })
@@ -338,7 +339,7 @@ function Show-LogVerdictGui {
         }
         foreach ($n in @('TxtOverviewDays', 'ChkOverviewAllChannels', 'ChkOverviewIncludeText',
                 'ChkOverviewDiagnosticChannels', 'ChkOverviewIncludeBenign', 'ChkOverviewIncludeLowConfidence', 'TxtOverviewChannels',
-                'TxtOverviewDatabase', 'BtnOverviewBrowseDatabase', 'ChkOverviewSkipReliability',
+                'TxtOverviewDatabase', 'BtnOverviewBrowseDatabase', 'TxtOverviewSuppression', 'BtnOverviewBrowseSuppression', 'ChkOverviewSkipReliability',
                 'TxtOverviewOutputDir', 'BtnOverviewBrowseOutput', 'ChkOverviewRedact',
                 'ChkOverviewEvidence', 'BtnResetSettings', 'BtnCoverageElevate', 'BtnSideElevate')) {
             $ui[$n].IsEnabled = -not $On
@@ -579,6 +580,7 @@ function Show-LogVerdictGui {
         $ui.TxtActivitySubtitle.Text = 'Latest scan - {0:yyyy-MM-dd HH:mm}' -f $Result.ScanTime
         $ui.TxtActivityState.Text = 'Completed in {0:N1}s' -f $Result.Duration.TotalSeconds
         $incidentSummary = Get-LVReportIncidentSummary -Result $Result
+        $suppressionStatus = Get-LVReportSuppressionStatus -Result $Result
         if ($Result.Reduction.PSObject.Properties['InitialSignatureCount']) {
             $ui.TxtActivityHeadline.Text = '{0:N0} records -> {1:N0} masked -> {2:N0} signatures -> {3:N0} incidents ({4:P0} suppression)' -f `
                 $Result.Reduction.RecordCount, $Result.Reduction.InitialSignatureCount, $Result.Reduction.SignatureCount,
@@ -586,6 +588,10 @@ function Show-LogVerdictGui {
         } else {
             $ui.TxtActivityHeadline.Text = '{0:N0} records reduced to {1:N0} signatures -> {2:N0} incidents ({3:P0} suppression)' -f `
                 $Result.Reduction.RecordCount, $Result.Reduction.SignatureCount, $incidentSummary.IncidentCount, $incidentSummary.SuppressionRatio
+        }
+        if ($suppressionStatus.SuppressedFindingCount -gt 0 -or $suppressionStatus.UnmatchedCount -gt 0 -or $suppressionStatus.ExpiredCount -gt 0) {
+            $ui.TxtActivityHeadline.Text += ' - expectations: {0} suppressed, {1} unmatched, {2} due' -f `
+                $suppressionStatus.SuppressedFindingCount, $suppressionStatus.UnmatchedCount, $suppressionStatus.ExpiredCount
         }
         $ui.BtnActivityRunAgain.Content = 'Run again'
         $ui.TxtActivityDuration.Text = '{0:N1}s' -f $Result.Duration.TotalSeconds
@@ -602,6 +608,9 @@ function Show-LogVerdictGui {
         $footer = '{0} - {1} rule(s)' -f $Result.DatabaseName, $Result.RuleCount
         if ($Result.DatabaseDate) { $footer += ' - updated {0}' -f $Result.DatabaseDate }
         $footer += ' - scanned in {0:N1}s' -f $Result.Duration.TotalSeconds
+        if ($suppressionStatus.SuppressedFindingCount -gt 0) {
+            $footer += ' - {0} suppression expectation(s) matched' -f $suppressionStatus.SuppressedFindingCount
+        }
 
         $stale = if ($Result.PSObject.Properties['DatabaseFreshness'] -and $Result.DatabaseFreshness) {
             [int]$Result.DatabaseFreshness.StaleRuleCount
@@ -622,6 +631,9 @@ function Show-LogVerdictGui {
 
         $summary = 'Scan complete. {0} incident(s), worst is {1}. {2:N0} record(s) reduced to {3:N0} signature(s) ({4:P0} incident suppression).' -f `
             @($state.FindingStore).Count, $worst.Label, $Result.Reduction.RecordCount, $Result.Reduction.SignatureCount, $incidentSummary.SuppressionRatio
+        if ($suppressionStatus.UnmatchedCount -gt 0 -or $suppressionStatus.ExpiredCount -gt 0) {
+            $summary += ' {0} suppression expectation(s) need review.' -f ($suppressionStatus.UnmatchedCount + $suppressionStatus.ExpiredCount)
+        }
         & $setStatus $summary
     }
 
@@ -638,6 +650,7 @@ function Show-LogVerdictGui {
     $ui.ChkOverviewIncludeLowConfidence.IsChecked = $initialIncludeLowConfidence
     $ui.TxtOverviewChannels.Text = $initialNamedChannels
     $ui.TxtOverviewDatabase.Text = $initialDatabasePath
+    $ui.TxtOverviewSuppression.Text = $initialSuppressionPath
     $ui.ChkOverviewSkipReliability.IsChecked = $initialSkipReliability
     $ui.TxtOverviewOutputDir.Text = $initialOutputDirectory
     $ui.ChkOverviewRedact.IsChecked = $initialRedact
@@ -697,6 +710,7 @@ function Show-LogVerdictGui {
         $ui.ChkOverviewIncludeLowConfidence.IsChecked = $false
         $ui.TxtOverviewChannels.Text = ''
         $ui.TxtOverviewDatabase.Text = ''
+        $ui.TxtOverviewSuppression.Text = ''
         $ui.ChkOverviewSkipReliability.IsChecked = $false
         $ui.TxtOverviewOutputDir.Text = ''
         $ui.ChkOverviewRedact.IsChecked = $false
@@ -735,6 +749,19 @@ function Show-LogVerdictGui {
             $dialog.FileName = Split-Path -Leaf $current
         }
         if ($dialog.ShowDialog($window)) { $ui.TxtOverviewDatabase.Text = $dialog.FileName }
+    })
+
+    $ui.BtnOverviewBrowseSuppression.Add_Click({
+        $dialog = New-Object Microsoft.Win32.OpenFileDialog
+        $dialog.Title = 'Choose suppression expectations'
+        $dialog.Filter = 'JSON suppression set (*.json)|*.json|All files (*.*)|*.*'
+        $dialog.CheckFileExists = $true
+        $current = $ui.TxtOverviewSuppression.Text.Trim()
+        if ($current -and (Test-Path -LiteralPath $current -PathType Leaf)) {
+            $dialog.InitialDirectory = Split-Path -Parent $current
+            $dialog.FileName = Split-Path -Leaf $current
+        }
+        if ($dialog.ShowDialog($window)) { $ui.TxtOverviewSuppression.Text = $dialog.FileName }
     })
 
     $ui.BtnOverviewBrowseOutput.Add_Click({
@@ -963,6 +990,16 @@ function Show-LogVerdictGui {
             $scanArgs['DatabasePath'] = $databasePath
         }
 
+        $suppressionPath = $ui.TxtOverviewSuppression.Text.Trim()
+        if ($suppressionPath) {
+            if (-not (Test-Path -LiteralPath $suppressionPath -PathType Leaf)) {
+                & $setStatus ('Suppression expectations not found: {0}' -f $suppressionPath)
+                & $showPage 'Overview'
+                return
+            }
+            $scanArgs['SuppressionPath'] = $suppressionPath
+        }
+
         try {
             $state.Job = Start-LVScanJob -ScanArgs $scanArgs -LogSink $state.Sink
             $state.ScanStartedAt = Get-Date
@@ -1138,6 +1175,7 @@ function Show-LogVerdictGui {
             IncludeLowConfidence = [bool]$ui.ChkOverviewIncludeLowConfidence.IsChecked
             NamedChannels = $ui.TxtOverviewChannels.Text
             DatabasePath = $ui.TxtOverviewDatabase.Text
+            SuppressionPath = $ui.TxtOverviewSuppression.Text
             OutputDirectory = $ui.TxtOverviewOutputDir.Text
             Redact = [bool]$ui.ChkOverviewRedact.IsChecked
             IncludeEvidence = [bool]$ui.ChkOverviewEvidence.IsChecked

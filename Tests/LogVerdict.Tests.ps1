@@ -376,6 +376,7 @@ Describe 'Module surface' {
             'Get-LogVerdictDatabase',
             'Get-LogVerdictErrorCatalog',
             'Get-LogVerdictProvider',
+            'Get-LogVerdictSuppression',
             'Invoke-LogVerdictProvider',
             'Invoke-LogVerdictScan',
             'New-LogVerdictCaseProfile',
@@ -3524,6 +3525,174 @@ Describe 'Incident grouping and confidence gates' {
     }
 }
 
+Describe 'Suppression expectations' {
+    It 'validates scoped dates and assigns a ninety-day review deadline' {
+        InModuleScope LogVerdict {
+            $path = Join-Path $TestDrive 'suppressions-valid.json'
+            $hash = Get-LVSuppressionSignatureHash -Key 'Acme/99'
+            $document = [ordered]@{
+                schemaVersion = 1
+                name = 'LogVerdict.Suppressions'
+                entries = @([ordered]@{
+                    id = 'SUP-ONE'
+                    scope = [ordered]@{ signatureHash = $hash; machine = 'TEST-PC'; windowsBuild = '26100' }
+                    action = 'hide'
+                    statement = 'The vendor has documented this transient event for this build.'
+                    created = '2026-01-01T00:00:00Z'
+                })
+            }
+            $document | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding UTF8
+
+            $set = Import-LVSuppressionSet -Path $path -AsOf ([datetime]'2026-01-02')
+            $set.Status | Should -BeExactly 'loaded'
+            $set.EntryCount | Should -Be 1
+            $set.Entries[0].scope.signatureHash | Should -BeExactly $hash
+            $set.Entries[0].reviewDueOn | Should -BeExactly '2026-04-01T00:00:00.0000000Z'
+            $set.Entries[0].status | Should -BeExactly 'active'
+
+            $document.entries[0].expiresOn = 'not-a-date'
+            $document | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding UTF8
+            { Import-LVSuppressionSet -Path $path } | Should -Throw '*expiresOn*'
+
+            $document.entries[0].expiresOn = '2026-12-01T00:00:00Z'
+            $document.entries[0].scope = [ordered]@{ signatureHash = $hash; machine = 'TEST-PC' }
+            $document | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding UTF8
+            { Import-LVSuppressionSet -Path $path } | Should -Throw '*windowsBuild or appVersion*'
+        }
+    }
+
+    It 'keeps hidden findings in raw totals and applies only a real downgrade' {
+        InModuleScope LogVerdict {
+            $asOf = [datetime]'2026-08-03'
+            $finding = [pscustomobject]@{
+                Key='Acme/99'; Verdict='actionable'; Title='Acme failure'; Why='Original reason'
+                Count=2; PerDay=0.2; RuleId='LV-TEST'; Confidence='high'
+            }
+            $hash = Get-LVSuppressionSignatureHash -Key $finding.Key
+            $hidePath = Join-Path $TestDrive 'suppressions-hide.json'
+            [ordered]@{
+                schemaVersion=1; name='LogVerdict.Suppressions'; entries=@([ordered]@{
+                    id='HIDE-ONE'; scope=[ordered]@{ signatureHash=$hash; machine='TEST-PC'; appVersion='0.8.2' }
+                    action='hide'; statement='Known vendor noise in this application release.'; created='2026-08-01T00:00:00Z'
+                })
+            } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $hidePath -Encoding UTF8
+            $hideSet = Import-LVSuppressionSet -Path $hidePath -AsOf $asOf
+            $hidden = Apply-LVSuppression -Finding @($finding) -SuppressionSet $hideSet -MachineName 'TEST-PC' -AppVersion '0.8.2' -AsOf $asOf
+            $hidden.Findings[0].Suppressed | Should -BeTrue
+            $hidden.Findings[0].Verdict | Should -BeExactly 'actionable'
+            $hidden.Findings[0].OriginalVerdict | Should -BeExactly 'actionable'
+            $hidden.Summary.EntryCount | Should -Be 1
+            $hidden.Summary.SuppressedFindingCount | Should -Be 1
+
+            $downgradePath = Join-Path $TestDrive 'suppressions-downgrade.json'
+            [ordered]@{
+                schemaVersion=1; name='LogVerdict.Suppressions'; entries=@([ordered]@{
+                    id='DOWN-ONE'; scope=[ordered]@{ signatureHash=$hash; machine='TEST-PC'; appVersion='0.8.2' }
+                    action='downgrade'; downgradeTo='benign'; statement='This is an approved transient condition.'; created='2026-08-01T00:00:00Z'
+                })
+            } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $downgradePath -Encoding UTF8
+            $downgradeSet = Import-LVSuppressionSet -Path $downgradePath -AsOf $asOf
+            $downgraded = Apply-LVSuppression -Finding @($finding) -SuppressionSet $downgradeSet -MachineName 'TEST-PC' -AppVersion '0.8.2' -AsOf $asOf
+            $downgraded.Findings[0].Suppressed | Should -BeTrue
+            $downgraded.Findings[0].SuppressionAction | Should -BeExactly 'downgrade'
+            $downgraded.Findings[0].OriginalVerdict | Should -BeExactly 'actionable'
+            $downgraded.Findings[0].Verdict | Should -BeExactly 'benign'
+            $downgraded.Findings[0].Why | Should -Match 'DOWN-ONE'
+        }
+    }
+
+    It 'reports unmatched and expired expectations while preserving standard export metadata' {
+        InModuleScope LogVerdict {
+            $asOf = [datetime]'2026-08-03'
+            $finding = [pscustomobject]@{
+                Key='Acme/99'; Verdict='actionable'; Title='Acme failure'; Plain='plain'; Why='why'; Action='action'
+                Count=2; PerDay=0.2; RuleId='LV-TEST'; Confidence='high'; Source='event'; Channel='System'; Provider='Acme'; Id=99
+                FirstSeen=([datetime]'2026-08-02 10:00'); LastSeen=([datetime]'2026-08-02 11:00'); Samples=@('failure')
+                References=@(); Sources=@(); FalsePositives=@(); FallbackMessage=$null
+            }
+            $hash = Get-LVSuppressionSignatureHash -Key $finding.Key
+            $path = Join-Path $TestDrive 'suppressions-report.json'
+            [ordered]@{
+                schemaVersion=1; name='LogVerdict.Suppressions'; entries=@(
+                    [ordered]@{ id='MATCHED'; scope=[ordered]@{ signatureHash=$hash; machine='TEST-PC'; windowsBuild='26100' }; action='hide'; statement='Known condition.'; created='2026-08-01T00:00:00Z' },
+                    [ordered]@{ id='UNMATCHED'; scope=[ordered]@{ signatureHash=('a' * 64); machine='TEST-PC'; windowsBuild='26100' }; action='hide'; statement='Expected only on a different signature.'; created='2026-08-01T00:00:00Z' },
+                    [ordered]@{ id='EXPIRED'; scope=[ordered]@{ signatureHash=('b' * 64); machine='TEST-PC'; windowsBuild='26100' }; action='hide'; statement='Review this old expectation.'; created='2025-01-01T00:00:00Z' }
+                )
+            } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding UTF8
+            $set = Import-LVSuppressionSet -Path $path -AsOf $asOf
+            $applied = Apply-LVSuppression -Finding @($finding) -SuppressionSet $set -MachineName 'TEST-PC' -WindowsBuild '26100' -AsOf $asOf
+            $applied.Summary.MatchedCount | Should -Be 1
+            $applied.Summary.UnmatchedCount | Should -Be 1
+            $applied.Summary.ExpiredCount | Should -Be 1
+            $applied.Summary.ActiveCount | Should -Be 2
+            $applied.Findings[0].Suppressed | Should -BeTrue
+
+            $incident = @(Get-LVIncidentReduction -Finding @($applied.Findings)).Incidents
+            $result = [pscustomobject]@{
+                Tool='LogVerdict'; Version='0.8.2'; MachineName='TEST-PC'; ScanTime=$asOf; Duration=[timespan]::FromSeconds(1)
+                DaysBack=30; Elevated=$false; Channels=@('System'); Reduction=[pscustomobject]@{ RecordCount=2; SignatureCount=1; Ratio=2 }
+                Findings=@($applied.Findings); Incidents=@($incident); IncidentSummary=(Get-LVIncidentReduction -Finding @($applied.Findings)).Summary
+                SuppressionStatus=$applied.Summary; WindowsBuild=26100; Correlations=@(); Coverage=@(); CoverageNotes=@(); HealthProfiles=@(); Performance=@()
+                CrashArtifacts=@(); Stability=$null; Horizon=@{}; HorizonWarning=$null; SetupDiag=$null; DatabaseName='test'; DatabaseDate='2026-08-03'; RuleCount=1
+                DatabaseFreshness=$null; WorstVerdict='actionable'; ExitCode=2; Redacted=$false; Advisories=@()
+            }
+            $text = ConvertTo-LVTextReport -Result $result
+            $ticket = ConvertTo-LVTicketSummary -Result $result
+            $text | Should -Match 'Suppression expectations: 1 signature\(s\) suppressed; 1 matched nothing; 1 expired/review due'
+            $text | Should -Match 'UNMATCHED matched nothing'
+            $text | Should -Match 'EXPIRED expired/review due'
+            $ticket | Should -Match 'Suppression expectations'
+            $ticket | Should -Match 'UNMATCHED'
+
+            $ecs = (Export-LogVerdictStandard -Result $result -Format Ecs).Document
+            $ecs.logverdict.scan.windowsBuild | Should -Be 26100
+            $ecs.logverdict.suppression.suppressedFindingCount | Should -Be 1
+            $ecs.findings[0].logverdict.suppressed | Should -BeTrue
+            $ecs.findings[0].logverdict.suppression.id | Should -BeExactly 'MATCHED'
+            $sarif = (Export-LogVerdictStandard -Result $result -Format Sarif).Document
+            $sarif.runs[0].results[0].baselineState | Should -BeExactly 'unchanged'
+            $sarif.runs[0].results[0].suppressions[0].kind | Should -BeExactly 'external'
+            $sarif.runs[0].results[0].properties.'logverdict.expiresOn' | Should -BeNullOrEmpty
+            $sarif.runs[0].results[0].suppressions[0].properties.'logverdict.suppressionId' | Should -BeExactly 'MATCHED'
+            $jsonl = @(Export-LogVerdictStandard -Result $result -Format Jsonl)
+            $jsonlFinding = @($jsonl | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object recordType -eq 'finding')[0]
+            $jsonlFinding.suppressed | Should -BeTrue
+            $jsonlFinding.suppression.id | Should -BeExactly 'MATCHED'
+        }
+    }
+
+    It 'exposes the set alone and records suppression transitions in scan comparisons' {
+        InModuleScope LogVerdict {
+            $path = Join-Path $TestDrive 'suppressions-only.json'
+            [ordered]@{
+                schemaVersion=1; name='LogVerdict.Suppressions'; entries=@([ordered]@{
+                    id='ONLY-ONE'; scope=[ordered]@{ signatureHash=('c' * 64); machine='TEST-PC'; appVersion='0.8.2' }
+                    action='hide'; statement='Reviewable expectation.'; created='2026-08-01T00:00:00Z'
+                })
+            } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding UTF8
+            $set = Get-LogVerdictSuppression -Path $path
+            $set.schemaVersion | Should -Be 1
+            $set.entries[0].id | Should -BeExactly 'ONLY-ONE'
+            @(Invoke-LogVerdictScan -SuppressedOnly -SuppressionPath $path).Count | Should -Be 1
+
+            $before = [pscustomobject]@{ ScanTime=[datetime]'2026-08-01'; Findings=@([pscustomobject]@{
+                Key='Acme/99'; Title='failure'; Verdict='actionable'; Count=1; PerDay=0.1; Suppressed=$false
+            }) }
+            $after = [pscustomobject]@{ ScanTime=[datetime]'2026-08-02'; Findings=@([pscustomobject]@{
+                Key='Acme/99'; Title='failure'; Verdict='actionable'; Count=1; PerDay=0.1; Suppressed=$true
+                SuppressionId='ONLY-ONE'; SuppressionAction='hide'
+            }) }
+            $change = @(Compare-LogVerdictScan -Before $before -After $after)
+            $change.Count | Should -Be 1
+            $change[0].Change | Should -BeExactly 'suppressed'
+            $change[0].SuppressionId | Should -BeExactly 'ONLY-ONE'
+
+            $unsuppressed = @(Compare-LogVerdictScan -Before $after -After $before)
+            $unsuppressed[0].Change | Should -BeExactly 'unsuppressed'
+        }
+    }
+}
+
 Describe 'Local model explanations' {
     It 'requests structured output from loopback and keeps the candidate separate' {
         InModuleScope LogVerdict {
@@ -4661,7 +4830,7 @@ Describe 'GUI settings persistence' {
             $value = [pscustomobject]@{
                 DaysBack=14; AllChannels=$true; DiagnosticChannels=$true; SkipTextLogs=$true
                 SkipReliability=$true; IncludeBenign=$true; IncludeLowConfidence=$true; NamedChannels='System, Application'
-                DatabasePath='C:\rules\verdicts.json'; OutputDirectory='C:\reports'
+                DatabasePath='C:\rules\verdicts.json'; SuppressionPath='C:\rules\suppressions.json'; OutputDirectory='C:\reports'
                 Redact=$true; IncludeEvidence=$true
                 WindowWidth=1500.4; WindowHeight=820.4
             }
@@ -4677,6 +4846,7 @@ Describe 'GUI settings persistence' {
             $read.IncludeLowConfidence | Should -BeTrue
             $read.NamedChannels | Should -BeExactly 'System, Application'
             $read.DatabasePath | Should -BeExactly 'C:\rules\verdicts.json'
+            $read.SuppressionPath | Should -BeExactly 'C:\rules\suppressions.json'
             $read.OutputDirectory | Should -BeExactly 'C:\reports'
             $read.Redact | Should -BeTrue
             $read.IncludeEvidence | Should -BeTrue
@@ -4798,7 +4968,7 @@ Describe 'GUI and console feature parity' {
         $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Show-LogVerdictGui.ps1'
         $text = Get-Content -LiteralPath $path -Raw
         foreach ($argument in @('Channel', 'AllChannels', 'DiagnosticChannels', 'SkipTextLogs',
-                'SkipReliability', 'IncludeBenign', 'IncludeLowConfidence', 'DatabasePath')) {
+                'SkipReliability', 'IncludeBenign', 'IncludeLowConfidence', 'DatabasePath', 'SuppressionPath')) {
             $text | Should -Match ("scanArgs\['{0}'\]|{0}\s*=" -f $argument) -Because "$argument must reach Invoke-LogVerdictScan"
         }
     }

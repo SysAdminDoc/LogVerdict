@@ -32,6 +32,7 @@
         'Private\23-LVProvider.ps1'
         'Private\25-LVCorrelate.ps1'
         'Private\30-LVResolve.ps1'
+        'Private\35-LVSuppression.ps1'
         'Private\31-LVFixture.ps1'
         'Private\32-LVErrorCatalog.ps1'
         'Private\40-LVReport.ps1'
@@ -50,6 +51,7 @@
         'Public\Get-LogVerdictAdvisory.ps1'
         'Public\Get-LogVerdictAdvisoryStatus.ps1'
         'Public\Get-LogVerdictDatabase.ps1'
+        'Public\Get-LogVerdictSuppression.ps1'
         'Public\Get-LogVerdictErrorCatalog.ps1'
         'Public\Get-LogVerdictProvider.ps1'
         'Public\Invoke-LogVerdictProvider.ps1'
@@ -76,6 +78,7 @@
         'Data\provider.schema.json'
         'Data\report-contract.schema.json'
         'Data\review-artifact.schema.json'
+        'Data\suppressions.schema.json'
         'Data\verdicts.json'
         'Data\verdicts.schema.json'
     )
@@ -84,6 +87,7 @@
         'Compare-LogVerdictScan',
         'Invoke-LogVerdictScan',
         'Get-LogVerdictDatabase',
+        'Get-LogVerdictSuppression',
         'Get-LogVerdictAdvisory',
         'Get-LogVerdictAdvisoryStatus',
         'Get-LogVerdictErrorCatalog',

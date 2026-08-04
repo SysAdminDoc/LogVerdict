@@ -519,6 +519,7 @@ function Invoke-LVOfflineScan {
         [switch]$PerformanceTelemetry,
         [switch]$IncludeBenign,
         [switch]$IncludeLowConfidence,
+        [string]$SuppressionPath,
         [string]$DatabasePath,
         [int]$MaxPerChannel = 20000,
         [ValidateRange(1, 512)][int]$MaxEvtxFiles = 64,
@@ -725,31 +726,47 @@ function Invoke-LVOfflineScan {
         $databaseFreshness = Get-LVDatabaseFreshnessSummary -Database $db -AsOf ([datetime]::UtcNow.Date)
         Write-LVLog -Level info -Message ('Applying {0} rule(s) from the verdict database...' -f @($db.rules).Count)
         $findings = @(Resolve-LVVerdict -Signature $signatures -Database $db)
+        $evidenceMachine = '(offline evidence)'
+        if ($sourceReport -and $sourceReport.MachineName) { $evidenceMachine = [string]$sourceReport.MachineName }
+        elseif ($records.Count -gt 0 -and $records[0].MachineName) { $evidenceMachine = [string]$records[0].MachineName }
+        $evidenceWindowsBuild = $null
+        if ($sourceReport -and $sourceReport.PSObject.Properties['WindowsBuild']) { $evidenceWindowsBuild = [string]$sourceReport.WindowsBuild }
+        $evidenceAppVersion = if ($sourceReport -and $sourceReport.Version) { [string]$sourceReport.Version } else { $script:LVVersion }
+        $suppressionSet = Import-LVSuppressionSet -Path $SuppressionPath
+        $suppressionApplied = Apply-LVSuppression -Finding @($findings) -SuppressionSet $suppressionSet `
+            -MachineName $evidenceMachine -WindowsBuild $evidenceWindowsBuild -AppVersion $evidenceAppVersion
+        $findings = @($suppressionApplied.Findings)
+        $suppressionSummary = $suppressionApplied.Summary
+        if ($suppressionSummary.UnmatchedCount -gt 0) {
+            Write-LVLog -Level warn -Message ('{0} active suppression expectation(s) matched nothing in this offline scan.' -f $suppressionSummary.UnmatchedCount)
+        }
+        if ($suppressionSummary.ExpiredCount -gt 0) {
+            Write-LVLog -Level warn -Message ('{0} suppression expectation(s) passed their expiry or 90-day review date and were not applied.' -f $suppressionSummary.ExpiredCount)
+        }
 
         $lowConfidenceSuppressed = 0
         if (-not $IncludeLowConfidence) {
             $beforeLowConfidence = @($findings).Count
-            $findings = @($findings | Where-Object { Test-LVConfidenceIncluded -Finding $_ })
+            $findings = @($findings | Where-Object { (Test-LVConfidenceIncluded -Finding $_) -or $_.Suppressed })
             $lowConfidenceSuppressed = $beforeLowConfidence - @($findings).Count
             if ($lowConfidenceSuppressed -gt 0) {
                 Write-LVLog -Level ok -Message ('{0} low-confidence ruling(s) hidden (use -IncludeLowConfidence to see them)' -f $lowConfidenceSuppressed)
             }
         }
-        $correlations = @(Resolve-LVCorrelation -Finding $findings -Database $db)
+        $correlationFindings = @($findings | Where-Object { -not ($_.Suppressed -and $_.SuppressionAction -eq 'hide') })
+        $correlations = @(Resolve-LVCorrelation -Finding $correlationFindings -Database $db)
         if ($resolutionTimer) {
             $resolutionTimer.Stop()
             & $recordPerformance -Source 'resolution' -Kind 'stage' -Name 'rule resolution' `
                 -Status $(if ($signatures.Count -eq 0) { 'empty' } else { 'completed' }) -ObservedRecords $signatures.Count -SkippedRecords 0 -Cap $null `
                 -ElapsedMilliseconds ([int64][Math]::Round($resolutionTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'offline'
         }
-        if (-not $IncludeBenign) { $findings = @($findings | Where-Object { $_.Verdict -ne 'benign' }) }
+        if (-not $IncludeBenign) { $findings = @($findings | Where-Object { $_.Verdict -ne 'benign' -or $_.Suppressed }) }
         $modelRequested = [bool]($ExplainUnknown -or $PromoteToRule)
         $promotedDrafts = @()
         if ($modelRequested) {
             Write-LVLog -Level info -Message ('Requesting non-remedial draft explanations for unknown signatures from local Ollama model {0}...' -f $OllamaModel)
-            $explanationMachine = $env:COMPUTERNAME
-            if ($sourceReport -and $sourceReport.MachineName) { $explanationMachine = [string]$sourceReport.MachineName }
-            elseif ($records.Count -gt 0 -and $records[0].MachineName) { $explanationMachine = [string]$records[0].MachineName }
+            $explanationMachine = $evidenceMachine
             $findings = @(Add-LVModelExplanation -Finding @($findings) -Model $OllamaModel -Endpoint $OllamaEndpoint `
                 -Redact:$Redact -MachineName $explanationMachine -UserName $env:USERNAME)
         }
@@ -758,9 +775,6 @@ function Invoke-LVOfflineScan {
             if ($accepted.Count -eq 0) {
                 Write-LVLog -Level warn -Message 'No safe model candidates were available to promote; the local rule file was not changed.'
             } else {
-                $evidenceMachine = $null
-                if ($sourceReport -and $sourceReport.MachineName) { $evidenceMachine = [string]$sourceReport.MachineName }
-                elseif ($records.Count -gt 0 -and $records[0].MachineName) { $evidenceMachine = [string]$records[0].MachineName }
                 $promotedDrafts = @(Write-LVModelDraftRule -Finding $accepted -Path $LocalRulePath -MachineName $evidenceMachine)
             }
         }
@@ -829,7 +843,8 @@ function Invoke-LVOfflineScan {
         }
 
         $worst = 'benign'
-        foreach ($finding in @($findings) + @($correlations)) {
+        $visibleFindings = @($findings | Where-Object { -not ($_.Suppressed -and $_.SuppressionAction -eq 'hide') })
+        foreach ($finding in @($visibleFindings) + @($correlations)) {
             if ((Get-LVVerdictRank -Verdict $finding.Verdict) -gt (Get-LVVerdictRank -Verdict $worst)) { $worst = $finding.Verdict }
         }
         $exitCode = 0
@@ -845,9 +860,7 @@ function Invoke-LVOfflineScan {
             -Status $(if ($recordCount -eq 0) { 'empty' } else { 'completed' }) -ObservedRecords $recordCount -SkippedRecords 0 -Cap $null `
             -ElapsedMilliseconds ([int64][Math]::Round($scanTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'offline'
 
-        $machineName = '(offline evidence)'
-        if ($sourceReport -and $sourceReport.MachineName) { $machineName = [string]$sourceReport.MachineName }
-        elseif ($records.Count -gt 0 -and $records[0].MachineName) { $machineName = [string]$records[0].MachineName }
+        $machineName = $evidenceMachine
 
         $crash = @()
         if ($sourceReport -and -not $SkipTextLogs) { $crash = @($sourceReport.CrashArtifacts) }
@@ -886,6 +899,7 @@ function Invoke-LVOfflineScan {
             Version        = $script:LVVersion
             Contract       = New-LVReportContract -Result ([pscustomobject]@{ ScanTime = $started; Offline = $true })
             MachineName    = $machineName
+            WindowsBuild   = $evidenceWindowsBuild
             ScanTime       = $started
             Duration       = ((Get-Date) - $started)
             DaysBack       = $effectiveDays
@@ -901,6 +915,7 @@ function Invoke-LVOfflineScan {
             Incidents      = @($incidents)
             IncidentSummary = $incidentReduction.Summary
             LowConfidenceSuppressedCount = $lowConfidenceSuppressed
+            SuppressionStatus = $suppressionSummary
             Correlations   = @($correlations)
             CrashArtifacts = @($crash)
             EvidenceManifest = @($evtxPlan.Manifest)
@@ -924,6 +939,7 @@ function Invoke-LVOfflineScan {
                 performanceTelemetry = [bool]$PerformanceTelemetry
                 includeBenign = [bool]$IncludeBenign
                 includeLowConfidence = [bool]$IncludeLowConfidence
+                suppressionPath = $suppressionSummary.Path
                 explainUnknown = [bool]$ExplainUnknown
                 promoteToRule = [bool]$PromoteToRule
                 evidencePath = $true
