@@ -52,11 +52,24 @@ function Test-LogVerdictDatabase {
     $validConfidence = @($script:LVRuleConfidence)
     $schemaVersion = [int]$db.schemaVersion
 
+    $freshnessPolicy = Get-LVDatabaseFreshnessPolicy -Database $db
+    if ($db.PSObject.Properties['freshness']) {
+        if (-not $db.freshness -or -not $db.freshness.PSObject.Properties['maxAgeDays']) {
+            $problems.Add([pscustomobject]@{ RuleId = '(database)'; Problem = 'freshness.maxAgeDays is required when a freshness policy is declared' }) | Out-Null
+        } else {
+            $declaredMaxAge = 0
+            if (-not [int]::TryParse([string]$db.freshness.maxAgeDays, [ref]$declaredMaxAge) -or $declaredMaxAge -lt 1) {
+                $problems.Add([pscustomobject]@{ RuleId = '(database)'; Problem = 'freshness.maxAgeDays must be a positive integer' }) | Out-Null
+            }
+        }
+        if (-not $db.freshness.PSObject.Properties['dateBasis'] -or [string]$db.freshness.dateBasis -ne 'UTC') {
+            $problems.Add([pscustomobject]@{ RuleId = '(database)'; Problem = 'freshness.dateBasis must be UTC' }) | Out-Null
+        }
+    }
+
     # Provenance is only required from the schema version that introduced it, so a
     # hand-written v1 local database keeps validating.
     if ($schemaVersion -ge 2) { $required += @('status', 'verified') }
-
-    $staleBefore = (Get-Date).AddMonths(-1 * $script:LVVerificationMaxAgeMonths)
 
     foreach ($rule in $db.rules) {
         $id = $rule.id
@@ -83,6 +96,38 @@ function Test-LogVerdictDatabase {
         }
         if ($rule.confidence -eq 'draft' -and $rule.status -ne 'unsupported') {
             $problems.Add([pscustomobject]@{ RuleId = $id; Problem = "confidence 'draft' requires status 'unsupported' so it cannot produce a verdict before human review" }) | Out-Null
+        }
+
+        if ($rule.PSObject.Properties['staleAfterDays']) {
+            $ruleDays = 0
+            if (-not [int]::TryParse([string]$rule.staleAfterDays, [ref]$ruleDays) -or $ruleDays -lt 1) {
+                $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'staleAfterDays must be a positive integer' }) | Out-Null
+            }
+        }
+        if ($rule.PSObject.Properties['windowsBuild']) {
+            if (-not $rule.windowsBuild) {
+                $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'windowsBuild must declare min or max' }) | Out-Null
+            } else {
+                $minBuild = $null
+                $maxBuild = $null
+                if ($rule.windowsBuild.PSObject.Properties['min']) {
+                    $candidateMin = 0
+                    if (-not [int]::TryParse([string]$rule.windowsBuild.min, [ref]$candidateMin) -or $candidateMin -lt 1) {
+                        $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'windowsBuild.min must be a positive integer' }) | Out-Null
+                    } else { $minBuild = $candidateMin }
+                }
+                if ($rule.windowsBuild.PSObject.Properties['max']) {
+                    $candidateMax = 0
+                    if (-not [int]::TryParse([string]$rule.windowsBuild.max, [ref]$candidateMax) -or $candidateMax -lt 1) {
+                        $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'windowsBuild.max must be a positive integer' }) | Out-Null
+                    } else { $maxBuild = $candidateMax }
+                }
+                if ($null -eq $minBuild -and $null -eq $maxBuild) {
+                    $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'windowsBuild must declare min or max' }) | Out-Null
+                } elseif ($null -ne $minBuild -and $null -ne $maxBuild -and $minBuild -gt $maxBuild) {
+                    $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'windowsBuild.min cannot exceed windowsBuild.max' }) | Out-Null
+                }
+            }
         }
 
         if ($null -eq $rule.match) {
@@ -115,10 +160,13 @@ function Test-LogVerdictDatabase {
 
             if (-not $parsed) {
                 $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("verified '{0}' is not an ISO date (yyyy-MM-dd)" -f $rule.verified) }) | Out-Null
-            } elseif ($verifiedOn -lt $staleBefore -and $rule.status -ne 'deprecated') {
+            } else {
+                $freshness = Get-LVRuleFreshness -Rule $rule -Policy $freshnessPolicy
+                if ($freshness.IsStale -and $rule.status -ne 'deprecated') {
                 # Guidance ages. A rule asserting what Microsoft recommends can quietly
                 # become wrong across Windows releases, so re-verification is enforced.
-                $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("last verified {0}, older than {1} months; re-verify or mark deprecated" -f $rule.verified, $script:LVVerificationMaxAgeMonths) }) | Out-Null
+                    $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("last verified {0}, older than the {1}-day freshness threshold; re-verify or mark deprecated" -f $rule.verified, $freshness.StaleAfterDays) }) | Out-Null
+                }
             }
         }
 

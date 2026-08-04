@@ -9,6 +9,11 @@ Combines unknown signatures from a LogVerdict report with local-model, Sigma, or
 other inactive candidate rules. The artifact is a review exchange format: it has
 stable ids, redacted evidence, source context, provenance, false-positive fields,
 and a fixture scaffold. It never updates the curated verdict database.
+When the report carries a validated UTC freshness summary, each unknown also
+carries a redacted "Rule to write: <provider> <eventId>" test scaffold with a
+mandatory sources[].retrieved date. Reports without that summary remain
+evidence-only; changing a scaffold into a curated rule remains a human review
+step.
 #>
 [CmdletBinding()]
 param(
@@ -70,6 +75,11 @@ $artifact = & $module {
     if ($CandidateJson) { $candidates = @($CandidateJson | ConvertFrom-Json -ErrorAction Stop) }
     New-LVReviewArtifact -Result $redacted -Candidate $candidates -GeneratedAt $When -MachineName $OriginalMachineName
 } $rawResult $candidatePayload $GeneratedAt $machineName
+
+& $module {
+    param($Value)
+    Test-LVReviewArtifactObject -Artifact $Value | Out-Null
+} $artifact
 
 if ($OutputPath) {
     $target = [IO.Path]::GetFullPath($OutputPath)

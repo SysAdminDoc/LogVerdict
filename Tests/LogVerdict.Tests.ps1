@@ -895,6 +895,45 @@ Describe 'Verdict database' {
         }
     }
 
+    It 'declares the freshness policy and supports per-rule build and age bounds' {
+        $database = Get-LogVerdictDatabase
+        $database.freshness.maxAgeDays | Should -Be 730
+        $database.freshness.dateBasis | Should -BeExactly 'UTC'
+
+        InModuleScope LogVerdict {
+            $build = Get-LVCurrentWindowsBuild
+            $build | Should -BeGreaterThan 0
+            $today = [datetime]::UtcNow.Date
+            $rule = [pscustomobject]@{
+                id = 'FRESHNESS-TEST'; status = 'test'; verified = $today.AddDays(-10).ToString('yyyy-MM-dd')
+                staleAfterDays = 5; windowsBuild = [pscustomobject]@{ min = $build - 1; max = $build + 1 }
+                match = [pscustomobject]@{ source = 'event'; provider = 'Freshness-Test'; eventId = 4242 }
+                verdict = 'investigate'; title = 't'; plain = 'p'; why = 'w'; action = 'a'; confidence = 'medium'
+                references = @('https://example.invalid/freshness')
+            }
+            $db = [pscustomobject]@{
+                schemaVersion = 6; name = 'freshness'; updated = $today.ToString('yyyy-MM-dd')
+                freshness = [pscustomobject]@{ maxAgeDays = 730; dateBasis = 'UTC' }
+                rules = @($rule); correlations = @()
+            }
+            $summary = Get-LVDatabaseFreshnessSummary -Database $db -AsOf $today
+            $summary.StaleRuleCount | Should -Be 1
+            $summary.StaleRules[0].RuleId | Should -BeExactly 'FRESHNESS-TEST'
+            $summary.StaleRules[0].StaleAfterDays | Should -Be 5
+
+            $signature = [pscustomobject]@{ Key = 'event|Freshness-Test|4242'; Source = 'event'; Provider = 'Freshness-Test'; Id = 4242; SampleMessage = 'test'; Count = 1; PerDay = 1 }
+            $finding = @(Resolve-LVVerdict -Signature @($signature) -Database ([pscustomobject]@{ rules = @($rule); correlations = @(); freshness = $db.freshness }))[0]
+            $finding.RuleId | Should -BeExactly 'FRESHNESS-TEST'
+            $finding.RuleStale | Should -BeTrue
+            $finding.RuleFreshness.StaleAfterDays | Should -Be 5
+
+            $rule.windowsBuild = [pscustomobject]@{ max = $build - 1 }
+            $outOfRange = @(Resolve-LVVerdict -Signature @($signature) -Database ([pscustomobject]@{ rules = @($rule); correlations = @(); freshness = $db.freshness }))[0]
+            $outOfRange.Verdict | Should -BeExactly 'unknown'
+            $outOfRange.RuleId | Should -BeNullOrEmpty
+        }
+    }
+
     It 'refuses a schema version this build does not understand' {
         $future = Join-Path $TestDrive 'future.json'
         '{ "schemaVersion": 99, "name": "future", "updated": "2026-07-31", "rules": [] }' |
@@ -948,6 +987,9 @@ Describe 'Verdict database' {
         $schema.definitions.correlationRule.properties.sources.items.properties.uri.pattern | Should -BeExactly '^https?://'
         $schema.definitions.rule.properties.references.items.pattern | Should -BeExactly '^https?://'
         $schema.definitions.rule.properties.sources.items.properties.uri.pattern | Should -BeExactly '^https?://'
+        $schema.properties.freshness.properties.dateBasis.const | Should -BeExactly 'UTC'
+        $schema.definitions.rule.properties.staleAfterDays.minimum | Should -Be 1
+        $schema.definitions.rule.properties.windowsBuild.properties.min.minimum | Should -Be 1
 
         InModuleScope LogVerdict -Parameters @{ sv = $schemaVerdicts; ss = $schemaStatuses; sc = $schemaConfidence } {
             param($sv, $ss, $sc)
@@ -3571,6 +3613,25 @@ Describe 'Report rendering' {
             $ecs.logverdict.scan.performanceTelemetry | Should -BeTrue
             $ecs.logverdict.scan.performance[0].status | Should -BeExactly 'empty'
             $ecs.logverdict.scan.performance[0].elapsedMilliseconds | Should -Be 1200
+        }
+    }
+
+    It 'surfaces stale rule guidance in text and HTML reports' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $result | Add-Member -NotePropertyName DatabaseFreshness -NotePropertyValue ([pscustomobject]@{
+                DateBasis = 'UTC'; DefaultStaleAfterDays = 730; AsOf = [datetime]'2026-08-02'
+                StaleRuleCount = 1; StaleRules = @([pscustomobject]@{
+                    RuleId = 'LV-STALE-1'; Verified = '2024-01-01'; StaleAfterDays = 730
+                })
+            })
+            $text = ConvertTo-LVTextReport -Result $result
+            $html = ConvertTo-LVHtmlReport -Result $result
+            $text | Should -Match 'STALE RULE GUIDANCE'
+            $text | Should -Match 'LV-STALE-1'
+            $html | Should -Match 'Stale rule guidance'
+            $html | Should -Match 'LV-STALE-1'
         }
     }
 
@@ -6507,6 +6568,10 @@ Describe 'Redacted review artifacts' {
                 Contract = [pscustomobject][ordered]@{ schemaVersion = 1; name = 'LogVerdict.Report'; mode = 'offline' }
                 Tool = 'LogVerdict'; Version = '0.8.1'; MachineName = 'HOST-9'
                 ScanTime = [datetime]'2026-08-02T12:00:00Z'; DaysBack = 7; Offline = $true
+                DatabaseFreshness = [pscustomobject][ordered]@{
+                    DateBasis = 'UTC'; DefaultStaleAfterDays = 730; AsOf = [datetime]'2026-08-02'
+                    StaleRuleCount = 0; StaleRules = @()
+                }
                 Coverage = @(); WorstVerdict = 'unknown'; ExitCode = 1
                 Findings = @([pscustomobject][ordered]@{
                     Key = 'event|System|100'; RuleId = $null; Verdict = 'unknown'; Confidence = 'none'; Title = 'Unrecognized activity'
@@ -6550,12 +6615,33 @@ Describe 'Redacted review artifacts' {
         $unknown.id | Should -Match '^UNKNOWN-[0-9A-F]{12}$'
         $unknown.evidence.sampleMessage | Should -BeExactly '<MACHINE> failed for C:\Users\<USER>'
         $unknown.evidence.structuredData.EventData.Image | Should -BeExactly 'C:\Users\<USER>\app.exe'
+        $unknown.contribution.label | Should -BeExactly 'Rule to write: Test 100'
+        $unknown.contribution.status | Should -BeExactly 'test'
+        $unknown.contribution.rule.status | Should -BeExactly 'test'
+        $unknown.contribution.rule.sources[0].retrieved | Should -BeExactly '2026-08-02'
+        $unknown.contribution.issue.title | Should -BeExactly 'Rule to write: Test 100'
+        ($unknown | ConvertTo-Json -Depth 30) | Should -Not -Match 'HOST-9'
         $first.privacy.redacted | Should -BeTrue
         $first.privacy.rawEvidence | Should -BeFalse
         $candidate = @($first.items | Where-Object { $_.kind -eq 'candidate' })[0]
         $candidate.falsePositives[0] | Should -BeExactly 'maintenance by <MACHINE>'
         $candidate.provenance.sourceType | Should -BeExactly 'sigma'
         $candidate.fixture.origin | Should -BeExactly 'review-scaffold'
+    }
+
+    It 'withholds contribution scaffolds until the result declares UTC freshness' {
+        $resultPath = Join-Path $TestDrive 'review-no-freshness.json'
+        $artifactPath = Join-Path $TestDrive 'review-no-freshness-artifact.json'
+        Export-ReviewResultFixture -Path $resultPath
+        $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+        $result.PSObject.Properties.Remove('DatabaseFreshness')
+        $result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $resultPath -Encoding UTF8
+
+        $artifact = & $script:ReviewExporter -ResultPath $resultPath -OutputPath $artifactPath `
+            -GeneratedAt '2026-08-02T12:00:00.0000000Z'
+        $unknown = @($artifact.items | Where-Object { $_.kind -eq 'unknown' })[0]
+        $unknown.PSObject.Properties.Name | Should -Not -Contain 'contribution'
+        Test-Path -LiteralPath $artifactPath | Should -BeTrue
     }
 
     It 'imports review changes as a diff without touching the curated database' {

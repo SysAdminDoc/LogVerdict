@@ -68,6 +68,87 @@ function ConvertTo-LVReviewFixtureScaffold {
     }
 }
 
+function Get-LVReviewRetrievedDate {
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$GeneratedAt)
+
+    try {
+        return ([datetimeoffset]::Parse($GeneratedAt, [Globalization.CultureInfo]::InvariantCulture).UtcDateTime).ToString(
+            'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    } catch {
+        return [datetime]::UtcNow.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    }
+}
+
+function ConvertTo-LVReviewContribution {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Finding,
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)]$Evidence,
+        [Parameter(Mandatory)][string]$Retrieved
+    )
+
+    $provider = [string](Get-LVReviewProperty -InputObject $Context -Name 'provider')
+    if (-not $provider) { $provider = '<provider>' }
+    $eventId = [string](Get-LVReviewProperty -InputObject $Context -Name 'eventId')
+    if (-not $eventId) { $eventId = '<eventId>' }
+    $label = 'Rule to write: {0} {1}' -f $provider, $eventId
+
+    $match = [ordered]@{}
+    foreach ($name in @('source', 'channel', 'provider', 'eventId')) {
+        $value = Get-LVReviewProperty -InputObject $Context -Name $name
+        if ($null -eq $value -or -not [string]$value) { continue }
+        if ($name -eq 'eventId') {
+            $numericId = 0
+            if ([int]::TryParse([string]$value, [ref]$numericId)) { $match[$name] = $numericId }
+        } else {
+            $match[$name] = [string]$value
+        }
+    }
+
+    $sourceUri = 'https://github.com/SysAdminDoc/LogVerdict/issues/new?template=rule-contribution.yml'
+    $rule = [ordered]@{
+        id             = ('TEST-{0}' -f (Get-LVShortHash -Text ([string](Get-LVReviewProperty -InputObject $Finding -Name 'Key')))).ToUpperInvariant()
+        status         = 'test'
+        match          = [pscustomobject]$match
+        verdict        = 'unknown'
+        title          = $label
+        plain          = 'This contribution is a redacted test scaffold for an otherwise unrecognized signature. It is not a diagnosis.'
+        why            = 'The signature was not covered by a curated rule. Human review must establish what the provider and event actually mean before any non-unknown verdict is written.'
+        action         = 'Review the redacted evidence, add a regression fixture, and replace the test scaffold only after the source and remediation are verified.'
+        confidence     = 'low'
+        references     = @()
+        falsepositives = @()
+        sources        = @([pscustomobject][ordered]@{ uri = $sourceUri; retrieved = $Retrieved })
+    }
+
+    $body = @(
+        $label
+        ''
+        'Status: test'
+        ('Provider: {0}' -f $provider)
+        ('Event ID: {0}' -f $eventId)
+        ('Source retrieved: {0}' -f $Retrieved)
+        ''
+        'Redacted evidence:'
+        '```json'
+        ($Evidence | ConvertTo-Json -Depth 12 -Compress)
+        '```'
+        ''
+        'Do not promote this scaffold without a reviewed meaning, remediation, source, and regression fixture.'
+    ) -join [Environment]::NewLine
+
+    return [pscustomobject][ordered]@{
+        label      = $label
+        status     = 'test'
+        rule       = [pscustomobject]$rule
+        evidence   = $Evidence
+        issue      = [pscustomobject][ordered]@{ title = $label; body = $body }
+        instruction = 'This is a redacted contribution scaffold. Keep status=test until a human reviewer has verified the source, meaning, remediation, sources[].retrieved, and a regression fixture.'
+    }
+}
+
 function ConvertTo-LVReviewRedactedValue {
     param(
         [AllowNull()]$Value,
@@ -114,7 +195,9 @@ function ConvertTo-LVReviewRedactedValue {
 function ConvertTo-LVReviewUnknownItem {
     param(
         [Parameter(Mandatory)]$Finding,
-        [Parameter(Mandatory)]$Result
+        [Parameter(Mandatory)]$Result,
+        [Parameter(Mandatory)][string]$Retrieved,
+        [switch]$IncludeContribution
     )
 
     $key = [string](Get-LVReviewProperty -InputObject $Finding -Name 'Key')
@@ -149,7 +232,7 @@ function ConvertTo-LVReviewUnknownItem {
         key = $key
     }
 
-    return [pscustomobject][ordered]@{
+    $item = [ordered]@{
         id = $id
         kind = 'unknown'
         status = 'pending'
@@ -170,6 +253,30 @@ function ConvertTo-LVReviewUnknownItem {
             notes = @()
         }
     }
+    if ($IncludeContribution) {
+        $item.contribution = ConvertTo-LVReviewContribution -Finding $Finding -Context $context `
+            -Evidence ([pscustomobject]$evidence) -Retrieved $Retrieved
+    }
+    return [pscustomobject]$item
+}
+
+function Test-LVReviewFreshnessReady {
+    [CmdletBinding()]
+    param([AllowNull()]$Result)
+
+    if ($null -eq $Result -or -not $Result.PSObject.Properties['DatabaseFreshness'] -or -not $Result.DatabaseFreshness) {
+        return $false
+    }
+    $policy = $Result.DatabaseFreshness
+    $days = 0
+    if (-not $policy.PSObject.Properties['DefaultStaleAfterDays'] -or
+        -not [int]::TryParse([string]$policy.DefaultStaleAfterDays, [ref]$days) -or $days -lt 1) {
+        return $false
+    }
+    if ($policy.PSObject.Properties['DateBasis'] -and [string]$policy.DateBasis -ne 'UTC') {
+        return $false
+    }
+    return $true
 }
 
 function ConvertTo-LVReviewCandidateItem {
@@ -248,9 +355,12 @@ function New-LVReviewArtifact {
         [int]$MaxCandidates = 1000
     )
 
+    $contributionReady = Test-LVReviewFreshnessReady -Result $Result
     $unknowns = foreach ($finding in @($Result.Findings)) {
         if ($finding.Verdict -eq 'unknown' -and -not $finding.RuleId) {
-            ConvertTo-LVReviewUnknownItem -Finding $finding -Result $Result
+            ConvertTo-LVReviewUnknownItem -Finding $finding -Result $Result `
+                -Retrieved (Get-LVReviewRetrievedDate -GeneratedAt $GeneratedAt) `
+                -IncludeContribution:$contributionReady
         }
     }
     $items = New-Object System.Collections.Generic.List[object]
@@ -320,6 +430,7 @@ function New-LVReviewArtifact {
             sourceCount = @($Result.Coverage).Count
             unknownCount = @($orderedItems | Where-Object { $_.kind -eq 'unknown' }).Count
             candidateCount = @($orderedItems | Where-Object { $_.kind -eq 'candidate' }).Count
+            staleRuleCount = if ($Result.PSObject.Properties['DatabaseFreshness']) { [int]$Result.DatabaseFreshness.StaleRuleCount } else { 0 }
         }
         items = $orderedItems
         import = [pscustomobject][ordered]@{
@@ -351,6 +462,31 @@ function Test-LVReviewArtifactObject {
         if (-not $id -or $seen.ContainsKey($id)) { throw 'Review artifact items must have unique stable ids.' }
         $seen[$id] = $true
         if ([string]$item.kind -notin @('unknown', 'candidate')) { throw ("Review item '{0}' has an unsupported kind." -f $id) }
+        if ([string]$item.kind -eq 'unknown') {
+            $contribution = Get-LVReviewProperty -InputObject $item -Name 'contribution'
+            if ($contribution) {
+                if ([string]$contribution.status -ne 'test' -or
+                    [string]$contribution.rule.status -ne 'test') {
+                    throw ("Review item '{0}' contribution scaffold must remain status=test." -f $id)
+                }
+                if ([string]$contribution.label -notmatch '^Rule to write: .+') {
+                    throw ("Review item '{0}' contribution label is not pre-filled." -f $id)
+                }
+                if ([string]$contribution.rule.verdict -ne 'unknown') {
+                    throw ("Review item '{0}' contribution rule must remain verdict=unknown." -f $id)
+                }
+                $sources = @($contribution.rule.sources | Where-Object { $_ })
+                if ($sources.Count -eq 0) { throw ("Review item '{0}' contribution has no source." -f $id) }
+                foreach ($source in $sources) {
+                    if (-not $source.uri -or [string]$source.uri -notmatch '^https?://') {
+                        throw ("Review item '{0}' contribution source URI is not http/https." -f $id)
+                    }
+                    if ([string]$source.retrieved -notmatch '^\d{4}-\d{2}-\d{2}$') {
+                        throw ("Review item '{0}' contribution source must declare sources[].retrieved." -f $id)
+                    }
+                }
+            }
+        }
         $reviewStatus = [string]$item.review.status
         if ($reviewStatus -notin @('pending', 'accepted', 'rejected', 'needs-evidence')) {
             throw ("Review item '{0}' has an unsupported review status." -f $id)

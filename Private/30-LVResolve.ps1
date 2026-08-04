@@ -29,6 +29,125 @@ function Assert-LVSchemaVersion {
     }
 }
 
+function Get-LVDatabaseFreshnessPolicy {
+    [CmdletBinding()]
+    param([AllowNull()]$Database)
+
+    $maxAgeDays = $script:LVDefaultStaleAfterDays
+    $dateBasis = 'UTC'
+    if ($Database -and $Database.PSObject.Properties['freshness'] -and $Database.freshness) {
+        if ($Database.freshness.PSObject.Properties['maxAgeDays'] -and
+            [int]::TryParse([string]$Database.freshness.maxAgeDays, [ref]$maxAgeDays)) {
+            if ($maxAgeDays -lt 1) { $maxAgeDays = $script:LVDefaultStaleAfterDays }
+        } else {
+            $maxAgeDays = $script:LVDefaultStaleAfterDays
+        }
+        if ($Database.freshness.PSObject.Properties['dateBasis'] -and $Database.freshness.dateBasis) {
+            $dateBasis = [string]$Database.freshness.dateBasis
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        MaxAgeDays = [int]$maxAgeDays
+        DateBasis  = $dateBasis
+    }
+}
+
+function Get-LVRuleFreshness {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Rule,
+        [Parameter(Mandatory)]$Policy,
+        [datetime]$AsOf = ([datetime]::UtcNow.Date)
+    )
+
+    $verified = [string]$Rule.verified
+    $verifiedOn = [datetime]::MinValue
+    $parsed = [datetime]::TryParseExact(
+        $verified, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$verifiedOn)
+    $staleAfterDays = [int]$Policy.MaxAgeDays
+    if ($Rule.PSObject.Properties['staleAfterDays'] -and $Rule.staleAfterDays) {
+        $candidateDays = 0
+        if ([int]::TryParse([string]$Rule.staleAfterDays, [ref]$candidateDays) -and $candidateDays -gt 0) {
+            $staleAfterDays = $candidateDays
+        }
+    }
+    $staleOn = $null
+    $isStale = $false
+    if ($parsed) {
+        $staleOn = $verifiedOn.Date.AddDays($staleAfterDays)
+        $isStale = $staleOn -lt $AsOf.Date
+    }
+
+    return [pscustomobject][ordered]@{
+        RuleId        = [string]$Rule.id
+        Status        = [string]$Rule.status
+        Verified      = if ($verified) { $verified } else { $null }
+        VerifiedOn    = if ($parsed) { $verifiedOn.Date } else { $null }
+        StaleAfterDays = $staleAfterDays
+        StaleOn       = $staleOn
+        IsStale       = [bool]$isStale
+        DateBasis     = [string]$Policy.DateBasis
+        Parseable     = [bool]$parsed
+    }
+}
+
+function Get-LVDatabaseFreshnessSummary {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Database,
+        [datetime]$AsOf = ([datetime]::UtcNow.Date)
+    )
+
+    $policy = Get-LVDatabaseFreshnessPolicy -Database $Database
+    $stale = New-Object System.Collections.Generic.List[object]
+    foreach ($rule in @($Database.rules | Where-Object { $_ -and (Test-LVRuleActive -Rule $_) })) {
+        $freshness = Get-LVRuleFreshness -Rule $rule -Policy $policy -AsOf $AsOf
+        if (-not $freshness.IsStale) { continue }
+        $stale.Add([pscustomobject][ordered]@{
+            RuleId         = $freshness.RuleId
+            Status         = $freshness.Status
+            Verified       = $freshness.Verified
+            StaleAfterDays = $freshness.StaleAfterDays
+            StaleOn        = $freshness.StaleOn
+            WindowsBuild   = if ($rule.PSObject.Properties['windowsBuild']) { $rule.windowsBuild } else { $null }
+        }) | Out-Null
+    }
+
+    return [pscustomobject][ordered]@{
+        DateBasis          = $policy.DateBasis
+        DefaultStaleAfterDays = $policy.MaxAgeDays
+        AsOf               = $AsOf.Date
+        StaleRuleCount     = $stale.Count
+        StaleRules         = @($stale.ToArray() | Sort-Object RuleId)
+    }
+}
+
+function Get-LVCurrentWindowsBuild {
+    [CmdletBinding()]
+    param()
+
+    try {
+        $build = [int][Environment]::OSVersion.Version.Build
+        if ($build -gt 0) { return $build }
+    } catch { Write-Verbose 'Windows build could not be determined from the runtime.' }
+    return $null
+}
+
+function Test-LVWindowsBuildMatch {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Rule)
+
+    if (-not $Rule.PSObject.Properties['windowsBuild'] -or -not $Rule.windowsBuild) { return $true }
+    $current = Get-LVCurrentWindowsBuild
+    if ($null -eq $current) { return $false }
+    $range = $Rule.windowsBuild
+    if ($range.PSObject.Properties['min'] -and $current -lt [int]$range.min) { return $false }
+    if ($range.PSObject.Properties['max'] -and $current -gt [int]$range.max) { return $false }
+    return $true
+}
+
 function Test-LVDatabaseProvenance {
     <#
         A live rule must be checkable by a reader. References and source records are
@@ -90,6 +209,20 @@ function Get-LVDatabaseTrustProblem {
     $ruleById = @{}
     $allIds = @{}
 
+    if ($Database.PSObject.Properties['freshness']) {
+        if (-not $Database.freshness -or -not $Database.freshness.PSObject.Properties['maxAgeDays']) {
+            $problems.Add([pscustomobject]@{ RuleId='(database)'; Problem='freshness.maxAgeDays is required when a freshness policy is declared' }) | Out-Null
+        } else {
+            $maxAgeDays = 0
+            if (-not [int]::TryParse([string]$Database.freshness.maxAgeDays, [ref]$maxAgeDays) -or $maxAgeDays -lt 1) {
+                $problems.Add([pscustomobject]@{ RuleId='(database)'; Problem='freshness.maxAgeDays must be a positive integer' }) | Out-Null
+            }
+        }
+        if (-not $Database.freshness.PSObject.Properties['dateBasis'] -or [string]$Database.freshness.dateBasis -ne 'UTC') {
+            $problems.Add([pscustomobject]@{ RuleId='(database)'; Problem='freshness.dateBasis must be UTC' }) | Out-Null
+        }
+    }
+
     foreach ($rule in @($Database.rules | Where-Object { $_ })) {
         $id = [string]$rule.id
         if (-not $id) {
@@ -101,6 +234,38 @@ function Get-LVDatabaseTrustProblem {
         }
         $allIds[$id] = $true
         $ruleById[$id] = $rule
+
+        if ($rule.PSObject.Properties['staleAfterDays']) {
+            $staleAfterDays = 0
+            if (-not [int]::TryParse([string]$rule.staleAfterDays, [ref]$staleAfterDays) -or $staleAfterDays -lt 1) {
+                $problems.Add([pscustomobject]@{ RuleId=$id; Problem='staleAfterDays must be a positive integer' }) | Out-Null
+            }
+        }
+        if ($rule.PSObject.Properties['windowsBuild']) {
+            if (-not $rule.windowsBuild) {
+                $problems.Add([pscustomobject]@{ RuleId=$id; Problem='windowsBuild must declare min or max' }) | Out-Null
+            } else {
+                $minBuild = $null
+                $maxBuild = $null
+                if ($rule.windowsBuild.PSObject.Properties['min']) {
+                    $value = 0
+                    if (-not [int]::TryParse([string]$rule.windowsBuild.min, [ref]$value) -or $value -lt 1) {
+                        $problems.Add([pscustomobject]@{ RuleId=$id; Problem='windowsBuild.min must be a positive integer' }) | Out-Null
+                    } else { $minBuild = $value }
+                }
+                if ($rule.windowsBuild.PSObject.Properties['max']) {
+                    $value = 0
+                    if (-not [int]::TryParse([string]$rule.windowsBuild.max, [ref]$value) -or $value -lt 1) {
+                        $problems.Add([pscustomobject]@{ RuleId=$id; Problem='windowsBuild.max must be a positive integer' }) | Out-Null
+                    } else { $maxBuild = $value }
+                }
+                if ($null -eq $minBuild -and $null -eq $maxBuild) {
+                    $problems.Add([pscustomobject]@{ RuleId=$id; Problem='windowsBuild must declare min or max' }) | Out-Null
+                } elseif ($null -ne $minBuild -and $null -ne $maxBuild -and $minBuild -gt $maxBuild) {
+                    $problems.Add([pscustomobject]@{ RuleId=$id; Problem='windowsBuild.min cannot exceed windowsBuild.max' }) | Out-Null
+                }
+            }
+        }
 
         foreach ($uriProblem in @(Get-LVDatabaseUriProblem -Item $rule -RuleId $id)) {
             $problems.Add($uriProblem) | Out-Null
@@ -264,6 +429,8 @@ function Test-LVRuleMatch {
     # gets a verdict merely because it happens to share an event ID or source.
     if ($Signature.PSObject.Properties['ProviderExtension'] -and $Signature.ProviderExtension) { return $false }
 
+    if (-not (Test-LVWindowsBuildMatch -Rule $Rule)) { return $false }
+
     $m = $Rule.match
 
     if ($m.source   -and $m.source  -ne $Signature.Source)  { return $false }
@@ -403,6 +570,8 @@ function Resolve-LVVerdict {
             $sig | Add-Member -NotePropertyName 'Sources'    -NotePropertyValue @() -Force
             $sig | Add-Member -NotePropertyName 'Status'     -NotePropertyValue $null -Force
             $sig | Add-Member -NotePropertyName 'Verified'   -NotePropertyValue $null -Force
+            $sig | Add-Member -NotePropertyName 'RuleStale'  -NotePropertyValue $false -Force
+            $sig | Add-Member -NotePropertyName 'RuleFreshness' -NotePropertyValue $null -Force
             $sig | Add-Member -NotePropertyName 'FalsePositives' -NotePropertyValue @() -Force
             $catalogMatch = Get-LVErrorCatalogMatch -Signature $sig
             Add-LVErrorCatalogContext -Signature $sig -Match $catalogMatch
@@ -457,6 +626,9 @@ function Resolve-LVVerdict {
         $sig | Add-Member -NotePropertyName 'Sources'    -NotePropertyValue @($hit.sources | Where-Object { $_ }) -Force
         $sig | Add-Member -NotePropertyName 'Status'     -NotePropertyValue $hit.status -Force
         $sig | Add-Member -NotePropertyName 'Verified'   -NotePropertyValue $hit.verified -Force
+        $freshness = Get-LVRuleFreshness -Rule $hit -Policy (Get-LVDatabaseFreshnessPolicy -Database $Database)
+        $sig | Add-Member -NotePropertyName 'RuleStale' -NotePropertyValue ([bool]$freshness.IsStale) -Force
+        $sig | Add-Member -NotePropertyName 'RuleFreshness' -NotePropertyValue $freshness -Force
         $sig | Add-Member -NotePropertyName 'FalsePositives' -NotePropertyValue @($hit.falsepositives | Where-Object { $_ }) -Force
         Add-LVErrorCatalogContext -Signature $sig -Match (Get-LVErrorCatalogMatch -Signature $sig)
         Add-LVUnknownBurstContext -Signature $sig

@@ -134,6 +134,7 @@ $script:LVShortHashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
 # A ruling that asserts "Microsoft says ignore this" is only as good as the day it was
 # checked. Rules older than this without re-verification are reported as stale.
 $script:LVVerificationMaxAgeMonths = 24
+$script:LVDefaultStaleAfterDays = 730
 
 # The machine's UI language, captured once. Rules whose messagePattern is matched
 # against localized event text declare the locale they were written for, and are

@@ -1377,6 +1377,17 @@ function Get-LVGuiXaml {
             <StackPanel Grid.Column="1">
               <Border Style="{StaticResource Card}" Padding="14">
                 <StackPanel>
+                  <TextBlock Text="Rule freshness" Foreground="{DynamicResource Text}" FontSize="14" FontWeight="SemiBold"/>
+                  <TextBlock x:Name="TxtCoverageStaleSummary" Text="Freshness status appears after the first scan."
+                             TextWrapping="Wrap" Foreground="{DynamicResource Subtext0}" FontSize="10.5" Margin="0,5,0,0" LineHeight="16"/>
+                  <ItemsControl x:Name="LstStaleRulesPage" Margin="0,6,0,0">
+                    <ItemsControl.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource Surface0}" BorderThickness="0,1,0,0" Padding="0,6"><TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="{DynamicResource Subtext0}" FontFamily="Consolas" FontSize="10"/></Border></DataTemplate></ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBlock x:Name="TxtStaleNone" Text="No active rule is past its freshness threshold." Foreground="{DynamicResource Green}" FontSize="10.5" Margin="0,8,0,0"/>
+                </StackPanel>
+              </Border>
+              <Border Style="{StaticResource Card}" Padding="14">
+                <StackPanel>
                   <TextBlock Text="Coverage gaps" Foreground="{DynamicResource Text}" FontSize="14" FontWeight="SemiBold"/>
                   <ItemsControl x:Name="LstCoveragePage" Margin="0,8,0,0">
                     <ItemsControl.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource Surface0}" BorderThickness="0,1,0,0" Padding="0,7"><TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="{DynamicResource Subtext0}" FontSize="10.5" LineHeight="16"/></Border></DataTemplate></ItemsControl.ItemTemplate>

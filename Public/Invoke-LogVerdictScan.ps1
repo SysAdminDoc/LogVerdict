@@ -423,6 +423,7 @@ function Invoke-LogVerdictScan {
 
     $resolutionTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
     $db = Get-LogVerdictDatabase -Path $DatabasePath
+    $databaseFreshness = Get-LVDatabaseFreshnessSummary -Database $db -AsOf ([datetime]::UtcNow.Date)
     Write-LVLog -Level info -Message ('Applying {0} rule(s) from the verdict database...' -f @($db.rules).Count)
     $findings = Resolve-LVVerdict -Signature $signatures -Database $db
 
@@ -641,6 +642,7 @@ function Invoke-LogVerdictScan {
         DatabaseName   = $db.name
         DatabaseDate   = $db.updated
         RuleCount      = @($db.rules).Count
+        DatabaseFreshness = $databaseFreshness
         ScanOptions    = [ordered]@{
             channelMode = $channelMode
             channels = @($channels)

@@ -73,6 +73,19 @@ If you are not sure what an event means, do not write the rule. Or write it with
    Invoke-Pester -Path .\Tests    # must be green
    ```
 
+## Freshness and unknown-signature contributions
+
+The database declares a UTC freshness policy with `freshness.maxAgeDays`, currently 730 days. A rule may use
+`staleAfterDays` when its guidance decays faster or slower, and `windowsBuild` may declare an inclusive `min` / `max`
+Windows build range when the ruling is build-specific. A stale active rule is still deterministic and still matches;
+the report and GUI Coverage page surface it for re-verification rather than silently changing its verdict.
+
+`Tools\Export-LogVerdictReviewArtifact.ps1` turns every unmatched signature into a redacted contribution scaffold
+labelled `Rule to write: <provider> <eventId>`. The scaffold is deliberately `status: test`, retains the evidence only
+after redaction, and requires `sources[].retrieved`. Keep it at `test` until a human reviewer verifies the meaning,
+remediation, public source, Windows build range (if any), and regression fixture. The GitHub issue form in
+`.github\ISSUE_TEMPLATE\rule-contribution.yml` mirrors those gates; it is a submission aid, not an activation path.
+
 `Data/verdicts.schema.json` describes the full format. Point your editor at it for completion and inline validation.
 
 ## Writing the four fields well

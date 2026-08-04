@@ -96,6 +96,7 @@ function Get-LogVerdictDatabase {
         schemaVersion = $db.schemaVersion
         name          = $db.name
         updated       = $db.updated
+        freshness     = if ($db.PSObject.Properties['freshness']) { $db.freshness } else { Get-LVDatabaseFreshnessPolicy -Database $db }
         rules         = @($rules.ToArray())
         correlations  = @($correlations.ToArray())
     }

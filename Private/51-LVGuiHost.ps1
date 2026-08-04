@@ -394,6 +394,7 @@ $script:LVGuiElement = @(
     'BtnCoverageElevate', 'TxtCoverageState', 'TxtCoverageSummary',
     'TxtCoverageRatio', 'PbCoverage', 'TxtCoverageReadable', 'TxtCoverageGaps',
     'TxtCoverageWindow', 'LstChannelCoverage', 'LstCoveragePage', 'TxtCoverageNone',
+    'TxtCoverageStaleSummary', 'LstStaleRulesPage', 'TxtStaleNone',
     'TxtHorizonPage', 'LstCrashPage', 'TxtCrashNone',
     'LstCorrelationPage', 'TxtCorrelationNone',
     'TxtActivitySubtitle', 'TxtActivityState', 'BtnActivityClear',
@@ -847,6 +848,14 @@ function Get-LVStaleRuleCount {
     $cutoff = (Get-Date).AddMonths(-1 * $script:LVVerificationMaxAgeMonths)
     $stale = 0
     foreach ($f in $Finding) {
+        if ($f.PSObject.Properties['RuleStale']) {
+            if ([bool]$f.RuleStale) { $stale++ }
+            continue
+        }
+        if ($f.PSObject.Properties['RuleFreshness'] -and $f.RuleFreshness) {
+            if ([bool]$f.RuleFreshness.IsStale) { $stale++ }
+            continue
+        }
         if (-not $f.Verified) { continue }
         $parsed = [datetime]::MinValue
         if (-not [datetime]::TryParseExact([string]$f.Verified, 'yyyy-MM-dd',

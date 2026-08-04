@@ -236,6 +236,26 @@ function Write-LVConsoleReport {
         Write-Host ''
     }
 
+    $staleRules = @()
+    if ($Result.PSObject.Properties['DatabaseFreshness'] -and $Result.DatabaseFreshness) {
+        $staleRules = @($Result.DatabaseFreshness.StaleRules | Where-Object { $_ })
+    } else {
+        $staleRules = @($Result.Findings | Where-Object { $_.PSObject.Properties['RuleStale'] -and $_.RuleStale } |
+            ForEach-Object { [pscustomobject]@{ RuleId = $_.RuleId; Verified = $_.Verified; StaleAfterDays = $_.RuleFreshness.StaleAfterDays } })
+    }
+    if ($staleRules.Count -gt 0) {
+        $threshold = if ($Result.DatabaseFreshness.DefaultStaleAfterDays) { $Result.DatabaseFreshness.DefaultStaleAfterDays } else { $script:LVDefaultStaleAfterDays }
+        Write-Host '  STALE RULE GUIDANCE' -ForegroundColor Yellow
+        Write-Host ('    {0} active rule(s) are past their freshness threshold ({1} default day(s)); they still match but need re-verification.' -f $staleRules.Count, $threshold) -ForegroundColor Yellow
+        foreach ($staleRule in @($staleRules | Select-Object -First 20)) {
+            Write-Host ('    - {0}: last verified {1}; stale after {2} day(s)' -f $staleRule.RuleId, $staleRule.Verified, $staleRule.StaleAfterDays) -ForegroundColor Yellow
+        }
+        if ($staleRules.Count -gt 20) {
+            Write-Host ('    - {0} more stale rule(s) omitted from this summary.' -f ($staleRules.Count - 20)) -ForegroundColor Yellow
+        }
+        Write-Host ''
+    }
+
     if ($Result.PSObject.Properties['History'] -and $Result.History) {
         $history = $Result.History
         Write-Host '  BASELINE (ADVISORY ONLY)' -ForegroundColor Cyan
@@ -631,6 +651,26 @@ function ConvertTo-LVTextReport {
     Add-LVLine $sb ('Worst verdict : {0}' -f $Result.WorstVerdict)
     Add-LVLine $sb
 
+    $staleRules = @()
+    if ($Result.PSObject.Properties['DatabaseFreshness'] -and $Result.DatabaseFreshness) {
+        $staleRules = @($Result.DatabaseFreshness.StaleRules | Where-Object { $_ })
+    } else {
+        $staleRules = @($Result.Findings | Where-Object { $_.PSObject.Properties['RuleStale'] -and $_.RuleStale } |
+            ForEach-Object { [pscustomobject]@{ RuleId = $_.RuleId; Verified = $_.Verified; StaleAfterDays = $_.RuleFreshness.StaleAfterDays } })
+    }
+    if ($staleRules.Count -gt 0) {
+        $threshold = if ($Result.DatabaseFreshness.DefaultStaleAfterDays) { $Result.DatabaseFreshness.DefaultStaleAfterDays } else { $script:LVDefaultStaleAfterDays }
+        Add-LVLine $sb 'STALE RULE GUIDANCE'
+        Add-LVLine $sb ('{0} active rule(s) are past the {1}-day freshness threshold; they still match but need re-verification.' -f $staleRules.Count, $threshold)
+        foreach ($staleRule in @($staleRules | Select-Object -First 20)) {
+            Add-LVLine $sb ('  - {0}: last verified {1}; stale after {2} day(s)' -f $staleRule.RuleId, $staleRule.Verified, $staleRule.StaleAfterDays)
+        }
+        if ($staleRules.Count -gt 20) {
+            Add-LVLine $sb ('  - {0} more stale rule(s) omitted from this summary.' -f ($staleRules.Count - 20))
+        }
+        Add-LVLine $sb
+    }
+
     if ($Result.PSObject.Properties['History'] -and $Result.History) {
         $history = $Result.History
         Add-LVLine $sb 'BASELINE (ADVISORY ONLY)'
@@ -957,6 +997,13 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
     Add-LVLine $sb ('<div class="sub">{0} &middot; scanned {1:yyyy-MM-dd HH:mm} &middot; last {2} day(s) &middot; elevated: {3} &middot; v{4}</div>' -f (ConvertTo-LVHtmlEncoded $Result.MachineName), $Result.ScanTime, $Result.DaysBack, $Result.Elevated, $Result.Version)
 
     $needsAttention = @($Result.Findings | Where-Object { (Get-LVVerdictRank -Verdict $_.Verdict) -ge (Get-LVVerdictRank -Verdict 'unknown') }).Count
+    $staleRules = @()
+    if ($Result.PSObject.Properties['DatabaseFreshness'] -and $Result.DatabaseFreshness) {
+        $staleRules = @($Result.DatabaseFreshness.StaleRules | Where-Object { $_ })
+    } else {
+        $staleRules = @($Result.Findings | Where-Object { $_.PSObject.Properties['RuleStale'] -and $_.RuleStale } |
+            ForEach-Object { [pscustomobject]@{ RuleId = $_.RuleId; Verified = $_.Verified; StaleAfterDays = $_.RuleFreshness.StaleAfterDays } })
+    }
 
     Add-LVLine $sb '<div class="grid">'
     Add-LVLine $sb ('<div class="stat"><div class="k">Records read</div><div class="v">{0}</div></div>' -f $Result.Reduction.RecordCount)
@@ -966,6 +1013,7 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
     if ($Result.Stability) {
         Add-LVLine $sb ('<div class="stat"><div class="k">Stability ({0})</div><div class="v">{1}/10</div></div>' -f (ConvertTo-LVHtmlEncoded $Result.Stability.Direction), $Result.Stability.Current)
     }
+    Add-LVLine $sb ('<div class="stat"><div class="k">Stale rulings</div><div class="v">{0}</div></div>' -f $staleRules.Count)
     Add-LVLine $sb '</div>'
     if ($Result.Reduction.PSObject.Properties['InitialSignatureCount']) {
         Add-LVLine $sb ('<div class="sub">Template passes: {0} fully masked signatures ({1}:1 reduction) &rarr; {2} signatures after promoting {3} low-cardinality slot(s) ({4}:1 reduction).</div>' -f `
@@ -1039,6 +1087,15 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             Add-LVLine $sb '<div>No advisory in the supplied cache matches the requested package/version.</div>'
         }
         Add-LVLine $sb '</div>'
+    }
+    if ($staleRules.Count -gt 0) {
+        $threshold = if ($Result.DatabaseFreshness.DefaultStaleAfterDays) { $Result.DatabaseFreshness.DefaultStaleAfterDays } else { $script:LVDefaultStaleAfterDays }
+        Add-LVLine $sb '<div class="warn"><strong>Stale rule guidance.</strong> These active rules still match, but their guidance is past the declared freshness threshold and needs re-verification.'
+        Add-LVLine $sb ('<div>Default threshold: {0} day(s); as of {1}. Showing up to 20 rule ids.</div><ul>' -f $threshold, (ConvertTo-LVHtmlEncoded ([string]$Result.DatabaseFreshness.AsOf)))
+        foreach ($staleRule in @($staleRules | Select-Object -First 20)) {
+            Add-LVLine $sb ('<li>{0}: last verified {1}; stale after {2} day(s)</li>' -f (ConvertTo-LVHtmlEncoded $staleRule.RuleId), (ConvertTo-LVHtmlEncoded $staleRule.Verified), $staleRule.StaleAfterDays)
+        }
+        Add-LVLine $sb '</ul></div>'
     }
     if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {
         Add-LVLine $sb '<div class="warn"><strong>CASE PROFILE / HANDOFF.</strong><div>Collection metadata and operator context; this is not a verdict.</div>'
@@ -1158,7 +1215,7 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         Add-LVLine $sb ('<article class="f finding" data-verdict="{0}" style="border-left-color:{1}">' -f `
             (ConvertTo-LVHtmlEncoded $f.Verdict), $hex)
         Add-LVLine $sb ('<h2><span class="badge" style="color:{0}">{1}</span>{2}</h2>' -f $hex, $f.Verdict, (ConvertTo-LVHtmlEncoded $f.Title))
-        Add-LVLine $sb ('<div class="meta">{0} &middot; {1} occurrence(s) &middot; {2}/day &middot; {3} to {4} &middot; rule {5} ({6}{7})</div>' -f (ConvertTo-LVHtmlEncoded $f.Key), $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen), $f.RuleId, $f.Confidence, $(if ($f.Verified) { ', verified ' + $f.Verified } else { '' }))
+        Add-LVLine $sb ('<div class="meta">{0} &middot; {1} occurrence(s) &middot; {2}/day &middot; {3} to {4} &middot; rule {5} ({6}{7}{8})</div>' -f (ConvertTo-LVHtmlEncoded $f.Key), $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen), $f.RuleId, $f.Confidence, $(if ($f.Verified) { ', verified ' + $f.Verified } else { '' }), $(if ($f.PSObject.Properties['RuleStale'] -and $f.RuleStale) { ', stale guidance' } else { '' }))
         if ($f.PSObject.Properties['Burst'] -and $f.Burst) {
             Add-LVLine $sb ('<div class="row"><div class="lbl">Burst</div><div>{0} &middot; {1} occurrence(s) in {2} minute(s)</div></div>' -f (Format-LVWhen $f.BurstOnset), $f.BurstCount, $f.BurstWindowMinutes)
         }

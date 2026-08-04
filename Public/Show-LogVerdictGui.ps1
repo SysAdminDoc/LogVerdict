@@ -464,6 +464,26 @@ function Show-LogVerdictGui {
             $ui.TxtCoverageNone.Visibility = 'Visible'
         }
 
+        $staleRules = @()
+        if ($Result.PSObject.Properties['DatabaseFreshness'] -and $Result.DatabaseFreshness) {
+            $staleRules = @($Result.DatabaseFreshness.StaleRules | Where-Object { $_ })
+        } else {
+            $staleRules = @($Result.Findings | Where-Object { $_.PSObject.Properties['RuleStale'] -and $_.RuleStale } |
+                ForEach-Object { [pscustomobject]@{ RuleId = $_.RuleId; Verified = $_.Verified; StaleAfterDays = $_.RuleFreshness.StaleAfterDays } })
+        }
+        $staleLines = @($staleRules | Select-Object -First 20 | ForEach-Object {
+            '{0}  last verified {1}; stale after {2} day(s)' -f $_.RuleId, $_.Verified, $_.StaleAfterDays
+        })
+        $ui.LstStaleRulesPage.ItemsSource = [string[]]$staleLines
+        if ($staleRules.Count -gt 0) {
+            $defaultStaleDays = if ($Result.DatabaseFreshness.DefaultStaleAfterDays) { $Result.DatabaseFreshness.DefaultStaleAfterDays } else { $script:LVDefaultStaleAfterDays }
+            $ui.TxtCoverageStaleSummary.Text = '{0} active rule(s) are past the {1}-day freshness threshold. They still match, but their guidance needs re-verification.' -f $staleRules.Count, $defaultStaleDays
+            $ui.TxtStaleNone.Visibility = 'Collapsed'
+        } else {
+            $ui.TxtCoverageStaleSummary.Text = 'No active rule is past the declared freshness threshold.'
+            $ui.TxtStaleNone.Visibility = 'Visible'
+        }
+
         $channelLines = New-Object System.Collections.Generic.List[string]
         $readable = 0
         $totalChannels = 0
@@ -596,9 +616,14 @@ function Show-LogVerdictGui {
         if ($Result.DatabaseDate) { $footer += ' - updated {0}' -f $Result.DatabaseDate }
         $footer += ' - scanned in {0:N1}s' -f $Result.Duration.TotalSeconds
 
-        $stale = Get-LVStaleRuleCount -Finding @($Result.Findings)
+        $stale = if ($Result.PSObject.Properties['DatabaseFreshness'] -and $Result.DatabaseFreshness) {
+            [int]$Result.DatabaseFreshness.StaleRuleCount
+        } else {
+            Get-LVStaleRuleCount -Finding @($Result.Findings)
+        }
         if ($stale -gt 0) {
-            $footer += ' - {0} ruling(s) not re-checked in over {1} months' -f $stale, $script:LVVerificationMaxAgeMonths
+            $staleDays = if ($Result.DatabaseFreshness.DefaultStaleAfterDays) { $Result.DatabaseFreshness.DefaultStaleAfterDays } else { $script:LVDefaultStaleAfterDays }
+            $footer += ' - {0} active ruling(s) past the {1}-day freshness threshold' -f $stale, $staleDays
             $ui.TxtFooter.Foreground = $ui.PillDetail.FindResource('Yellow')
         } else {
             $ui.TxtFooter.Foreground = $ui.PillDetail.FindResource('TextMuted')

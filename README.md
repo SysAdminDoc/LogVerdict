@@ -455,8 +455,17 @@ removed candidates between imports. The importer is offline and never edits `Dat
 
 `Tools\Export-LogVerdictReviewArtifact.ps1` accepts the Sigma queue (or a local `rules` JSON file) through
 `-CandidatePath`, so unknown findings, model candidates, and third-party candidates can be reviewed in one
-redacted artifact. `Tools\Import-LogVerdictReviewArtifact.ps1` validates that contract and emits a diff only; it
-does not promote accepted material automatically.
+redacted artifact. A freshness-qualified report also gives every unknown item a pre-filled `Rule to write: <provider>
+<eventId>` contribution scaffold. The scaffold remains `status: test`, carries the redacted evidence, and includes a
+`sources[].retrieved` date; reports without a validated freshness summary remain evidence-only. It is not a diagnosis
+or an automatic promotion. `Tools\Import-LogVerdictReviewArtifact.ps1` validates that
+contract and emits a diff only; it does not promote accepted material automatically.
+
+Rule freshness is explicit and UTC-based. `Data\verdicts.json` declares a 730-day default through `freshness.maxAgeDays`;
+a rule may override it with `staleAfterDays` and may restrict matching to an inclusive `windowsBuild.min` / `windowsBuild.max`
+range. Stale active rules remain visible and continue to match, but the console/HTML report and GUI Coverage page call
+out that their guidance needs re-verification. The contribution issue form is YAML-only and requires a source URI and
+retrieval date before a test rule can be proposed.
 
 `match` accepts `source`, `channel`, `provider` (trailing `*` wildcard allowed), `eventId`, `messagePattern` (regex), and `eventData`. Prefer `eventData` whenever the ruling depends on a payload field: rendered Windows messages can be localized while XML values such as HRESULTs remain stable. A structured condition looks like `{"all":[{"field":"EventData.Image","endswith":"\\\\powershell.exe"}]}`; supported modifiers are `equals`, `contains`, `startswith`, `endswith`, and `regex`, combined through bounded `all`, `any`, and `not` conditions. Unsupported Sigma modifiers remain inactive importer candidates. More match keys means higher specificity, and the most specific matching rule wins.
 

@@ -1,0 +1,60 @@
+name: Rule contribution
+description: Submit a reviewed unknown Windows signature for a test rule.
+title: "Rule to write: "
+labels:
+  - rule-contribution
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep the rule at `status: test` until the provider meaning, remediation, source, and regression fixture are verified.
+        Do not include hostnames, usernames, SIDs, profile paths, tokens, or raw evidence that has not been redacted.
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      description: The redacted event provider name.
+    validations:
+      required: true
+  - type: input
+    id: event-id
+    attributes:
+      label: Event ID
+      description: The numeric event ID, or state that this is a non-event signature.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted evidence
+      description: Paste the contribution.evidence block from the review artifact after checking it for identifiers.
+    validations:
+      required: true
+  - type: input
+    id: source-uri
+    attributes:
+      label: Source URI
+      description: Public documentation that supports the proposed meaning and remediation.
+      placeholder: https://learn.microsoft.com/...
+    validations:
+      required: true
+  - type: input
+    id: source-retrieved
+    attributes:
+      label: Source retrieved
+      description: UTC date when the source was read, in YYYY-MM-DD format.
+      placeholder: YYYY-MM-DD
+    validations:
+      required: true
+  - type: input
+    id: windows-build
+    attributes:
+      label: Windows build range
+      description: Optional inclusive min/max build range if the behavior is build-specific.
+  - type: textarea
+    id: proposed-rule
+    attributes:
+      label: Proposed test rule
+      description: Include match, verdict, title, plain, why, action, confidence, and a regression fixture. Keep status test.
+    validations:
+      required: true
