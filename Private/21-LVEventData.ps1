@@ -187,7 +187,9 @@ function Get-LVStructuredFieldValues {
 function Test-LVStructuredPredicate {
     param(
         [Parameter(Mandatory)]$Predicate,
-        [Parameter(Mandatory)]$Signature
+        [Parameter(Mandatory)]$Signature,
+        [AllowNull()][ref]$RegexFailure,
+        [string]$RuleId
     )
 
     if (-not $Predicate.field) { return $false }
@@ -203,7 +205,19 @@ function Test-LVStructuredPredicate {
                     'contains' { if ($observed.IndexOf([string]$expected, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true } }
                     'startswith' { if ($observed.StartsWith([string]$expected, [StringComparison]::OrdinalIgnoreCase)) { return $true } }
                     'endswith' { if ($observed.EndsWith([string]$expected, [StringComparison]::OrdinalIgnoreCase)) { return $true } }
-                    'regex' { try { if ($observed -imatch [string]$expected) { return $true } } catch { return $false } }
+                    'regex' {
+                        try {
+                            $regex = Get-LVCompiledRegex -Pattern ([string]$expected)
+                            if ($regex.IsMatch([string]$observed)) { return $true }
+                        } catch [Text.RegularExpressions.RegexMatchTimeoutException] {
+                            if ($RegexFailure) { $RegexFailure.Value = $RuleId }
+                            Write-LVLog -Level warn -Message ("Rule '{0}' structured regex timed out; signature will remain unknown." -f $RuleId)
+                            return $false
+                        } catch {
+                            Write-LVLog -Level warn -Message ("Rule '{0}' structured regex could not be evaluated; signature will remain unknown." -f $RuleId)
+                            return $false
+                        }
+                    }
                 }
             }
         }
@@ -215,21 +229,35 @@ function Test-LVStructuredPredicate {
 function Test-LVStructuredCondition {
     param(
         [Parameter(Mandatory)]$Condition,
-        [Parameter(Mandatory)]$Signature
+        [Parameter(Mandatory)]$Signature,
+        [AllowNull()][ref]$RegexFailure,
+        [string]$RuleId
     )
 
     if ($Condition.PSObject.Properties['all']) {
         $children = @($Condition.all)
-        return ($children.Count -gt 0 -and (@($children | Where-Object { -not (Test-LVStructuredCondition -Condition $_ -Signature $Signature) }).Count -eq 0))
+        return ($children.Count -gt 0 -and (@($children | Where-Object {
+            $childArgs = @{ Condition = $_; Signature = $Signature; RuleId = $RuleId }
+            if ($RegexFailure) { $childArgs.RegexFailure = $RegexFailure }
+            -not (Test-LVStructuredCondition @childArgs)
+        }).Count -eq 0))
     }
     if ($Condition.PSObject.Properties['any']) {
         $children = @($Condition.any)
-        return ($children.Count -gt 0 -and (@($children | Where-Object { Test-LVStructuredCondition -Condition $_ -Signature $Signature }).Count -gt 0))
+        return ($children.Count -gt 0 -and (@($children | Where-Object {
+            $childArgs = @{ Condition = $_; Signature = $Signature; RuleId = $RuleId }
+            if ($RegexFailure) { $childArgs.RegexFailure = $RegexFailure }
+            Test-LVStructuredCondition @childArgs
+        }).Count -gt 0))
     }
     if ($Condition.PSObject.Properties['not']) {
-        return -not (Test-LVStructuredCondition -Condition $Condition.not -Signature $Signature)
+        $childArgs = @{ Condition = $Condition.not; Signature = $Signature; RuleId = $RuleId }
+        if ($RegexFailure) { $childArgs.RegexFailure = $RegexFailure }
+        return -not (Test-LVStructuredCondition @childArgs)
     }
-    return Test-LVStructuredPredicate -Predicate $Condition -Signature $Signature
+    $predicateArgs = @{ Predicate = $Condition; Signature = $Signature; RuleId = $RuleId }
+    if ($RegexFailure) { $predicateArgs.RegexFailure = $RegexFailure }
+    return Test-LVStructuredPredicate @predicateArgs
 }
 
 function Get-LVStructuredConditionProblems {

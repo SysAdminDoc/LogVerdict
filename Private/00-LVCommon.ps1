@@ -47,6 +47,8 @@ $script:LVReliabilityBudgetStop = $null
 $script:LVRuleStatus = @('stable', 'test', 'experimental', 'deprecated', 'unsupported')
 $script:LVActiveRuleStatus = @('stable', 'test', 'experimental')
 $script:LVRuleConfidence = @('high', 'medium', 'low', 'draft')
+$script:LVRuleRegexMatchTimeout = [TimeSpan]::FromMilliseconds(100)
+$script:LVCompiledRegexCache = @{}
 
 # Numeric, error-code, and version slots can carry a small diagnostic vocabulary.
 # Identity and volatile slots are never promoted even when a tiny sample makes them

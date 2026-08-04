@@ -827,6 +827,29 @@ Describe 'Verdict database' {
         @(Test-LogVerdictDatabase).Count | Should -Be 0
     }
 
+    It 'reports an uncompilable message or structured regex as a rule trust problem' {
+        $rules = @(
+            [ordered]@{
+                id='BAD-MESSAGE-REGEX'; status='stable'; verified='2026-08-03'
+                match=@{ source='event'; messagePattern='[' }
+                verdict='benign'; title='t'; plain='p'; why='w'; action='a'; confidence='high'
+            }
+            [ordered]@{
+                id='BAD-STRUCTURED-REGEX'; status='stable'; verified='2026-08-03'
+                match=@{ source='event'; eventData=@{ field='EventData.Image'; regex='[' } }
+                verdict='benign'; title='t'; plain='p'; why='w'; action='a'; confidence='high'
+            }
+        )
+        $path = Join-Path $TestDrive 'bad-regex.json'
+        [pscustomobject]@{ schemaVersion=6; name='bad-regex'; updated='2026-08-03'; rules=$rules; correlations=@() } |
+            ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path -Encoding UTF8
+
+        $problems = @(Test-LogVerdictDatabase -Path $path -SkipFixture)
+        @($problems | Where-Object { $_.RuleId -eq 'BAD-MESSAGE-REGEX' -and $_.Problem -match 'messagePattern.*valid regex' }).Count | Should -Be 1
+        @($problems | Where-Object { $_.RuleId -eq 'BAD-STRUCTURED-REGEX' -and $_.Problem -match 'eventData\.regex.*valid regex' }).Count | Should -Be 1
+        { Get-LogVerdictDatabase -Path $path } | Should -Throw '*BAD-MESSAGE-REGEX*'
+    }
+
     It 'allows only http and https rule URIs and names the offending rule' {
         $unsafe = [ordered]@{
             'URI-JS'       = @{ field = 'references'; value = 'javascript:alert(1)' }
@@ -3257,6 +3280,47 @@ Describe 'Verdict resolution' {
 
             $bad = [pscustomobject]@{ field='EventData.Image'; contains='app'; wildcard='unsupported' }
             @(Get-LVStructuredConditionProblems -Condition $bad).Count | Should -BeGreaterThan 0
+        }
+    }
+
+    It 'matches a structured regex through the bounded compiled path' {
+        InModuleScope LogVerdict {
+            $signature = [pscustomobject]@{
+                Key='Acme/2'; Source='event'; Channel='System'; Provider='Acme'; Id=2
+                Count=1; PerDay=0.1; SampleMessage='localized provider text'; FirstSeen=(Get-Date); LastSeen=(Get-Date)
+                StructuredData = [pscustomobject]@{
+                    EventData = [pscustomobject]@{ Image='C:\Tools\app.exe' }
+                }
+            }
+            $rule = [pscustomobject]@{
+                id='STRUCT-REGEX'; status='stable'; verified='2026-08-03'
+                match=[pscustomobject]@{
+                    source='event'; provider='Acme'; eventId=2
+                    eventData=[pscustomobject]@{ field='EventData.Image'; regex='^C:\\Tools\\.+\.exe$' }
+                }
+                verdict='actionable'; title='structured regex'; plain='p'; why='w'; action='a'; confidence='high'
+            }
+            $finding = @(Resolve-LVVerdict -Signature @($signature) -Database ([pscustomobject]@{ rules=@($rule) }))[0]
+            $finding.RuleId | Should -BeExactly 'STRUCT-REGEX'
+        }
+    }
+
+    It 'turns a timed-out message regex into an unknown finding' {
+        InModuleScope LogVerdict {
+            $rule = [pscustomobject]@{
+                id='REGEX-TIMEOUT'; status='stable'; verified='2026-08-03'
+                match=[pscustomobject]@{ source='event'; provider='Acme'; eventId=99; messagePattern='(a+)+$' }
+                verdict='critical'; title='must not win'; plain='p'; why='w'; action='a'; confidence='high'
+            }
+            $signature = [pscustomobject]@{
+                Key='Acme/99'; Source='event'; Channel='System'; Provider='Acme'; Id=99
+                Count=1; PerDay=0.1; SampleMessage=(('a' * 10000) + 'X'); FirstSeen=(Get-Date); LastSeen=(Get-Date)
+            }
+            $finding = @(Resolve-LVVerdict -Signature @($signature) -Database ([pscustomobject]@{ rules=@($rule); correlations=@() }))[0]
+            $finding.Verdict | Should -BeExactly 'unknown'
+            $finding.RegexMatchTimeout | Should -BeTrue
+            $finding.RegexRuleId | Should -BeExactly 'REGEX-TIMEOUT'
+            $finding.Why | Should -Match 'timeout'
         }
     }
 

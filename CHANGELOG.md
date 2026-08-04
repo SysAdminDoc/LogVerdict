@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [0.8.2] - 2026-08-02
 
+- Compiled rule message and structured regular expressions once with bounded match timeouts; invalid patterns now fail database trust and timed-out matches remain unknown with an explicit warning.
 - Made result redaction deny-by-default, recursively masked live-watch records and model errors, and made `Invoke-LogVerdictScan -Redact` return a redacted contract.
 - Extended catalog and advisory integrity hashes across user-visible descriptions, explanations, titles, and licensed provenance; regenerated both bundled data files and added prose-tamper tests.
 - Made all-channel enumeration return an explicit failure state, retain restricted probes and unknown-count channels, and force incomplete sweeps to an unknown verdict with a non-zero exit.

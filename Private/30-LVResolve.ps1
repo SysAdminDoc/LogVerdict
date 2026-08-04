@@ -191,6 +191,83 @@ function Get-LVDatabaseUriProblem {
     }
 }
 
+function Get-LVCompiledRegex {
+    <#
+        Compile one rule pattern for the lifetime of the module. A timeout is part
+        of the Regex object, so matching cannot inherit the unbounded default used by
+        PowerShell's -match operator.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Pattern)
+
+    if (-not $script:LVCompiledRegexCache) { $script:LVCompiledRegexCache = @{} }
+    if ($script:LVCompiledRegexCache.ContainsKey($Pattern)) {
+        return $script:LVCompiledRegexCache[$Pattern]
+    }
+    $timeout = $script:LVRuleRegexMatchTimeout
+    $compiled = [regex]::new($Pattern,
+        [Text.RegularExpressions.RegexOptions]::IgnoreCase,
+        $timeout)
+    $script:LVCompiledRegexCache[$Pattern] = $compiled
+    return $compiled
+}
+
+function Get-LVRegexPatternProblem {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$Pattern,
+        [Parameter(Mandatory)][string]$RuleId,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Pattern)) { return $null }
+    try {
+        [void](Get-LVCompiledRegex -Pattern $Pattern)
+    } catch {
+        return [pscustomobject]@{
+            RuleId = $RuleId
+            Problem = ("{0} is not a valid regex: {1}" -f $Path, $_.Exception.Message)
+        }
+    }
+    return $null
+}
+
+function Get-LVStructuredRegexProblems {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '',
+        Justification = 'The function returns every regex validation problem in a condition tree.')]
+    param(
+        [AllowNull()]$Condition,
+        [Parameter(Mandatory)][string]$RuleId,
+        [string]$Path = 'eventData',
+        [int]$Depth = 0
+    )
+
+    $problems = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Condition -or $Depth -gt 16) { return @($problems.ToArray()) }
+    if ($Condition.PSObject.Properties['field']) {
+        if ($Condition.PSObject.Properties['regex']) {
+            $problem = Get-LVRegexPatternProblem -Pattern ([string]$Condition.regex) -RuleId $RuleId -Path ("{0}.regex" -f $Path)
+            if ($problem) { $problems.Add($problem) | Out-Null }
+        }
+        return @($problems.ToArray())
+    }
+    foreach ($operator in @('all', 'any')) {
+        if (-not $Condition.PSObject.Properties[$operator]) { continue }
+        $children = @($Condition.$operator)
+        for ($i = 0; $i -lt $children.Count; $i++) {
+            foreach ($problem in @(Get-LVStructuredRegexProblems -Condition $children[$i] -RuleId $RuleId -Path ("{0}.{1}[{2}]" -f $Path, $operator, $i) -Depth ($Depth + 1))) {
+                $problems.Add($problem) | Out-Null
+            }
+        }
+    }
+    if ($Condition.PSObject.Properties['not']) {
+        foreach ($problem in @(Get-LVStructuredRegexProblems -Condition $Condition.not -RuleId $RuleId -Path ("{0}.not" -f $Path) -Depth ($Depth + 1))) {
+            $problems.Add($problem) | Out-Null
+        }
+    }
+    return @($problems.ToArray())
+}
+
 function Get-LVDatabaseTrustProblem {
     <#
         Validate fields that the resolver consumes but JSON Schema cannot express:
@@ -281,6 +358,15 @@ function Get-LVDatabaseTrustProblem {
         if ($rule.match -and $rule.match.eventData) {
             foreach ($problem in @(Get-LVStructuredConditionProblems -Condition $rule.match.eventData)) {
                 $problems.Add([pscustomobject]@{ RuleId=$id; Problem=[string]$problem }) | Out-Null
+            }
+        }
+        if ($rule.match -and $rule.match.messagePattern) {
+            $problem = Get-LVRegexPatternProblem -Pattern ([string]$rule.match.messagePattern) -RuleId $id -Path 'messagePattern'
+            if ($problem) { $problems.Add($problem) | Out-Null }
+        }
+        if ($rule.match -and $rule.match.eventData) {
+            foreach ($problem in @(Get-LVStructuredRegexProblems -Condition $rule.match.eventData -RuleId $id)) {
+                $problems.Add($problem) | Out-Null
             }
         }
     }
@@ -420,7 +506,8 @@ function Get-LVRuleSpecificity {
 function Test-LVRuleMatch {
     param(
         [Parameter(Mandatory)]$Rule,
-        [Parameter(Mandatory)]$Signature
+        [Parameter(Mandatory)]$Signature,
+        [AllowNull()][ref]$RegexFailure
     )
 
     # Extension records are evidence, not a way for a provider to inherit or
@@ -466,7 +553,9 @@ function Test-LVRuleMatch {
 
     if ($m.eventData) {
         if ($Signature.Source -notin @('event', 'reliability')) { return $false }
-        if (-not (Test-LVStructuredCondition -Condition $m.eventData -Signature $Signature)) { return $false }
+        $conditionArgs = @{ Condition = $m.eventData; Signature = $Signature; RuleId = [string]$Rule.id }
+        if ($RegexFailure) { $conditionArgs.RegexFailure = $RegexFailure }
+        if (-not (Test-LVStructuredCondition @conditionArgs)) { return $false }
     }
 
     if ($m.messagePattern) {
@@ -481,7 +570,17 @@ function Test-LVRuleMatch {
 
         $haystack = $Signature.SampleMessage
         if (-not $haystack) { $haystack = '' }
-        if ($haystack -notmatch $m.messagePattern) { return $false }
+        try {
+            $regex = Get-LVCompiledRegex -Pattern ([string]$m.messagePattern)
+            if (-not $regex.IsMatch([string]$haystack)) { return $false }
+        } catch [Text.RegularExpressions.RegexMatchTimeoutException] {
+            if ($RegexFailure) { $RegexFailure.Value = [string]$Rule.id }
+            Write-LVLog -Level warn -Message ("Rule '{0}' regex timed out; signature will remain unknown." -f $Rule.id)
+            return $false
+        } catch {
+            Write-LVLog -Level warn -Message ("Rule '{0}' regex could not be evaluated; signature will remain unknown." -f $Rule.id)
+            return $false
+        }
     }
 
     return $true
@@ -553,16 +652,18 @@ function Resolve-LVVerdict {
         }
 
         $hit = $null
+        $regexFailure = $null
         foreach ($rule in $rules) {
-            if (Test-LVRuleMatch -Rule $rule -Signature $sig) { $hit = $rule; break }
+            if (Test-LVRuleMatch -Rule $rule -Signature $sig -RegexFailure ([ref]$regexFailure)) { $hit = $rule; break }
+            if ($regexFailure) { break }
         }
 
         if ($null -eq $hit) {
             $sig | Add-Member -NotePropertyName 'RuleId'     -NotePropertyValue $null -Force
             $sig | Add-Member -NotePropertyName 'Verdict'    -NotePropertyValue 'unknown' -Force
             $sig | Add-Member -NotePropertyName 'Title'      -NotePropertyValue ('Unrecognized: {0}' -f $sig.Key) -Force
-            $sig | Add-Member -NotePropertyName 'Plain'      -NotePropertyValue 'No rule in the verdict database covers this signature, so LogVerdict will not guess at what it means. The raw message below is the evidence, unedited.' -Force
-            $sig | Add-Member -NotePropertyName 'Why'        -NotePropertyValue 'Reported so that an unknown problem is visible rather than silently dropped.' -Force
+            $sig | Add-Member -NotePropertyName 'Plain'      -NotePropertyValue $(if ($regexFailure) { 'A verdict rule could not be evaluated within its safety timeout, so LogVerdict refused to guess. The raw message below is the evidence, unedited.' } else { 'No rule in the verdict database covers this signature, so LogVerdict will not guess at what it means. The raw message below is the evidence, unedited.' }) -Force
+            $sig | Add-Member -NotePropertyName 'Why'        -NotePropertyValue $(if ($regexFailure) { "Rule '$regexFailure' exceeded the regex match timeout; the signature remains unknown until the rule is corrected." } else { 'Reported so that an unknown problem is visible rather than silently dropped.' }) -Force
             $sig | Add-Member -NotePropertyName 'Action'     -NotePropertyValue 'Read the sample message. If you identify it, add a reviewed rule to Data/verdicts.local.json so the next scan explains it.' -Force
             $sig | Add-Member -NotePropertyName 'Confidence' -NotePropertyValue 'none' -Force
             $sig | Add-Member -NotePropertyName 'Reference'  -NotePropertyValue $null -Force
@@ -573,6 +674,8 @@ function Resolve-LVVerdict {
             $sig | Add-Member -NotePropertyName 'RuleStale'  -NotePropertyValue $false -Force
             $sig | Add-Member -NotePropertyName 'RuleFreshness' -NotePropertyValue $null -Force
             $sig | Add-Member -NotePropertyName 'FalsePositives' -NotePropertyValue @() -Force
+            $sig | Add-Member -NotePropertyName 'RegexMatchTimeout' -NotePropertyValue ([bool]$regexFailure) -Force
+            $sig | Add-Member -NotePropertyName 'RegexRuleId' -NotePropertyValue $regexFailure -Force
             $catalogMatch = Get-LVErrorCatalogMatch -Signature $sig
             Add-LVErrorCatalogContext -Signature $sig -Match $catalogMatch
             if ($catalogMatch -and $catalogMatch.Entry) {
