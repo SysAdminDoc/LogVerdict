@@ -155,7 +155,10 @@ function Get-LVModuleManifest {
     if ($records.Count -ne $ExpectedFileCount) {
         throw ("Pinned dependency {0} v{1} file count mismatch. Expected {2}, got {3}." -f $Name, $ExpectedVersion, $ExpectedFileCount, $records.Count)
     }
-    $totalBytes = [int64](($records | Measure-Object -Property bytes -Sum).Sum)
+    $totalBytes = [int64]0
+    foreach ($record in $records) {
+        $totalBytes += [int64]$record['bytes']
+    }
     if ($totalBytes -ne $ExpectedTotalBytes) {
         throw ("Pinned dependency {0} v{1} byte count mismatch. Expected {2}, got {3}." -f $Name, $ExpectedVersion, $ExpectedTotalBytes, $totalBytes)
     }
