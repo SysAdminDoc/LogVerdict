@@ -608,45 +608,39 @@ function ConvertTo-LVEcsExport {
 function ConvertTo-LVOcsfExport {
     param([Parameter(Mandatory)]$Model)
 
-    $severityMap = @{ critical = 5; actionable = 4; investigate = 3; unknown = 2; informational = 1; benign = 0 }
-    $findings = foreach ($finding in @($Model.Findings)) {
+    # LogVerdict findings include diagnostics, health signals, and benign context,
+    # so they are not OCSF Detection Findings. Keep the envelope intentionally
+    # classless and carry the complete normalized evidence in the vendor extension.
+    $evidence = foreach ($finding in @($Model.Findings)) {
         $time = ConvertTo-LVStandardUnixMillisecond $finding.event.firstObserved
         [pscustomobject][ordered]@{
-            activity_id = 1
-            activity_name = 'Create'
-            category_name = 'Findings'
-            category_uid = 2
-            class_name = 'Detection Finding'
-            class_uid = 2004
-            type_name = 'Detection Finding: Create'
-            type_uid = 200401
-            severity_id = $severityMap[[string]$finding.verdict]
-            severity = ([string]$finding.verdict).ToUpperInvariant()
-            status = 'New'
             time = $time
             start_time = $time
             end_time = ConvertTo-LVStandardUnixMillisecond $finding.event.lastObserved
             count = $finding.event.count
             metadata = [pscustomobject][ordered]@{ product = [pscustomobject]@{ name = 'LogVerdict'; version = $Model.Context.scan.version }; version = '1.1.0' }
-            finding_info = [pscustomobject][ordered]@{
-                uid = $finding.key
-                title = $finding.title
-                desc = $finding.plain
-                analytic = [pscustomobject][ordered]@{ rule_uid = $finding.ruleId; confidence = $finding.confidence }
-                references = @($finding.references)
+            unmapped = [pscustomobject][ordered]@{
+                logverdict = [pscustomobject][ordered]@{
+                    recordType = 'normalized-evidence'
+                    finding = $finding
+                }
             }
-            unmapped = [pscustomobject]@{ logverdict = $finding }
         }
     }
     return [pscustomobject][ordered]@{
         adapter = 'ocsf'
         schemaVersion = $Model.Context.schemaVersion
         ocsfVersion = '1.1.0'
-        metadata = [pscustomobject][ordered]@{ product = [pscustomobject]@{ name = 'LogVerdict'; version = $Model.Context.scan.version }; profiles = @('logverdict.finding') }
+        contract = 'normalized-evidence'
+        metadata = [pscustomobject][ordered]@{ product = [pscustomobject]@{ name = 'LogVerdict'; version = $Model.Context.scan.version }; profiles = @('logverdict.normalized-evidence') }
         scan = $Model.Context
-        findings = @($findings)
-        advisories = @($Model.Advisories)
-        correlations = @($Model.Correlations)
+        evidence = @($evidence)
+        unmapped = [pscustomobject][ordered]@{
+            logverdict = [pscustomobject][ordered]@{
+                advisories = @($Model.Advisories)
+                correlations = @($Model.Correlations)
+            }
+        }
     }
 }
 

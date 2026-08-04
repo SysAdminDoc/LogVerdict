@@ -320,7 +320,7 @@ $advisories = Get-LogVerdictAdvisory -Package PowerShell -Version 7.4.0
 $r.Findings | Where-Object Verdict -eq 'actionable'
 $r | Export-LogVerdictReport -OutputDir C:\Temp\lv
 
-# Versioned machine-interchange JSON for ECS, OCSF, OpenTelemetry Logs, or STIX 2.1
+# Versioned machine-interchange JSON for ECS, OCSF evidence, OpenTelemetry Logs, or STIX 2.1
 Export-LogVerdictStandard -Result $r -Format Ocsf -Path C:\Temp\lv\finding.ocsf.json -Redact
 
 # Bounded JSONL timeline: one compact record per line, streamed to an atomic file
@@ -337,6 +337,14 @@ timestamps, normalized coverage, configuration-health profiles, and explicit
 `privacy.redacted`/`privacy.rawEvidenceIncluded` state. `-Redact` applies the same
 identifier masking as the ordinary reports before projection; the adapters never copy
 the internal result object wholesale or add raw EVTX bytes.
+
+The OCSF adapter is deliberately scoped to normalized diagnostic evidence. LogVerdict
+does not claim OCSF's security-oriented `Detection Finding` class for health, benign, or
+operational diagnostics: each `evidence[]` record carries generic time/count fields and
+the complete normalized finding under `unmapped.logverdict.finding`. The adapter's
+advisories and correlations are likewise under `unmapped.logverdict`; use the vendor
+extension as the source of verdicts and rules rather than treating the record as a native
+OCSF detection event.
 
 `-Format Jsonl` uses the same versioned privacy and provenance envelope but writes a
 streaming timeline instead of an adapter document. It includes metadata, normalized event

@@ -3223,7 +3223,7 @@ Describe 'Report rendering' {
             $ecs.findings[0].rule.confidence | Should -BeExactly 'high'
             $ecs.logverdict.coverage[0].status | Should -BeExactly 'empty'
             $ocsf = (Export-LogVerdictStandard -Result $result -Format Ocsf).Document
-            $ocsf.findings[0].finding_info.uid | Should -BeExactly 'Acme/99'
+            $ocsf.evidence[0].unmapped.logverdict.finding.key | Should -BeExactly 'Acme/99'
             $otel = (Export-LogVerdictStandard -Result $result -Format OpenTelemetry).Document
             @($otel.resourceLogs[0].scopeLogs[0].logRecords[0].attributes.key) | Should -Contain 'logverdict.event.provider'
             $stix = (Export-LogVerdictStandard -Result $result -Format Stix).Document
@@ -3233,6 +3233,28 @@ Describe 'Report rendering' {
             $written = Export-LogVerdictStandard -Result $result -Format Ecs -Path $path
             $written.Path | Should -BeExactly $path
             (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).adapter | Should -BeExactly 'ecs'
+        }
+    }
+
+    It 'scopes OCSF output to normalized evidence instead of a detection class' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $document = (Export-LogVerdictStandard -Result ($r | Select-Object *) -Format Ocsf).Document
+            $document.contract | Should -BeExactly 'normalized-evidence'
+            @($document.metadata.profiles) | Should -Contain 'logverdict.normalized-evidence'
+            @($document.evidence).Count | Should -Be 1
+            $record = $document.evidence[0]
+            $record.time | Should -BeOfType [long]
+            $record.unmapped.logverdict.recordType | Should -BeExactly 'normalized-evidence'
+            $record.unmapped.logverdict.finding.key | Should -BeExactly 'Acme/99'
+            $record.unmapped.logverdict.finding.verdict | Should -BeExactly 'actionable'
+            $record.unmapped.logverdict.finding.event.provider | Should -BeExactly 'Acme'
+            @($record.PSObject.Properties.Name) | Should -Not -Contain 'class_uid'
+            @($record.PSObject.Properties.Name) | Should -Not -Contain 'category_uid'
+            @($document.unmapped.logverdict.PSObject.Properties.Name) | Should -Contain 'advisories'
+            @($document.unmapped.logverdict.PSObject.Properties.Name) | Should -Contain 'correlations'
+            $json = $document | ConvertTo-Json -Depth 30
+            $json | Should -Not -Match 'Detection Finding|"class_uid"\s*:\s*2004|"category_uid"\s*:\s*2'
         }
     }
 
