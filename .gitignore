@@ -24,5 +24,6 @@ obj/
 *.psproj
 .vscode/
 .idea/
-TestResults*.xml
+testResults*.xml
+Packaging/supply-chain/
 Roadmap_Blocked.md

@@ -58,6 +58,7 @@ $process = $null
 $oldHighContrast = $env:LOGVERDICT_TEST_HIGH_CONTRAST
 $oldHold = $env:LOGVERDICT_GUI_SMOKE_HOLD_MS
 $oldScreenshotPath = $env:LOGVERDICT_GUI_SCREENSHOT_PATH
+$oldComputerName = $env:COMPUTERNAME
 
 function Add-SmokeCheck {
     param(
@@ -208,6 +209,8 @@ try {
     else { $env:LOGVERDICT_TEST_HIGH_CONTRAST = '0' }
     $env:LOGVERDICT_GUI_SMOKE_HOLD_MS = '5000'
     if ($ScreenshotPath) { $env:LOGVERDICT_GUI_SCREENSHOT_PATH = [IO.Path]::GetFullPath($ScreenshotPath) }
+    # Keep generated GUI evidence portable; the real application still reports the host name.
+    $env:COMPUTERNAME = 'LOCAL-MACHINE'
 
     $process = Start-Process -FilePath $resolvedGui -ArgumentList @('-DaysBack', '1') -PassThru
     $evidence.processId = $process.Id
@@ -320,6 +323,8 @@ try {
     else { $env:LOGVERDICT_GUI_SMOKE_HOLD_MS = $oldHold }
     if ($null -eq $oldScreenshotPath) { Remove-Item Env:LOGVERDICT_GUI_SCREENSHOT_PATH -ErrorAction SilentlyContinue }
     else { $env:LOGVERDICT_GUI_SCREENSHOT_PATH = $oldScreenshotPath }
+    if ($null -eq $oldComputerName) { Remove-Item Env:COMPUTERNAME -ErrorAction SilentlyContinue }
+    else { $env:COMPUTERNAME = $oldComputerName }
     $evidence.finishedAt = (Get-Date).ToUniversalTime().ToString('o')
     $parent = Split-Path -Parent $EvidencePath
     if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
