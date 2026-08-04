@@ -63,6 +63,342 @@ function New-LVHealthProfile {
     }
 }
 
+function Invoke-LVReadOnlyCommand {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [AllowEmptyCollection()][string[]]$Argument = @()
+    )
+
+    try {
+        $output = @(& $Path @Argument 2>&1 | ForEach-Object { [string]$_ })
+        return [pscustomobject]@{
+            ExitCode = [int]$LASTEXITCODE
+            Output   = @($output)
+            Error    = $null
+        }
+    } catch {
+        return [pscustomobject]@{
+            ExitCode = -1
+            Output   = @()
+            Error    = $_.Exception.Message
+        }
+    }
+}
+
+function Get-LVShadowCopyInventory {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object[]]$ShadowCopy
+    )
+
+    $items = @()
+    $errorText = $null
+    if ($PSBoundParameters.ContainsKey('ShadowCopy')) {
+        $items = @($ShadowCopy | Where-Object { $_ })
+    } else {
+        try {
+            $items = @(Get-CimInstance -ClassName Win32_ShadowCopy -ErrorAction Stop)
+        } catch {
+            $errorText = $_.Exception.Message
+        }
+    }
+
+    $valid = @($items | Where-Object {
+        $_ -and $_.PSObject.Properties['DeviceObject'] -and
+        [string]$_.DeviceObject -match '^\\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy\d+$'
+    })
+    $status = if ($errorText) { 'unreadable' } elseif ($valid.Count -eq 0) { 'empty' } else { 'readable' }
+    return [pscustomobject]@{
+        Status       = $status
+        ShadowCopies = @($valid)
+        Error        = $errorText
+    }
+}
+
+function Get-LVShadowCopyStorageSummary {
+    [CmdletBinding()]
+    param(
+        [string]$CommandPath = (Join-Path $env:SystemRoot 'System32\vssadmin.exe'),
+        [AllowNull()]$CommandResult
+    )
+
+    if (-not $CommandResult) {
+        if (-not (Test-Path -LiteralPath $CommandPath -PathType Leaf)) {
+            return [pscustomobject]@{ Status = 'not-observed'; Text = $null; Error = 'vssadmin.exe was not present.' }
+        }
+        $CommandResult = Invoke-LVReadOnlyCommand -Path $CommandPath -Argument @('list', 'shadowstorage')
+    }
+
+    $text = (@($CommandResult.Output | Where-Object { $_ }) -join '; ')
+    $status = if ($CommandResult.Error) { 'unreadable' } elseif ([int]$CommandResult.ExitCode -ne 0 -and -not $text) { 'unreadable' } elseif ($text) { 'readable' } else { 'empty' }
+    return [pscustomobject]@{
+        Status = $status
+        Text   = $text
+        Error  = if ($CommandResult.Error) { [string]$CommandResult.Error } elseif ([int]$CommandResult.ExitCode -ne 0) { 'vssadmin list shadowstorage returned a non-zero exit code.' } else { $null }
+    }
+}
+
+function Get-LVPointInTimeRestoreHealthProfile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Inventory,
+        [AllowNull()]$StorageSummary
+    )
+
+    $copies = @($Inventory.ShadowCopies | Where-Object { $_ })
+    $dates = @($copies | ForEach-Object {
+        $value = if ($_.PSObject.Properties['InstallDate']) { $_.InstallDate } else { $null }
+        if ($value -is [datetime]) { $value }
+        elseif ($value) {
+            try { [Management.ManagementDateTimeConverter]::ToDateTime([string]$value) } catch { $null }
+        }
+    } | Where-Object { $_ } | Sort-Object)
+    $oldest = if ($dates.Count -gt 0) { $dates[0] } else { $null }
+    $newest = if ($dates.Count -gt 0) { $dates[$dates.Count - 1] } else { $null }
+    $observed = 'Restore points observed: {0}' -f $copies.Count
+    if ($oldest) { $observed += '; oldest observed: ' + $oldest.ToUniversalTime().ToString('o') }
+    if ($newest) { $observed += '; newest observed: ' + $newest.ToUniversalTime().ToString('o') }
+    if ($StorageSummary -and $StorageSummary.Text) {
+        $observed += '; shadow storage: ' + [string]$StorageSummary.Text
+    }
+    if ($Inventory.Error) { $observed += '; inventory error: ' + [string]$Inventory.Error }
+
+    $required = 'Point-in-time restore and System Restore use VSS. Restore points should be retained for the configured window; Windows can evict the oldest under the 72-hour age, VSS limit, low-free-space, or VSS allocation/write failure conditions.'
+    $status = [string]$Inventory.Status
+    if ($StorageSummary -and $StorageSummary.Status -eq 'unreadable' -and $status -eq 'readable') { $status = 'partial' }
+    $reason = if ($Inventory.Error) { 'The Win32_ShadowCopy inventory could not be read.' } elseif ($copies.Count -eq 0) { 'No local shadow copy was observed; this is not proof that restore-point capture is configured or healthy.' } elseif ($StorageSummary -and $StorageSummary.Error) { [string]$StorageSummary.Error } else { $null }
+    $advice = 'Treat restore-point count, age, and VSS storage as recovery coverage. Low free space, the VSS limit, age expiry, and writer or allocation failures can remove points; that absence is not evidence of tampering.'
+    $profileArgs = @{
+        ProfileName            = 'point-in-time-restore'
+        Source                 = 'vss'
+        Name                   = 'Point-in-time restore and VSS'
+        Status                 = $status
+        RequiredConfiguration  = $required
+        ObservedConfiguration  = $observed
+        MetadataStatus         = $status
+        Path                   = (Join-Path $env:SystemRoot 'System32\vssadmin.exe')
+        Reason                 = $reason
+        Advice                 = $advice
+        Origin                 = 'live'
+    }
+    if ($copies.Count -gt 0) { $profileArgs['RecordCount'] = [int64]$copies.Count }
+    if ($oldest) { $profileArgs['OldestRecord'] = $oldest }
+    $healthProfile = New-LVHealthProfile @profileArgs
+    $healthProfile | Add-Member -NotePropertyName ShadowCopyCount -NotePropertyValue ([int]$copies.Count) -Force
+    $healthProfile | Add-Member -NotePropertyName OldestShadowCopy -NotePropertyValue $oldest -Force
+    $healthProfile | Add-Member -NotePropertyName NewestShadowCopy -NotePropertyValue $newest -Force
+    $healthProfile | Add-Member -NotePropertyName StorageStatus -NotePropertyValue $(if ($StorageSummary) { $StorageSummary.Status } else { $null }) -Force
+    return $healthProfile
+}
+
+function Get-LVSRUMHealthProfile {
+    [CmdletBinding()]
+    param(
+        [string]$DatabasePath = (Join-Path $env:SystemRoot 'System32\sru\SRUDB.dat'),
+        [string]$SoftwarePath = (Join-Path $env:SystemRoot 'System32\config\SOFTWARE'),
+        [string]$EsentutilPath = (Join-Path $env:SystemRoot 'System32\esentutl.exe'),
+        [AllowNull()]$HeaderResult
+    )
+
+    $databasePresent = $false
+    try { $databasePresent = Test-Path -LiteralPath $DatabasePath -PathType Leaf -ErrorAction Stop } catch {
+        return New-LVHealthProfile -Profile 'application-resource-usage' -Source 'srum' -Name 'SRUM application resource usage' -Status 'unreadable' `
+            -RequiredConfiguration 'SRUDB.dat and the SOFTWARE hive should be available when historical application resource usage is in scope.' `
+            -ObservedConfiguration 'SRUDB.dat could not be probed.' -MetadataStatus 'unreadable' -Path $DatabasePath `
+            -Reason $_.Exception.Message -Advice 'Review SRUM access separately; this scan did not infer application usage.' -Origin 'live'
+    }
+    if (-not $databasePresent) {
+        return New-LVHealthProfile -Profile 'application-resource-usage' -Source 'srum' -Name 'SRUM application resource usage' -Status 'not-observed' `
+            -RequiredConfiguration 'SRUDB.dat and the SOFTWARE hive should be available when historical application resource usage is in scope.' `
+            -ObservedConfiguration 'SRUDB.dat was not present on this machine.' -MetadataStatus 'not-observed' -Path $DatabasePath `
+            -Reason 'The SRUM database is not present.' -Advice 'Treat an absent SRUM database as a coverage gap; it is not evidence that applications used no resources.' -Origin 'live'
+    }
+
+    $file = $null
+    try { $file = Get-Item -LiteralPath $DatabasePath -ErrorAction Stop } catch {
+        return New-LVHealthProfile -Profile 'application-resource-usage' -Source 'srum' -Name 'SRUM application resource usage' -Status 'unreadable' `
+            -RequiredConfiguration 'SRUDB.dat and the SOFTWARE hive should be available when historical application resource usage is in scope.' `
+            -ObservedConfiguration 'SRUDB.dat exists but its metadata could not be read.' -MetadataStatus 'unreadable' -Path $DatabasePath `
+            -Reason $_.Exception.Message -Advice 'Review SRUM access separately; this scan did not infer application usage.' -Origin 'live'
+    }
+
+    if (-not $HeaderResult) {
+        if (Test-Path -LiteralPath $EsentutilPath -PathType Leaf) {
+            $HeaderResult = Invoke-LVReadOnlyCommand -Path $EsentutilPath -Argument @('/mh', $DatabasePath)
+        } else {
+            $HeaderResult = [pscustomobject]@{ ExitCode = -1; Output = @(); Error = 'esentutl.exe was not present.' }
+        }
+    }
+    $headerLines = @($HeaderResult.Output | Where-Object { $_ })
+    $stateLine = @($headerLines | Where-Object { $_ -match '(?i)\bState\s*:' } | Select-Object -First 1)
+    $stateMatch = [regex]::Match([string]$stateLine, '(?i)\bState\s*:\s*(?<state>.*?)(?=\s{2,}[A-Za-z][A-Za-z ]{1,40}:|$)')
+    $databaseState = if ($stateMatch.Success) { $stateMatch.Groups['state'].Value.Trim() } else { $null }
+    $headerReadable = ([int]$HeaderResult.ExitCode -eq 0 -and $databaseState)
+    $status = if ($headerReadable) { 'readable' } else { 'partial' }
+    $metadataStatus = if ($headerReadable) { 'readable' } else { 'partial' }
+    $observed = 'SRUDB.dat size={0} bytes; last write={1:o}; SOFTWARE hive present={2}; application usage={3}' -f `
+        $file.Length, $file.LastWriteTime, (Test-Path -LiteralPath $SoftwarePath -PathType Leaf), 'not-parsed'
+    if ($databaseState) { $observed += '; ESE state=' + $databaseState }
+    if ($HeaderResult.Error) { $observed += '; header error=' + [string]$HeaderResult.Error }
+    $reason = if ($HeaderResult.Error) { [string]$HeaderResult.Error } elseif (-not $headerReadable) { 'The ESE header could not be read with the available built-in tool.' } else { 'The bundled zero-dependency collector records SRUM metadata and integrity state; it does not guess application rows from an opaque ESE database.' }
+    $healthProfile = New-LVHealthProfile -Profile 'application-resource-usage' -Source 'srum' -Name 'SRUM application resource usage' -Status $status `
+        -RequiredConfiguration 'SRUDB.dat and the SOFTWARE hive should be available when historical application resource usage is in scope.' `
+        -ObservedConfiguration $observed -MetadataStatus $metadataStatus -Path $DatabasePath -Reason $reason `
+        -Advice 'SRUM is an ESE history source. A readable file and clean ESE header establish artifact coverage; application-level usage rows require a compatible ESE parser and are not inferred from file size.' `
+        -Origin 'live'
+    $healthProfile | Add-Member -NotePropertyName DatabasePath -NotePropertyValue $DatabasePath -Force
+    $healthProfile | Add-Member -NotePropertyName SoftwarePath -NotePropertyValue $SoftwarePath -Force
+    $healthProfile | Add-Member -NotePropertyName SizeBytes -NotePropertyValue ([int64]$file.Length) -Force
+    $healthProfile | Add-Member -NotePropertyName ArtifactModified -NotePropertyValue $file.LastWriteTime -Force
+    $healthProfile | Add-Member -NotePropertyName DatabaseState -NotePropertyValue $databaseState -Force
+    $healthProfile | Add-Member -NotePropertyName ApplicationUsageStatus -NotePropertyValue 'not-parsed' -Force
+    return $healthProfile
+}
+
+function ConvertTo-LVSRUMDiagnosticRecord {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][Alias('Profile')]$HealthProfile)
+
+    if (-not $HealthProfile.DatabaseState -or [string]$HealthProfile.DatabaseState -notmatch '(?i)dirty|corrupt|repair|inconsistent') { return $null }
+    $state = [string]$HealthProfile.DatabaseState
+    return [pscustomobject]@{
+        Source       = 'textlog'
+        Channel      = 'SRUM'
+        Provider     = 'Microsoft SRUM ESE'
+        Id           = 0
+        Level        = 2
+        LevelName    = 'Error'
+        TimeCreated  = $HealthProfile.ArtifactModified
+        MachineName  = $env:COMPUTERNAME
+        RecordId     = 0
+        Area         = 'SRUM application resource usage'
+        SignatureKey = ('SRUM/{0}' -f $state.ToLowerInvariant())
+        Message      = ('SRUM database state: {0}; path={1}' -f $state, $HealthProfile.DatabasePath)
+    }
+}
+
+function Get-LVShadowEventFileName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Channel)
+
+    return (($Channel -replace '/', '%4') + '.evtx')
+}
+
+function Get-LVShadowCopyEventEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Inventory,
+        [Parameter(Mandatory)][string[]]$Channel,
+        [Parameter(Mandatory)][hashtable]$ChannelStatus,
+        [ValidateRange(1, 3650)][int]$DaysBack = 30,
+        [AllowNull()]$CollectionBudget,
+        [ValidateRange(1, 8)][int]$MaxShadowCopies = 4,
+        [ValidateRange(1, 32)][int]$MaxChannelsPerShadow = 8
+    )
+
+    $records = New-Object System.Collections.Generic.List[object]
+    $coverage = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+    $cutoff = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
+    $channels = @($Channel | Where-Object { $_ } | Select-Object -Unique | Select-Object -First $MaxChannelsPerShadow)
+    if ($channels.Count -eq 0) { $channels = @(Get-LVDefaultChannel) }
+    $copies = @($Inventory.ShadowCopies | Select-Object -First $MaxShadowCopies)
+
+    if ($copies.Count -eq 0) {
+        $status = if ($Inventory.Status -eq 'unreadable') { 'unreadable' } else { 'empty' }
+        $coverage.Add((New-LVCoverageRecord -Source 'shadow-copy' -Kind 'event-channel' -Name 'event logs in VSS shadow copies' `
+            -Status $status -Reason $(if ($Inventory.Error) { [string]$Inventory.Error } else { 'No local VSS shadow copy was observed.' }) `
+            -WindowStart $cutoff -WindowEnd (Get-Date) -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
+        return [pscustomobject]@{ Records=@(); Coverage=@($coverage.ToArray()) }
+    }
+
+    $copyIndex = 0
+    foreach ($copy in $copies) {
+        $copyIndex++
+        $device = ([string]$copy.DeviceObject).TrimEnd('\')
+        if ($device -notmatch '^\\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy\d+$') { continue }
+        foreach ($channelName in $channels) {
+            $fileName = Get-LVShadowEventFileName -Channel ([string]$channelName)
+            $path = $device + '\Windows\System32\winevt\Logs\' + $fileName
+            $name = 'shadow {0}/{1}' -f $copyIndex, $channelName
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                $coverage.Add((New-LVCoverageRecord -Source 'shadow-copy' -Kind 'event-channel' -Name $name -Status 'not-observed' `
+                    -Reason 'The requested event-log file was not present in this shadow copy.' -Path $path -WindowStart $cutoff -WindowEnd (Get-Date) `
+                    -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
+                continue
+            }
+
+            $data = Read-LVArchivedEventFile -Path $path -DaysBack $DaysBack -Level @(1, 2, 3) -CollectionBudget $CollectionBudget
+            $live = if ($ChannelStatus.ContainsKey([string]$channelName)) { $ChannelStatus[[string]$channelName] } else { $null }
+            $used = 0
+            foreach ($record in @($data.Records | Where-Object { $_ })) {
+                if ($record.TimeCreated -and $record.TimeCreated -lt $cutoff) { continue }
+                if ($live -and $live.Oldest -and $record.TimeCreated -and $record.TimeCreated -ge $live.Oldest) { continue }
+                $identity = if ($null -ne $record.RecordId) {
+                    '{0}|{1}|{2}' -f $record.Channel, $record.RecordId, $record.Id
+                } else {
+                    '{0}|{1}|{2}|{3}|{4}' -f $record.Channel, $record.Provider, $record.Id, $record.TimeCreated, $record.Message
+                }
+                if (-not $seen.Add($identity)) { continue }
+                $record | Add-Member -NotePropertyName Origin -NotePropertyValue 'shadow-copy' -Force
+                $records.Add($record) | Out-Null
+                $used++
+            }
+            $status = if ($data.BudgetStop) { $data.BudgetStop } elseif ($data.Error) { 'unreadable' } elseif ($used -gt 0) { 'readable' } else { 'empty' }
+            $reason = if ($data.BudgetStop) { 'The shared collection budget stopped the shadow-copy event read.' } elseif ($data.Error) { [string]$data.Error } elseif ($data.Records.Count -gt 0 -and $used -eq 0) { 'The shadow copy contained only events already covered by the live channel horizon.' } elseif ($used -eq 0) { 'No matching event was observed in the shadow-copy file.' } else { $null }
+            $coverage.Add((New-LVCoverageRecord -Source 'shadow-copy' -Kind 'event-channel' -Name $name -Status $status -Reason $reason `
+                -Path $path -WindowStart $cutoff -WindowEnd (Get-Date) -Cap $null -ObservedRecords @($data.Records).Count `
+                -SkippedRecords (@($data.Records).Count - $used) -ParserError $(if ($data.Error) { [string]$data.Error } else { $null }) `
+                -ParseMilliseconds $data.ParseMilliseconds -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
+            if ($data.BudgetStop -or (Get-LVCollectionBudgetStopReason -Budget $CollectionBudget)) { break }
+        }
+        if (Get-LVCollectionBudgetStopReason -Budget $CollectionBudget) { break }
+    }
+
+    return [pscustomobject]@{ Records=@($records.ToArray()); Coverage=@($coverage.ToArray()) }
+}
+
+function Get-LVDiagnosticEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][datetime]$WindowStart,
+        [Parameter(Mandatory)][datetime]$WindowEnd,
+        [ValidateRange(1, 3650)][int]$DaysBack = 30,
+        [AllowNull()][string[]]$Channel,
+        [Parameter(Mandatory)][hashtable]$ChannelStatus,
+        [AllowNull()]$CollectionBudget
+    )
+
+    $inventory = Get-LVShadowCopyInventory
+    $storage = Get-LVShadowCopyStorageSummary
+    $vssProfile = Get-LVPointInTimeRestoreHealthProfile -Inventory $inventory -StorageSummary $storage
+    $srumProfile = Get-LVSRUMHealthProfile
+    $records = New-Object System.Collections.Generic.List[object]
+    $srumRecord = ConvertTo-LVSRUMDiagnosticRecord -HealthProfile $srumProfile
+    if ($srumRecord) { $records.Add($srumRecord) | Out-Null }
+
+    $coverage = New-Object System.Collections.Generic.List[object]
+    $coverage.Add((New-LVCoverageRecord -Source 'vss' -Kind 'provider' -Name 'point-in-time restore and VSS' -Status $vssProfile.Status `
+        -Reason $vssProfile.Reason -Path $vssProfile.Path -WindowStart $WindowStart -WindowEnd $WindowEnd `
+        -ObservedRecords $vssProfile.ShadowCopyCount -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
+    $srumObserved = if ($srumProfile.Status -in @('readable', 'partial')) { 1 } else { 0 }
+    $coverage.Add((New-LVCoverageRecord -Source 'srum' -Kind 'file' -Name 'SRUDB.dat' -Status $srumProfile.Status `
+        -Reason $srumProfile.Reason -Path $srumProfile.Path -WindowStart $WindowStart -WindowEnd $WindowEnd `
+        -ObservedRecords $srumObserved -SizeBytes $srumProfile.SizeBytes -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
+
+    $shadow = Get-LVShadowCopyEventEvidence -Inventory $inventory -Channel @($Channel) -ChannelStatus $ChannelStatus -DaysBack $DaysBack -CollectionBudget $CollectionBudget
+    foreach ($record in @($shadow.Records | Where-Object { $_ })) { $records.Add($record) | Out-Null }
+    foreach ($entry in @($shadow.Coverage | Where-Object { $_ })) { $coverage.Add($entry) | Out-Null }
+
+    return [pscustomobject]@{
+        Records       = @($records.ToArray())
+        Coverage      = @($coverage.ToArray())
+        HealthProfiles = @($vssProfile, $srumProfile)
+        ShadowInventory = $inventory
+    }
+}
+
 function Get-LVHealthValueText {
     param([AllowNull()]$Value)
 
@@ -263,7 +599,7 @@ function Get-LVDefenderHealthProfile {
         return New-LVHealthProfile -Profile 'defender-configuration' -Source 'defender' -Name 'Microsoft Defender' -Status 'not-observed' `
             -RequiredConfiguration 'Defender antivirus and real-time protection should be enabled when Defender is the intended protection provider.' `
             -ObservedConfiguration 'Get-MpComputerStatus was not available.' -Reason 'The Defender PowerShell module is not installed or accessible.' `
-            -Advice 'Check the active endpoint protection provider separately; this profile is not a malware verdict.' -Origin 'live'
+            -Advice 'Check the active endpoint protection provider separately; this profile is not a malicious verdict.' -Origin 'live'
     }
     try {
         $state = & $command.Name -ErrorAction Stop
@@ -278,7 +614,7 @@ function Get-LVDefenderHealthProfile {
         return New-LVHealthProfile -Profile 'defender-configuration' -Source 'defender' -Name 'Microsoft Defender' -Status 'unreadable' `
             -RequiredConfiguration 'Defender antivirus and real-time protection should be enabled when Defender is the intended protection provider.' `
             -ObservedConfiguration 'Defender status could not be read.' -Reason $_.Exception.Message `
-            -Advice 'Check the active endpoint protection provider separately; this profile is not a malware verdict.' -Origin 'live'
+            -Advice 'Check the active endpoint protection provider separately; this profile is not a malicious verdict.' -Origin 'live'
     }
 }
 

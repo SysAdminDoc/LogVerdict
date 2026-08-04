@@ -2293,6 +2293,30 @@
         "ExtendCode": "-2147024894",
         "SampleMessage": "Microsoft SetupDiag 1.7.0.0 matched profile FindSPFatalError (A4028172-1B09-48F8-AD3B-86CDD7D55852). Failure: ResultCode = -2146498529; ExtendCode = -2147024894."
       }
+    },
+    {
+      "ruleId": "LV-0328",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Group Policy Files",
+        "Id": 4117,
+        "SampleMessage": "Group Policy Preferences Diagnostic Data: Access denied when copying a preference item. Error: 0x00000005."
+      }
+    },
+    {
+      "ruleId": "LV-0329",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "textlog",
+        "Channel": "SRUM",
+        "Provider": "Microsoft SRUM ESE",
+        "Id": 0,
+        "SampleMessage": "SRUM database state: Dirty Shutdown; path=C:\\Windows\\System32\\sru\\SRUDB.dat"
+      }
     }
   ]
 }

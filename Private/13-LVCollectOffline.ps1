@@ -288,6 +288,19 @@ function Get-LVOfflineEvtxCandidate {
     }
 }
 
+function Get-LVOfflineEvtxOrigin {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    # A snapshot path is evidence from a preserved volume, not a live channel. Do
+    # not mount, create, or delete snapshots here; classify only the path supplied
+    # by the operator so the report can say where the bytes came from.
+    if ($Path -match '(?i)(?:HarddiskVolumeShadowCopy\d+|shadow[ _-]?copy)') {
+        return 'shadow-copy'
+    }
+    return 'offline'
+}
+
 function Get-LVOfflineEvtxPlan {
     <#
         .SYNOPSIS
@@ -314,6 +327,7 @@ function Get-LVOfflineEvtxPlan {
             Path = $path; Name = [IO.Path]::GetFileName($path); SizeBytes = $size
             SHA256 = $null; Status = 'skipped'; Reason = $null; ParseMilliseconds = $null
             RecordCount = 0; Channel = $null; Oldest = $null; Truncated = $false
+            Origin = Get-LVOfflineEvtxOrigin -Path $path
         }
         if ($index -gt $MaxFiles) {
             $entry.Reason = ('file-count cap of {0} reached' -f $MaxFiles)
@@ -585,6 +599,11 @@ function Invoke-LVOfflineScan {
             $manifestEntry.Oldest = $data.Oldest
             $manifestEntry.RecordCount = @($data.Records).Count
             $manifestEntry.Truncated = [bool]$data.Truncated
+            if ([string]$manifestEntry.Origin -eq 'shadow-copy') {
+                foreach ($record in @($data.Records | Where-Object { $_ })) {
+                    $record | Add-Member -NotePropertyName Origin -NotePropertyValue 'shadow-copy' -Force
+                }
+            }
             if ($data.BudgetStop) {
                 $manifestEntry.Status = $data.BudgetStop
                 $manifestEntry.Reason = ('The shared collection {0} budget stopped this source; observed records are a lower bound.' -f $data.BudgetStop)
@@ -750,6 +769,10 @@ function Invoke-LVOfflineScan {
             $reason = if ($source.Reason) { ('; {0}' -f $source.Reason) } else { '' }
             $coverageNotes.Add(('EVTX {0}: {1}, {2} bytes, SHA-256 {3}{4}{5}.' -f $source.Name, $source.Status, $source.SizeBytes, $hash, $timing, $reason)) | Out-Null
         }
+        $shadowManifest = @($evtxPlan.Manifest | Where-Object { $_.Origin -eq 'shadow-copy' })
+        if ($shadowManifest.Count -gt 0) {
+            $coverageNotes.Add(('The offline package supplied {0} EVTX file(s) from a preserved shadow-copy path. These records are historical evidence and were not treated as live-channel coverage.' -f $shadowManifest.Count)) | Out-Null
+        }
         if ($failedChannels.Count -gt 0) {
             $coverageNotes.Add(('Archived channel file(s) could not be read and only their report summaries were available: {0}.' -f ($failedChannels -join ', '))) | Out-Null
         }
@@ -827,7 +850,7 @@ function Invoke-LVOfflineScan {
                 -Reason $source.Reason -Path $source.Path -WindowStart ($started.AddDays(-1 * [Math]::Abs($effectiveDays))) -WindowEnd $started `
                 -Cap $MaxPerChannel -ObservedRecords $source.RecordCount -RecordGap $null -ParserError $(if ($source.Status -eq 'unreadable') { $source.Reason } else { $null }) `
                 -SizeBytes $source.SizeBytes -ParseMilliseconds $source.ParseMilliseconds -SHA256 $source.SHA256 `
-                -CollectionBudget $CollectionBudget -Origin 'offline')) | Out-Null
+                -CollectionBudget $CollectionBudget -Origin ([string]$source.Origin))) | Out-Null
         }
         if ($sourceReport -and $sourceReport.PSObject.Properties['Coverage']) {
             foreach ($source in @($sourceReport.Coverage | Where-Object { $_ })) { $coverageSources.Add($source) | Out-Null }

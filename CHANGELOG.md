@@ -7,6 +7,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [0.8.2] - 2026-08-02
 
 - Made result redaction deny-by-default, recursively masked live-watch records and model errors, and made `Invoke-LogVerdictScan -Redact` return a redacted contract.
+- Added bounded VSS point-in-time, SRUM, and shadow-copy diagnostic coverage plus narrow Group Policy Preferences 4117 and SRUM rulings; preserved offline shadow-copy provenance is explicit.
 - Redacted the prompt-specific finding copy sent to the local model when `-Redact` is combined with unknown-signature explanations, while retaining the raw finding for local report/export handling.
 - Bounded evidence ZIP expansion by bytes actually copied, with separate per-member and total caps that reject understated archive headers before unbounded disk growth.
 - Raised JSON report serialization to the safe projection depth and added a round-trip regression for structured EventData/UserData values.

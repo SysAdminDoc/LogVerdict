@@ -524,7 +524,7 @@ Invoke-Pester -Path .\Tests
 
 ## Honest limitations
 
-- **Coverage is the roadmap.** 180 rules ship, alongside a 3,157-entry typed Microsoft error and stop-code catalog. A first scan will still report `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
+- **Coverage is the roadmap.** 182 rules ship, alongside a 3,157-entry typed Microsoft error and stop-code catalog. A first scan will still report `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
 - **Crash-stack analysis is bounded.** LogVerdict reads the bug-check code and four parameters from supported kernel dump headers, but naming the responsible driver still needs a debugger and symbols. Unsupported, truncated or access-controlled dumps remain inventoried with the reason they were not decoded.
 - **A clean result is not proof of health.** An in-place upgrade or a cleared log resets the event channels, so the report states each channel's oldest surviving record and warns when that horizon falls inside the requested window.
 - Offline review is bounded by what the bundle captured. Exported event channels are re-read in full, while text logs and Reliability Monitor are re-evaluated from the signature summaries in the source report rather than copied wholesale.

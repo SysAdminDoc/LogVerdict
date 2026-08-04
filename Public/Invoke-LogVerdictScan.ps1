@@ -365,6 +365,24 @@ function Invoke-LogVerdictScan {
         }
     }
 
+    $diagnosticEvidence = $null
+    try {
+        $diagnosticEvidence = Get-LVDiagnosticEvidence -WindowStart $started.AddDays(-1 * [Math]::Abs($DaysBack)) -WindowEnd $started `
+            -DaysBack $DaysBack -Channel @($channels) -ChannelStatus $channelStatus -CollectionBudget $collectionBudget
+        foreach ($diagnosticRecord in @($diagnosticEvidence.Records | Where-Object { $_ })) { $records.Add($diagnosticRecord) | Out-Null }
+    } catch {
+        Write-LVLog -Level warn -Message ("Additional diagnostic evidence could not be collected: {0}" -f $_.Exception.Message)
+        $diagnosticEvidence = [pscustomobject]@{
+            Records = @()
+            Coverage = @((New-LVCoverageRecord -Source 'diagnostic' -Kind 'collector' -Name 'additional Windows diagnostics' -Status 'unreadable' `
+                -Reason 'The diagnostic collector failed before its sources were available.' -ParserError $_.Exception.Message `
+                -WindowStart $started.AddDays(-1 * [Math]::Abs($DaysBack)) -WindowEnd $started -CollectionBudget $collectionBudget -Origin 'live'))
+            HealthProfiles = @((New-LVHealthProfile -Profile 'diagnostic-evidence' -Source 'diagnostic' -Name 'additional Windows diagnostics' -Status 'unreadable' `
+                -RequiredConfiguration 'Diagnostic sources should be readable when their evidence is in scope.' -ObservedConfiguration 'The diagnostic collector failed before its sources were available.' `
+                -Reason $_.Exception.Message -Advice 'Review diagnostic coverage separately; this is not a maliciousness verdict.' -Origin 'live'))
+        }
+    }
+
     $providerExtensions = New-Object System.Collections.Generic.List[object]
     $providerCoverage = New-Object System.Collections.Generic.List[object]
     $providerProjections = New-Object System.Collections.Generic.List[object]
@@ -553,6 +571,9 @@ function Invoke-LogVerdictScan {
     foreach ($entry in @($script:LVEventCoverage) + @($script:LVTextLogCoverage)) {
         if ($entry) { $coverageSources.Add($entry) | Out-Null }
     }
+    foreach ($entry in @($diagnosticEvidence.Coverage | Where-Object { $_ })) {
+        $coverageSources.Add($entry) | Out-Null
+    }
     foreach ($entry in @($providerCoverage.ToArray())) {
         if ($entry) { $coverageSources.Add($entry) | Out-Null }
     }
@@ -594,6 +615,7 @@ function Invoke-LogVerdictScan {
             -ObservedConfiguration 'The health-profile collector failed before all profiles were available.' `
             -Reason $_.Exception.Message -Advice 'Review configuration health separately; this is not a maliciousness verdict.' -Origin 'live'))
     }
+    foreach ($profile in @($diagnosticEvidence.HealthProfiles | Where-Object { $_ })) { $healthProfiles += $profile }
 
     # Precomputed here so callers (including the entry script) never need a private helper.
     # Correlations count toward the worst verdict: a pairing that is graver than either

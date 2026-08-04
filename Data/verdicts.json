@@ -4638,6 +4638,66 @@
           "retrieved": "2026-08-01"
         }
       ]
+    },
+    {
+      "id": "LV-0328",
+      "status": "stable",
+      "verified": "2026-08-04",
+      "match": {
+        "source": "event",
+        "channel": "Application",
+        "provider": "Group Policy *",
+        "eventId": 4117
+      },
+      "verdict": "investigate",
+      "title": "Group Policy Preferences recorded the item failure detail",
+      "plain": "A Group Policy Preferences item did not apply, and the newer diagnostic event identifies the operation, resource, or path and the error code behind the failure.",
+      "why": "The older 4098 event often says only that a preference failed. Microsoft added 4117 alongside it so an administrator can distinguish a missing source, an access denial, a failed delete, or an invalid drive-map path without turning on tracing first.",
+      "action": "Read the 4117 event together with its 4098 companion. Check the named source or destination, the security context, SYSVOL or share availability, and the hexadecimal error before changing the GPO.",
+      "confidence": "high",
+      "references": [
+        "https://techcommunity.microsoft.com/blog/askds/from-guesswork-to-clarity-gpp-diagnostics-improve-in-windows-server-2025-and-win/4499474",
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/group-policy/information-group-policy-preferences-events"
+      ],
+      "falsepositives": [
+        "A preference intentionally using Create can report an existing destination as a failure even when the resulting file is already present."
+      ],
+      "sources": [
+        {
+          "uri": "https://techcommunity.microsoft.com/blog/askds/from-guesswork-to-clarity-gpp-diagnostics-improve-in-windows-server-2025-and-win/4499474",
+          "retrieved": "2026-08-04"
+        }
+      ]
+    },
+    {
+      "id": "LV-0329",
+      "status": "stable",
+      "verified": "2026-08-04",
+      "match": {
+        "source": "textlog",
+        "channel": "SRUM",
+        "provider": "Microsoft SRUM ESE",
+        "messagePattern": "(?i)SRUM database state:\\s*(?:dirty shutdown|corrupt|repair|inconsistent)"
+      },
+      "verdict": "investigate",
+      "title": "SRUM usage history needs an integrity check",
+      "plain": "The SRUM ESE database header reports a dirty, corrupt, or repair-needed state, so historical application resource usage cannot be treated as complete until the database is healthy again.",
+      "why": "SRUM is an ESE history store used for application and resource-usage records. A damaged or unclearly closed database is a visibility problem first; it does not identify a malicious process or prove how much resource an application used.",
+      "action": "Preserve the SRUDB.dat artifact for review, check the related ESENT events, and use a supported Windows maintenance or recovery path to restore SRUM before relying on historical application-usage data.",
+      "confidence": "medium",
+      "references": [
+        "https://github.com/WithSecureLabs/chainsaw/wiki/SRUM-Analysis",
+        "https://learn.microsoft.com/en-us/answers/questions/4243644/persistent-srudb-errors"
+      ],
+      "falsepositives": [
+        "A transient shutdown or an in-progress SRUM maintenance operation can leave a dirty header that clears on the next successful close."
+      ],
+      "sources": [
+        {
+          "uri": "https://github.com/WithSecureLabs/chainsaw/wiki/SRUM-Analysis",
+          "retrieved": "2026-08-04"
+        }
+      ]
     }
   ],
   "correlations": [

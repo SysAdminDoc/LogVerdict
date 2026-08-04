@@ -2703,6 +2703,52 @@ Describe 'Provider and configuration health profiles' {
             Assert-MockCalled Read-LVArchivedEventFile -Times 1 -Exactly
         }
     }
+
+    It 'reports point-in-time restore inventory and VSS storage as advisory coverage' {
+        InModuleScope LogVerdict {
+            $copy = [pscustomobject]@{
+                DeviceObject = '\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy3'
+                InstallDate = (Get-Date).AddHours(-2)
+            }
+            $inventory = Get-LVShadowCopyInventory -ShadowCopy @($copy)
+            $storage = Get-LVShadowCopyStorageSummary -CommandPath (Join-Path $TestDrive 'missing-vssadmin.exe')
+            $profile = Get-LVPointInTimeRestoreHealthProfile -Inventory $inventory -StorageSummary $storage
+            $profile.Status | Should -BeExactly 'readable'
+            $profile.ShadowCopyCount | Should -Be 1
+            $profile.OldestShadowCopy | Should -Not -BeNullOrEmpty
+            $profile.Advice | Should -Match 'free space|VSS limit'
+
+            $empty = Get-LVPointInTimeRestoreHealthProfile -Inventory (Get-LVShadowCopyInventory -ShadowCopy @()) -StorageSummary $storage
+            $empty.Status | Should -BeExactly 'empty'
+            $empty.Reason | Should -Match 'not proof'
+        }
+    }
+
+    It 'records SRUM ESE state without pretending to parse application rows' {
+        $sru = Join-Path $TestDrive 'sru'
+        New-Item -ItemType Directory -Path $sru -Force | Out-Null
+        $database = Join-Path $sru 'SRUDB.dat'
+        $software = Join-Path $sru 'SOFTWARE'
+        [IO.File]::WriteAllBytes($database, [byte[]](1..32))
+        [IO.File]::WriteAllBytes($software, [byte[]](1..8))
+        InModuleScope LogVerdict -Parameters @{ Database = $database; Software = $software } {
+            param($Database, $Software)
+            $header = [pscustomobject]@{ ExitCode = 0; Output = @('State: Clean Shutdown    Last Full Backup: never'); Error = $null }
+            $profile = Get-LVSRUMHealthProfile -DatabasePath $Database -SoftwarePath $Software `
+                -EsentutilPath (Join-Path $TestDrive 'missing-esentutil.exe') -HeaderResult $header
+            $profile.Status | Should -BeExactly 'readable'
+            $profile.DatabaseState | Should -BeExactly 'Clean Shutdown'
+            $profile.SizeBytes | Should -Be 32
+            $profile.ApplicationUsageStatus | Should -BeExactly 'not-parsed'
+
+            $header.Output = @('State: Dirty Shutdown')
+            $dirty = Get-LVSRUMHealthProfile -DatabasePath $Database -SoftwarePath $Software `
+                -EsentutilPath (Join-Path $TestDrive 'missing-esentutil.exe') -HeaderResult $header
+            $record = ConvertTo-LVSRUMDiagnosticRecord -HealthProfile $dirty
+            $record.Message | Should -Match 'Dirty Shutdown'
+            $record.Source | Should -BeExactly 'textlog'
+        }
+    }
 }
 
 Describe 'Live event watch and WEF intake' {
@@ -5608,6 +5654,28 @@ Describe 'Offline evidence analysis' {
             @($result.CoverageNotes | Where-Object { $_ -match 'SHA-256 [0-9A-F]{64}' }).Count | Should -Be 1
             $manifest = Format-LVEvidenceManifest -Result $result -Content @()
             $manifest | Should -Match ('SHA-256 ' + $result.EvidenceManifest[0].SHA256)
+        }
+    }
+
+    It 'labels EVTX recovered from a preserved shadow-copy path' {
+        $root = Join-Path $TestDrive 'ShadowCopy1\Windows\System32\winevt\Logs'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $evtx = Join-Path $root 'System.evtx'
+        [IO.File]::WriteAllBytes($evtx, [byte[]](0x45, 0x56, 0x54, 0x58, 0x02))
+        InModuleScope LogVerdict -Parameters @{ Root = (Join-Path $TestDrive 'ShadowCopy1') } {
+            param($Root)
+            Mock Get-WinEvent {
+                param($Oldest)
+                if ($Oldest) { return [pscustomobject]@{ LogName = 'System'; TimeCreated = (Get-Date).AddDays(-2) } }
+                return [pscustomobject]@{
+                    LogName = 'System'; ProviderName = 'Disk'; Id = 7; Level = 2; LevelDisplayName = 'Error'
+                    TimeCreated = (Get-Date).AddDays(-2); MachineName = 'ARCHIVE-HOST'; RecordId = 42; Message = 'recovered event'
+                }
+            }
+            $result = Invoke-LVOfflineScan -EvidencePath $Root -DaysBack 30 -SkipTextLogs -SkipReliability
+            $result.EvidenceManifest[0].Origin | Should -BeExactly 'shadow-copy'
+            ($result.Coverage | Where-Object { $_.Source -eq 'offline-evtx' } | Select-Object -First 1).Origin | Should -BeExactly 'shadow-copy'
+            @($result.CoverageNotes | Where-Object { $_ -match 'preserved shadow-copy' }).Count | Should -Be 1
         }
     }
 
