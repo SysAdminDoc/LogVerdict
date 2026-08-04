@@ -5653,6 +5653,27 @@ Describe 'Correlation' {
         )
         $got = Invoke-Correlate -Finding $findings -Database (Build-CorrDb)
         @($got[0].Windows).Count | Should -Be 1
+        @($got[0].Windows[0].Occurrences).Count | Should -Be 40
+    }
+
+    It 'keeps a 4000-occurrence correlation within the linear budget' {
+        InModuleScope LogVerdict {
+            $base = [datetime]'2026-06-20 09:00:00'
+            $occurrences = New-Object System.Collections.Generic.List[object]
+            for ($i = 0; $i -lt 2000; $i++) {
+                $first = $base.AddMilliseconds($i)
+                $occurrences.Add([pscustomobject]@{ Time = $first; RuleId = 'R-1'; Key = "a-$i" }) | Out-Null
+                $occurrences.Add([pscustomobject]@{ Time = $first.AddMilliseconds(0.5); RuleId = 'R-2'; Key = "b-$i" }) | Out-Null
+            }
+
+            $timer = [Diagnostics.Stopwatch]::StartNew()
+            $windows = @(Get-LVCorrelationMatch -Occurrence $occurrences.ToArray() -RuleId @('R-1', 'R-2') -Timespan ([timespan]::FromMinutes(5)))
+            $timer.Stop()
+
+            @($windows).Count | Should -Be 1
+            @($windows[0].Occurrences).Count | Should -Be 4000
+            $timer.Elapsed.TotalSeconds | Should -BeLessThan 5
+        }
     }
 
     It 'separates two genuinely distinct incidents' {

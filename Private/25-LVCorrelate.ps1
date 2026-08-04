@@ -113,7 +113,11 @@ function Get-LVCorrelationMatch {
 
     $required = @($RuleId | Select-Object -Unique)
     $counts = @{}
-    foreach ($r in $required) { $counts[$r] = 0 }
+    $firstIndices = @{}
+    foreach ($r in $required) {
+        $counts[$r] = 0
+        $firstIndices[$r] = New-Object 'System.Collections.Generic.Queue[int]'
+    }
     $distinct = 0
     $left = 0
 
@@ -122,6 +126,7 @@ function Get-LVCorrelationMatch {
         if ($counts.ContainsKey($rid)) {
             if ($counts[$rid] -eq 0) { $distinct++ }
             $counts[$rid]++
+            $firstIndices[$rid].Enqueue($right)
         }
 
         # Shrink from the left until the window fits inside the timespan.
@@ -130,23 +135,29 @@ function Get-LVCorrelationMatch {
             if ($counts.ContainsKey($lid)) {
                 $counts[$lid]--
                 if ($counts[$lid] -eq 0) { $distinct-- }
+                if ($firstIndices[$lid].Count -gt 0 -and $firstIndices[$lid].Peek() -eq $left) {
+                    [void]$firstIndices[$lid].Dequeue()
+                }
             }
             $left++
         }
 
         if ($distinct -ne $required.Count) { continue }
 
-        $window = @($items[$left..$right])
-        if ($Ordered -and -not (Test-LVCorrelationOrder -Window $window -RuleId $RuleId)) { continue }
+        if ($Ordered -and -not (Test-LVCorrelationOrder -Window @() -RuleId $RuleId -FirstIndices $firstIndices)) { continue }
 
+        # Keep only interval endpoints while the window slides. The occurrence
+        # ranges are materialized once by Merge-LVCorrelationMatch after the
+        # overlapping intervals have been folded.
         $found.Add([pscustomobject]@{
-            Start       = $window[0].Time
-            End         = $window[-1].Time
-            Occurrences = $window
+            Start       = $items[$left].Time
+            End         = $items[$right].Time
+            StartIndex  = $left
+            EndIndex    = $right
         }) | Out-Null
     }
 
-    return ConvertTo-LVArrayOutput -Value @(Merge-LVCorrelationMatch -Match $found.ToArray())
+    return ConvertTo-LVArrayOutput -Value @(Merge-LVCorrelationMatch -Match $found.ToArray() -OccurrenceItems $items -AlreadySorted)
 }
 
 function Test-LVCorrelationOrder {
@@ -156,8 +167,21 @@ function Test-LVCorrelationOrder {
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Window,
-        [Parameter(Mandatory)][string[]]$RuleId
+        [Parameter(Mandatory)][string[]]$RuleId,
+        [AllowNull()][hashtable]$FirstIndices
     )
+
+    if ($null -ne $FirstIndices) {
+        $previous = -1
+        foreach ($r in @($RuleId | Select-Object -Unique)) {
+            $queue = $FirstIndices[$r]
+            if ($null -eq $queue -or $queue.Count -eq 0) { return $false }
+            $first = $queue.Peek()
+            if ($first -lt $previous) { return $false }
+            $previous = $first
+        }
+        return $true
+    }
 
     $firstAt = @{}
     for ($i = 0; $i -lt $Window.Count; $i++) {
@@ -184,23 +208,99 @@ function Merge-LVCorrelationMatch {
         separately would replace the two findings this feature exists to merge with
         several hundred, which is worse than doing nothing.
     #>
-    param([AllowEmptyCollection()][object[]]$Match)
+    param(
+        [AllowEmptyCollection()][object[]]$Match,
+        [AllowNull()][object[]]$OccurrenceItems,
+        [switch]$AlreadySorted
+    )
 
     $merged = New-Object System.Collections.Generic.List[object]
-    foreach ($m in @($Match | Sort-Object Start)) {
-        if ($merged.Count -gt 0 -and $m.Start -le $merged[-1].End) {
-            $last = $merged[-1]
+    $orderedMatches = if ($AlreadySorted) { @($Match) } else { @($Match | Sort-Object Start) }
+    foreach ($m in $orderedMatches) {
+        $overlaps = $merged.Count -gt 0 -and $m.Start -le $merged[$merged.Count - 1].End
+        if ($overlaps) {
+            $last = $merged[$merged.Count - 1]
             if ($m.End -gt $last.End) { $last.End = $m.End }
-            $seen = @{}
-            foreach ($o in (@($last.Occurrences) + @($m.Occurrences))) {
-                $seen[('{0:o}|{1}' -f $o.Time, $o.RuleId)] = $o
+
+            if ($null -ne $OccurrenceItems -and $null -ne $m.StartIndex -and $null -ne $m.EndIndex) {
+                # Both pointers are monotonic. Only the portion after the prior
+                # candidate's right edge can add a new occurrence to this union;
+                # this is the part that avoids rebuilding the growing window.
+                $startIndex = [Math]::Max([int]$m.StartIndex, [int]$last.LastEndIndex + 1)
+                $endIndex = [int]$m.EndIndex
+                for ($i = $startIndex; $i -le $endIndex; $i++) {
+                    $o = $OccurrenceItems[$i]
+                    $key = '{0:o}|{1}' -f $o.Time, $o.RuleId
+                    if ($last.OccurrenceIndex.ContainsKey($key)) {
+                        $last.OccurrenceList[$last.OccurrenceIndex[$key]] = $o
+                    } else {
+                        $last.OccurrenceIndex[$key] = $last.OccurrenceList.Count
+                        $last.OccurrenceList.Add($o) | Out-Null
+                    }
+                }
+            } else {
+                # Retain the helper's historical standalone behavior for callers
+                # that provide already-materialized matches. The scan path above
+                # always supplies source indices and remains linear.
+                foreach ($o in @($m.Occurrences)) {
+                    $key = '{0:o}|{1}' -f $o.Time, $o.RuleId
+                    if ($last.OccurrenceIndex.ContainsKey($key)) {
+                        $last.OccurrenceList[$last.OccurrenceIndex[$key]] = $o
+                    } else {
+                        $last.OccurrenceIndex[$key] = $last.OccurrenceList.Count
+                        $last.OccurrenceList.Add($o) | Out-Null
+                    }
+                }
             }
-            $last.Occurrences = @($seen.Values | Sort-Object Time)
+            if ($null -ne $m.EndIndex) { $last.LastEndIndex = [int]$m.EndIndex }
             continue
         }
-        $merged.Add([pscustomobject]@{ Start = $m.Start; End = $m.End; Occurrences = @($m.Occurrences) }) | Out-Null
+
+        $state = [pscustomobject]@{
+            Start = $m.Start
+            End = $m.End
+            LastEndIndex = -1
+            OccurrenceList = New-Object System.Collections.Generic.List[object]
+            OccurrenceIndex = New-Object 'System.Collections.Generic.Dictionary[string,int]'
+        }
+
+        if ($null -ne $OccurrenceItems -and $null -ne $m.StartIndex -and $null -ne $m.EndIndex) {
+            $startIndex = [int]$m.StartIndex
+            $endIndex = [int]$m.EndIndex
+            for ($i = $startIndex; $i -le $endIndex; $i++) {
+                $o = $OccurrenceItems[$i]
+                $key = '{0:o}|{1}' -f $o.Time, $o.RuleId
+                if ($state.OccurrenceIndex.ContainsKey($key)) {
+                    $state.OccurrenceList[$state.OccurrenceIndex[$key]] = $o
+                } else {
+                    $state.OccurrenceIndex[$key] = $state.OccurrenceList.Count
+                    $state.OccurrenceList.Add($o) | Out-Null
+                }
+            }
+            $state.LastEndIndex = $endIndex
+        } else {
+            foreach ($o in @($m.Occurrences)) {
+                $key = '{0:o}|{1}' -f $o.Time, $o.RuleId
+                if ($state.OccurrenceIndex.ContainsKey($key)) {
+                    $state.OccurrenceList[$state.OccurrenceIndex[$key]] = $o
+                } else {
+                    $state.OccurrenceIndex[$key] = $state.OccurrenceList.Count
+                    $state.OccurrenceList.Add($o) | Out-Null
+                }
+            }
+        }
+        $merged.Add($state) | Out-Null
     }
-    return ConvertTo-LVArrayOutput -Value @($merged.ToArray())
+
+    $output = New-Object System.Collections.Generic.List[object]
+    foreach ($state in $merged) {
+        $output.Add([pscustomobject]@{
+            Start = $state.Start
+            End = $state.End
+            Occurrences = @($state.OccurrenceList.ToArray() | Sort-Object Time)
+        }) | Out-Null
+    }
+    return ConvertTo-LVArrayOutput -Value @($output.ToArray())
 }
 
 function Resolve-LVCorrelation {
