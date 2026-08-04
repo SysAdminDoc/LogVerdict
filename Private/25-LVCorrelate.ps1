@@ -8,9 +8,10 @@
 #
 # ## Why the window slides
 #
-# The rule vocabulary here is Sigma's - `temporal`, `temporal_ordered`, `event_count`,
-# with `rules`, `timespan` and `group-by` - so anyone who can read a Sigma correlation
-# can read one of these. The windowing is deliberately NOT Sigma's.
+# The rule vocabulary is a deliberately small Sigma-inspired subset: `temporal` and
+# `temporal_ordered`, with `rules` and `timespan`. Event-count thresholds and grouping
+# keys have no engine semantics and are rejected by the loader. The windowing is
+# deliberately NOT Sigma's.
 #
 # Sigma buckets time into fixed intervals: with a 1h timespan, everything from 09:00
 # to 10:00 is one bucket. A crash at 09:59 and the service death it caused at 10:01
@@ -330,7 +331,7 @@ function Resolve-LVCorrelation {
         if ($null -eq $c) { continue }
 
         $refs = @($c.rules | Where-Object { $_ })
-        if ($refs.Count -lt 2 -and $c.type -ne 'event_count') { continue }
+        if ($refs.Count -lt 2) { continue }
 
         $span = ConvertFrom-LVTimespan -Text $c.timespan
         if ($null -eq $span) {

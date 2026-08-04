@@ -255,6 +255,20 @@ if ([int]$screenshotMetadata.width -le 0 -or [int]$screenshotMetadata.height -le
 }
 $catalogSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/error-codes.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$catalogSchema.properties.schemaVersion.const -ne 3) { throw 'Typed error catalog schema is not pinned at version 3.' }
+$verdictPath = Join-Path $repoRoot 'Data/verdicts.json'
+$verdictSchemaPath = Join-Path $repoRoot 'Data/verdicts.schema.json'
+$fixturePath = Join-Path $repoRoot 'Data/fixtures.json'
+$fixtureSchemaPath = Join-Path $repoRoot 'Data/fixtures.schema.json'
+$catalogPath = Join-Path $repoRoot 'Data/error-codes.json'
+$catalogSchemaPath = Join-Path $repoRoot 'Data/error-codes.schema.json'
+$verdictSchema = Get-Content -LiteralPath $verdictSchemaPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([int]$verdictSchema.properties.schemaVersion.maximum -ne 7 -or
+    @($verdictSchema.definitions.correlation.properties.type.enum) -contains 'event_count' -or
+    $verdictSchema.definitions.correlation.properties.PSObject.Properties['group-by']) {
+    throw 'Verdict schema advertises correlation semantics the engine does not load.'
+}
+$fixtureSchema = Get-Content -LiteralPath $fixtureSchemaPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([int]$fixtureSchema.properties.schemaVersion.const -ne 1) { throw 'Regression fixture schema is not pinned at version 1.' }
 $advisoryCache = if ($AdvisoryPath) { [IO.Path]::GetFullPath($AdvisoryPath) } else { Join-Path $repoRoot 'Data/advisories.json' }
 if (-not (Test-LogVerdictAdvisoryDatabase -Path $advisoryCache -Quiet)) { throw 'Offline advisory cache validation failed.' }
 $advisorySchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/advisories.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -441,6 +455,33 @@ try {
         }
         Test-LVReleaseJsonSchema -Path $documentInfo.Path -SchemaPath $documentInfo.SchemaPath -Label $documentInfo.Label
         Test-LVReleaseUtcDocument -Path $documentInfo.Path -Label $documentInfo.Label
+    }
+
+    # Validate the source contracts as well as generated release documents. Each
+    # malformed copy must be rejected so a schema that only exists on paper cannot
+    # silently drift away from the data contributors actually edit.
+    $dataSchemaDocuments = @(
+        [pscustomobject]@{ Label = 'verdict database'; Path = $verdictPath; SchemaPath = $verdictSchemaPath }
+        [pscustomobject]@{ Label = 'regression fixtures'; Path = $fixturePath; SchemaPath = $fixtureSchemaPath }
+        [pscustomobject]@{ Label = 'typed error catalog'; Path = $catalogPath; SchemaPath = $catalogSchemaPath }
+    )
+    foreach ($documentInfo in $dataSchemaDocuments) {
+        Test-LVReleaseJsonSchema -Path $documentInfo.Path -SchemaPath $documentInfo.SchemaPath -Label $documentInfo.Label
+        $invalid = Read-LVReleaseJson -Path $documentInfo.Path
+        switch ($documentInfo.Label) {
+            'verdict database' { $invalid.schemaVersion = 999 }
+            'regression fixtures' { $invalid.fixtures[0].ruleId = '' }
+            'typed error catalog' { $invalid.entries[0].id = 'not-a-catalog-id' }
+        }
+        $invalidPath = Join-Path $releaseSchemaRoot ('invalid-{0}.json' -f ($documentInfo.Label -replace '\s+', '-'))
+        Write-LVReleaseJson -Path $invalidPath -Value $invalid
+        $rejected = $false
+        try {
+            Test-LVReleaseJsonSchema -Path $invalidPath -SchemaPath $documentInfo.SchemaPath -Label ("malformed {0}" -f $documentInfo.Label)
+        } catch { $rejected = $true }
+        if (-not $rejected) {
+            throw ("Malformed {0} was accepted by its shipped schema." -f $documentInfo.Label)
+        }
     }
 
     # Standards smoke contract. These assertions stay intentionally field-level:

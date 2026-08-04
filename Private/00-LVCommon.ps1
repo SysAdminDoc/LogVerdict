@@ -27,10 +27,10 @@ $script:LVMaxSignatureTimes = 2000
 # every raw event. Keep only a small distinct sample per reduced signature.
 $script:LVMaxSignatureRecordIds = 20
 
-# Correlation types, from the Sigma Correlation Rules Specification v2.1.0. Named
-# after Sigma's vocabulary on purpose: anyone who can read a Sigma correlation can
-# read one of these. The window is NOT Sigma's, though - see 25-LVCorrelate.ps1.
-$script:LVCorrelationType = @('temporal', 'temporal_ordered', 'event_count')
+# Supported correlation types. The vocabulary is intentionally narrower than Sigma's:
+# event-count thresholds and group-by keys have no engine semantics here, so they must
+# not appear in the contributor-facing schema as if they were loadable.
+$script:LVCorrelationType = @('temporal', 'temporal_ordered')
 
 # Whether Reliability Monitor answered on this scan. Declared here so the variable
 # always exists: a scan that skipped the source and a scan whose provider is missing

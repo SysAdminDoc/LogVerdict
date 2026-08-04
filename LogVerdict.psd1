@@ -75,6 +75,7 @@
         'Data\evidence-contract.schema.json'
         'Data\export-templates.json'
         'Data\export-templates.schema.json'
+        'Data\fixtures.schema.json'
         'Data\localization.json'
         'Data\provider.schema.json'
         'Data\report-contract.schema.json'

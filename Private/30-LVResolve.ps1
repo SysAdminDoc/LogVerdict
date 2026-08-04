@@ -497,7 +497,7 @@ function Get-LVDatabaseTrustProblem {
         }
 
         foreach ($property in @($correlation.PSObject.Properties.Name)) {
-            if (@('type', 'rules', 'timespan', 'group-by') -notcontains $property) {
+            if (@('type', 'rules', 'timespan') -notcontains $property) {
                 $problems.Add([pscustomobject]@{ RuleId=$id; Problem=("unsupported correlation field '{0}' would be ignored" -f $property) }) | Out-Null
             }
         }
@@ -506,10 +506,6 @@ function Get-LVDatabaseTrustProblem {
         if ($script:LVCorrelationType -notcontains $type) {
             $problems.Add([pscustomobject]@{ RuleId=$id; Problem=("unknown correlation type '{0}'; valid: {1}" -f $type, ($script:LVCorrelationType -join ', ')) }) | Out-Null
         }
-        if ($type -eq 'event_count') {
-            $problems.Add([pscustomobject]@{ RuleId=$id; Problem="correlation type 'event_count' is not implemented and cannot be loaded" }) | Out-Null
-        }
-
         $rawRules = $correlation.PSObject.Properties['rules']
         if ($null -eq $rawRules -or $null -eq $rawRules.Value -or $rawRules.Value -is [string]) {
             $problems.Add([pscustomobject]@{ RuleId=$id; Problem='correlation.rules must be an array of rule ids' }) | Out-Null
@@ -517,7 +513,7 @@ function Get-LVDatabaseTrustProblem {
         } else {
             $refs = @($rawRules.Value | Where-Object { $_ })
         }
-        if ($type -ne 'event_count' -and $refs.Count -lt 2) {
+        if ($refs.Count -lt 2) {
             $problems.Add([pscustomobject]@{ RuleId=$id; Problem=("{0} correlation requires at least two rule ids" -f $type) }) | Out-Null
         }
         if (@($refs | Select-Object -Unique).Count -ne $refs.Count) {
@@ -532,9 +528,6 @@ function Get-LVDatabaseTrustProblem {
             }
         }
 
-        if ($correlation.PSObject.Properties['group-by']) {
-            $problems.Add([pscustomobject]@{ RuleId=$id; Problem="correlation field 'group-by' is not implemented and cannot be loaded" }) | Out-Null
-        }
         $span = ConvertFrom-LVTimespan -Text ([string]$correlation.timespan)
         if ($null -eq $span) {
             $problems.Add([pscustomobject]@{ RuleId=$id; Problem=("correlation timespan '{0}' is unreadable" -f $correlation.timespan) }) | Out-Null

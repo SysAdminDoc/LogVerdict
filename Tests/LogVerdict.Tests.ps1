@@ -1200,6 +1200,10 @@ Describe 'Verdict database' {
         $schema.definitions.rule.properties.modified.description | Should -Match 'title.*detection.*deprecated'
         $schema.definitions.rule.properties.related.items.properties.type.enum | Should -Contain 'obsolete'
         $schema.definitions.rule.properties.expiresWithKb.pattern | Should -BeExactly '^KB\d{5,}$'
+        $schema.definitions.correlation.properties.type.enum | Should -Be @('temporal', 'temporal_ordered')
+        $schema.definitions.correlation.properties.rules.minItems | Should -Be 2
+        @($schema.definitions.correlation.properties.PSObject.Properties.Name) | Should -Not -Contain 'group-by'
+        $schema.description | Should -Match 'sequentially.*never reused.*deprecated tombstone'
 
         InModuleScope LogVerdict -Parameters @{ sv = $schemaVerdicts; ss = $schemaStatuses; sc = $schemaConfidence } {
             param($sv, $ss, $sc)
@@ -6868,7 +6872,7 @@ Describe 'Correlation' {
         @($problems | Where-Object Problem -like '*group-by*').Count | Should -Be 1
     }
 
-    It 'rejects event-count correlations until their semantics are implemented' {
+    It 'rejects unsupported correlation types before they can be loaded' {
         $path = Join-Path $TestDrive 'event-count.json'
         $db = [pscustomobject]@{
             schemaVersion = 5; name = 'event count'; updated = '2026-08-01'
@@ -6883,7 +6887,7 @@ Describe 'Correlation' {
             })
         }
         $db | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding UTF8
-        { Get-LogVerdictDatabase -Path $path } | Should -Throw '*event_count*not implemented*'
+        { Get-LogVerdictDatabase -Path $path } | Should -Throw '*unknown correlation type*event_count*'
     }
 
     It 'correlates before benign suppression, so a benign signature still counts as evidence' {

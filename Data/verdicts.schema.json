@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/SysAdminDoc/LogVerdict/blob/main/Data/verdicts.schema.json",
   "title": "LogVerdict verdict database",
-  "description": "Curated rulings on Windows log signatures. Editors that understand JSON Schema will validate and autocomplete against this; Test-LogVerdictDatabase enforces the same rules plus the ones a schema cannot express.",
+  "description": "Curated rulings on Windows log signatures. Editors that understand JSON Schema will validate and autocomplete against this; Test-LogVerdictDatabase enforces the same rules plus the ones a schema cannot express. Rule ids are allocated sequentially and never reused: when a ruling retires, keep its id as a deprecated tombstone and point it at the replacement instead of assigning that id to new content.",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -47,7 +47,7 @@
     },
     "correlations": {
       "type": "array",
-      "description": "Curated pairings of rules that mean more together than apart. Deliberately curated and never inferred: on a single machine the loudest signature co-occurs with everything, so a discovered correlation is almost always an artefact of volume rather than a cause.",
+      "description": "Curated pairings of rules that mean more together than apart. Deliberately curated and never inferred: on a single machine the loudest signature co-occurs with everything, so a discovered correlation is almost always an artefact of volume rather than a cause. Correlation ids are stable too; retire one as a deprecated tombstone rather than reusing it.",
       "items": {
         "$ref": "#/definitions/correlationRule"
       }
@@ -133,12 +133,12 @@
       "description": "Vocabulary follows the Sigma Correlation Rules Specification v2.1.0 so anyone who reads Sigma can read these. The WINDOW does not: Sigma buckets time into fixed intervals, which misses a pair straddling a boundary while matching an unrelated pair at opposite ends of one bucket. This slides instead.",
       "properties": {
         "type": {
-          "enum": ["temporal", "temporal_ordered", "event_count"],
-          "description": "temporal: every referenced rule occurred inside one window. temporal_ordered: additionally, their first occurrences follow the declared order."
+          "enum": ["temporal", "temporal_ordered"],
+          "description": "temporal: every referenced rule occurred inside one sliding window. temporal_ordered: additionally, their first occurrences follow the declared order. Event-count and grouping semantics are not implemented and are intentionally not part of this contract."
         },
         "rules": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 2,
           "items": { "type": "string" },
           "description": "Rule ids that must co-occur. For temporal_ordered the array order is the required order."
         },
@@ -146,11 +146,6 @@
           "type": "string",
           "pattern": "^\\d+[smhd]$",
           "description": "Sliding window width: 30s, 5m, 2h, 1d. An unparseable value is skipped loudly rather than defaulted, because a correlation that silently never fires looks exactly like a healthy machine."
-        },
-        "group-by": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Sigma's grouping keys. On a single PC the useful ones are service name, process image and device instance - never user or host, which are constant."
         }
       }
     },
