@@ -49,7 +49,7 @@ jobs:
           $runtime = '${{ matrix.shell }}'
           $exe = if ($runtime -eq 'powershell') { 'powershell.exe' } else { 'pwsh.exe' }
           & $exe -NoProfile -STA -ExecutionPolicy Bypass -Command "Import-Module Pester -RequiredVersion 5.9.0; Invoke-Pester -Path .\Tests -CI -Output Normal"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not $?) { exit 1 }
 
       - name: Run GUI accessibility and scaling smoke matrix
         shell: ${{ matrix.shell }}
@@ -68,7 +68,7 @@ jobs:
           $exe = if ($runtime -eq 'powershell') { 'powershell.exe' } else { 'pwsh.exe' }
           $report = Join-Path $env:GITHUB_WORKSPACE ("coverage-{0}.json" -f $runtime)
           & $exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Tools\Test-LogVerdictCoverage.ps1 -OutputPath $report
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not $?) { exit 1 }
 
       - name: Upload structured coverage report
         if: always()
@@ -160,7 +160,10 @@ jobs:
 
       - name: Validate package hashes and version provenance
         shell: pwsh
-        run: .\Tools\Test-LogVerdictRelease.ps1 -ManifestDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging') -AssetDirectory (Join-Path (Get-Location).Path 'dist') -SupplyChainDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain')
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\Tools\Test-LogVerdictRelease.ps1 -ManifestDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging') -AssetDirectory (Join-Path (Get-Location).Path 'dist') -SupplyChainDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain')
+          if (-not $?) { exit 1 }
 
       - name: Launch packaged GUI smoke matrix
         shell: pwsh
@@ -182,7 +185,7 @@ jobs:
           $report = Join-Path $env:RUNNER_TEMP 'logverdict-gui-coverage.json'
           $evidence = Join-Path $env:RUNNER_TEMP 'logverdict-gui-normal.json'
           & pwsh -NoProfile -STA -ExecutionPolicy Bypass -File .\Tools\Test-LogVerdictCoverage.ps1 -OutputPath $report -DisplayEvidencePath $evidence
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not $?) { exit 1 }
 
       - name: Upload packaged GUI smoke evidence
         if: always()

@@ -179,6 +179,7 @@ Describe 'CI gate wiring' {
         $script:CiWorkflow | Should -Match 'name: Verify supply-chain metadata directly'
         $script:CiWorkflow | Should -Match 'Tools\\Test-LogVerdictSupplyChain\.ps1'
         $script:CiWorkflow | Should -Match 'if \(-not \$\?\) \{ exit 1 \}'
+        $script:CiWorkflow | Should -Not -Match '\$LASTEXITCODE'
     }
 }
 
