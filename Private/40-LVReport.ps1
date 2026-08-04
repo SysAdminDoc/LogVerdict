@@ -906,7 +906,7 @@ function ConvertTo-LVHtmlReport {
     Add-LVLine $sb '<style>'
     Add-LVLine $sb @'
 :root{--base:#1e1e2e;--mantle:#181825;--crust:#11111b;--s0:#313244;--s1:#45475a;
---text:#cdd6f4;--sub:#a6adc8;--over:#9399b2;--blue:#89b4fa;--mauve:#cba6f7}
+--text:#cdd6f4;--sub:#a6adc8;--over:#9399b2;--blue:#89b4fa;--mauve:#cba6f7;--act:#a6e3a1}
 /* --over carries the signature key, counts, dates and rule id at 11-13px, so it
    is content, not decoration, and must clear WCAG AA 4.5:1 for small text.
    Measured against the two surfaces it sits on: 6.22:1 on --mantle #181825,
@@ -918,6 +918,12 @@ font:15px/1.6 "Segoe UI",system-ui,-apple-system,sans-serif}
 h1{font-size:26px;margin:0 0 4px;letter-spacing:-.4px}
 h1 span{color:var(--mauve)}
 .sub{color:var(--over);font-size:13px;margin-bottom:28px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.skip-link{position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden}
+.skip-link:focus{position:fixed;left:12px;top:12px;width:auto;height:auto;z-index:1000;padding:8px 12px;
+ background:var(--blue);color:#07111f;border-radius:6px;font-weight:700;outline:3px solid var(--text)}
+main{display:block}
+section{margin:0 0 28px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:28px}
 .stat{background:var(--mantle);border:1px solid var(--s0);border-radius:10px;padding:14px 16px}
 .stat .k{color:var(--over);font-size:11px;text-transform:uppercase;letter-spacing:.9px}
@@ -926,18 +932,24 @@ h1 span{color:var(--mauve)}
 padding:12px 16px;margin-bottom:24px;color:#f5c2d3;font-size:14px}
 .warn ul{margin:8px 0 0;padding-left:20px}
 .warn li{margin:4px 0}
-.f{background:var(--mantle);border:1px solid var(--s0);border-left:4px solid var(--over);
-border-radius:10px;padding:16px 18px;margin-bottom:14px}
-.f h2{font-size:17px;margin:0 0 2px;font-weight:600}
+.f{background:var(--mantle);border:1px solid var(--s0);border-left:4px solid var(--verdict-color,var(--over));
+ border-radius:10px;padding:16px 18px;margin-bottom:14px}
+.f h2,.f h3{font-size:17px;margin:0 0 2px;font-weight:600}
 .meta{color:var(--over);font-size:12px;font-family:Consolas,monospace;margin-bottom:12px;
 word-break:break-word}
 .badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:1.1px;
-text-transform:uppercase;padding:3px 9px;border-radius:999px;margin-right:8px;
-background:var(--s0);vertical-align:2px}
+ text-transform:uppercase;padding:3px 9px;border-radius:999px;margin-right:8px;
+ background:var(--s0);border:1px solid currentColor;color:var(--verdict-color,var(--text));vertical-align:2px}
+.badge[data-verdict="critical"]:before{content:"[!!] "}
+.badge[data-verdict="actionable"]:before{content:"[!] "}
+.badge[data-verdict="investigate"]:before{content:"[?] "}
+.badge[data-verdict="unknown"]:before{content:"[?] "}
+.badge[data-verdict="informational"]:before{content:"[i] "}
+.badge[data-verdict="benign"]:before{content:"[+] "}
 .row{display:flex;gap:10px;margin:7px 0;font-size:14px}
 .row .lbl{color:var(--over);min-width:96px;flex-shrink:0;font-size:12px;
 text-transform:uppercase;letter-spacing:.6px;padding-top:2px}
-.act{color:#a6e3a1}
+.act{color:var(--act)}
 .model{background:var(--crust);border:1px dashed var(--mauve);border-radius:7px;
 padding:10px 12px;margin:12px 0;color:var(--sub)}
 .model strong{color:var(--mauve);font-size:11px;letter-spacing:.7px}
@@ -972,10 +984,32 @@ white-space:pre-wrap;word-break:break-word;max-height:180px;overflow:auto}
 a{color:var(--blue)}
 footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var(--s0);padding-top:16px}
 @media(max-width:560px){.row{flex-direction:column;gap:2px}.row .lbl{padding-top:0}}
+@media(prefers-color-scheme:light){
+  :root{--base:#f7f9fc;--mantle:#fff;--crust:#eef2f7;--s0:#cbd5e1;--s1:#94a3b8;
+  --text:#172033;--sub:#334155;--over:#4b5f77;--blue:#075985;--mauve:#6d28d9;--act:#1f6b45}
+  .warn{background:#fff1f2;border-color:#be123c;color:#7f1d1d}
+  .skip-link:focus{color:#fff}
+  .f{border-left-color:var(--s1)}
+  .badge{color:var(--text)}
+}
+@media(forced-colors:active){
+  body{background:Canvas;color:CanvasText}
+  a{color:LinkText}
+  .f,.stat,.warn,.model,.filterbar{background:Canvas;color:CanvasText;border-color:ButtonText}
+  .f{border-left-color:currentColor!important}
+  .badge,.toggle,.reset{background:ButtonFace;color:ButtonText!important;border-color:ButtonText}
+  .skip-link:focus{background:Highlight;color:HighlightText;outline-color:HighlightText}
+  .sub,.meta,.row .lbl,.filter-status,footer{color:CanvasText}
+  .act{color:LinkText}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;
+  transition-duration:.01ms!important;scroll-behavior:auto!important}
+}
 @media print{
   @page{margin:16mm}
   :root{--base:#fff;--mantle:#fff;--crust:#fff;--s0:#b8b8b8;--s1:#777;
-  --text:#111;--sub:#222;--over:#444;--blue:#000;--mauve:#000}
+   --text:#111;--sub:#222;--over:#444;--blue:#000;--mauve:#000;--act:#1f6b45}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   body{background:#fff;color:#111;font-size:10.5pt}
   .wrap{max-width:none;margin:0;padding:0}
@@ -993,8 +1027,9 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
 '@
     Add-LVLine $sb '</style></head><body><div class="wrap">'
 
-    Add-LVLine $sb '<h1>Log<span>Verdict</span></h1>'
-    Add-LVLine $sb ('<div class="sub">{0} &middot; scanned {1:yyyy-MM-dd HH:mm} &middot; last {2} day(s) &middot; elevated: {3} &middot; v{4}</div>' -f (ConvertTo-LVHtmlEncoded $Result.MachineName), $Result.ScanTime, $Result.DaysBack, $Result.Elevated, $Result.Version)
+    Add-LVLine $sb '<header class="report-header"><h1>Log<span>Verdict</span></h1>'
+    Add-LVLine $sb ('<div class="sub">{0} &middot; scanned {1:yyyy-MM-dd HH:mm} &middot; last {2} day(s) &middot; elevated: {3} &middot; v{4}</div></header>' -f (ConvertTo-LVHtmlEncoded $Result.MachineName), $Result.ScanTime, $Result.DaysBack, $Result.Elevated, $Result.Version)
+    Add-LVLine $sb '<nav aria-label="Report navigation"><a class="skip-link" href="#finding-list">Skip to findings</a></nav><main id="main-content" tabindex="-1">'
 
     $needsAttention = @($Result.Findings | Where-Object { (Get-LVVerdictRank -Verdict $_.Verdict) -ge (Get-LVVerdictRank -Verdict 'unknown') }).Count
     $staleRules = @()
@@ -1005,7 +1040,7 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             ForEach-Object { [pscustomobject]@{ RuleId = $_.RuleId; Verified = $_.Verified; StaleAfterDays = $_.RuleFreshness.StaleAfterDays } })
     }
 
-    Add-LVLine $sb '<div class="grid">'
+    Add-LVLine $sb '<section aria-labelledby="summary-heading"><h2 id="summary-heading" class="sr-only">Scan summary</h2><div class="grid">'
     Add-LVLine $sb ('<div class="stat"><div class="k">Records read</div><div class="v">{0}</div></div>' -f $Result.Reduction.RecordCount)
     Add-LVLine $sb ('<div class="stat"><div class="k">Signatures</div><div class="v">{0}</div></div>' -f $Result.Reduction.SignatureCount)
     Add-LVLine $sb ('<div class="stat"><div class="k">Noise removed</div><div class="v">{0}:1</div></div>' -f $Result.Reduction.Ratio)
@@ -1014,7 +1049,7 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         Add-LVLine $sb ('<div class="stat"><div class="k">Stability ({0})</div><div class="v">{1}/10</div></div>' -f (ConvertTo-LVHtmlEncoded $Result.Stability.Direction), $Result.Stability.Current)
     }
     Add-LVLine $sb ('<div class="stat"><div class="k">Stale rulings</div><div class="v">{0}</div></div>' -f $staleRules.Count)
-    Add-LVLine $sb '</div>'
+    Add-LVLine $sb '</div></section>'
     if ($Result.Reduction.PSObject.Properties['InitialSignatureCount']) {
         Add-LVLine $sb ('<div class="sub">Template passes: {0} fully masked signatures ({1}:1 reduction) &rarr; {2} signatures after promoting {3} low-cardinality slot(s) ({4}:1 reduction).</div>' -f `
             $Result.Reduction.InitialSignatureCount, $Result.Reduction.InitialRatio, $Result.Reduction.SignatureCount,
@@ -1123,7 +1158,7 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         Add-LVLine $sb '</div>'
     }
     if (@($Result.Coverage).Count -gt 0) {
-        Add-LVLine $sb '<h2>Coverage detail</h2><div class="sub">Every source is classified separately: empty means observed with no matching event; other statuses describe evidence that was not observed or could not be read.</div>'
+        Add-LVLine $sb '<section aria-labelledby="coverage-heading"><h2 id="coverage-heading">Coverage detail</h2><div class="sub">Every source is classified separately: empty means observed with no matching event; other statuses describe evidence that was not observed or could not be read.</div>'
         foreach ($source in @($Result.Coverage | Where-Object { $_ })) {
             $label = '{0}/{1} - {2}' -f $source.Source, $source.Kind, $source.Name
             $detail = New-Object 'System.Collections.Generic.List[string]'
@@ -1138,9 +1173,10 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             if ($source.PSObject.Properties['MaxLatencyMilliseconds']) { $detail.Add(('max latency: ' + [string]$source.MaxLatencyMilliseconds + ' ms')) | Out-Null }
             Add-LVLine $sb ('<div class="row"><div class="lbl">{0}</div><div>{1}</div></div>' -f (ConvertTo-LVHtmlEncoded $label), (ConvertTo-LVHtmlEncoded ($detail -join '; ')))
         }
+        Add-LVLine $sb '</section>'
     }
     if (@($Result.HealthProfiles).Count -gt 0) {
-        Add-LVLine $sb '<h2>Configuration health</h2><div class="sub">These profiles describe collection prerequisites and retention context. They are advisory coverage facts, never malicious verdicts.</div>'
+        Add-LVLine $sb '<section aria-labelledby="health-heading"><h2 id="health-heading">Configuration health</h2><div class="sub">These profiles describe collection prerequisites and retention context. They are advisory coverage facts, never malicious verdicts.</div>'
         foreach ($health in @($Result.HealthProfiles | Where-Object { $_ })) {
             $label = '{0}/{1} - {2}' -f $health.Source, $health.Profile, $health.Name
             $detail = New-Object 'System.Collections.Generic.List[string]'
@@ -1151,10 +1187,11 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             if ($health.Advice) { $detail.Add('advice: ' + [string]$health.Advice) | Out-Null }
             Add-LVLine $sb ('<div class="row"><div class="lbl">{0}</div><div>{1}</div></div>' -f (ConvertTo-LVHtmlEncoded $label), (ConvertTo-LVHtmlEncoded ($detail -join '; ')))
         }
+        Add-LVLine $sb '</section>'
     }
     $performanceRows = @($Result.Performance | Where-Object { $_ })
     if ($performanceRows.Count -gt 0) {
-        Add-LVLine $sb '<h2>Performance telemetry (opt-in; content-free)</h2><div class="sub">Source class, bounded counts and elapsed time only. Messages, paths, identifiers and signatures are not recorded.</div>'
+        Add-LVLine $sb '<section aria-labelledby="performance-heading"><h2 id="performance-heading">Performance telemetry (opt-in; content-free)</h2><div class="sub">Source class, bounded counts and elapsed time only. Messages, paths, identifiers and signatures are not recorded.</div>'
         foreach ($metric in $performanceRows) {
             $state = [string]$metric.Status
             if ($metric.Slow) { $state += ' (slow)' }
@@ -1163,19 +1200,24 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             if ($null -ne $metric.Cap) { $detail += '; cap ' + [string]$metric.Cap }
             Add-LVLine $sb ('<div class="row"><div class="lbl">{0}</div><div>{1}</div></div>' -f (ConvertTo-LVHtmlEncoded $label), (ConvertTo-LVHtmlEncoded $detail))
         }
+        Add-LVLine $sb '</section>'
     }
 
     $correlated = @($Result.Correlations | Where-Object { $_ })
     if ($correlated.Count -gt 0) {
-        Add-LVLine $sb '<h2>Things that happened together</h2>'
+        Add-LVLine $sb '<section aria-labelledby="correlations-heading"><h2 id="correlations-heading">Things that happened together</h2>'
         Add-LVLine $sb '<div class="sub">These signatures also appear individually below. Apart they describe symptoms; together they name a cause.</div>'
+        $correlationIndex = 0
         foreach ($c in $correlated) {
+            $correlationIndex++
             $chex = $script:LVVerdictHex[$c.Verdict]
             if (-not $chex) { $chex = '#6c7086' }
+            $correlationVerdict = ConvertTo-LVHtmlEncoded ([string]$c.Verdict)
+            $correlationTitle = ConvertTo-LVHtmlEncoded ([string]$c.Title)
 
-            Add-LVLine $sb ('<div class="f" style="border-left-color:{0}">' -f $chex)
-            Add-LVLine $sb ('<div class="h"><span class="v" style="background:{0}">{1}</span> {2}</div>' -f `
-                $chex, (ConvertTo-LVHtmlEncoded $c.Verdict.ToUpper()), (ConvertTo-LVHtmlEncoded $c.Title))
+            Add-LVLine $sb ('<article class="f" style="--verdict-color:{0}" aria-labelledby="correlation-heading-{1}">' -f $chex, $correlationIndex)
+            Add-LVLine $sb ('<h3 id="correlation-heading-{0}"><span class="badge" data-verdict="{1}" style="--verdict-color:{2}">Verdict: {3}</span>{4}</h3>' -f `
+                $correlationIndex, $correlationVerdict, $chex, $correlationVerdict.ToUpperInvariant(), $correlationTitle)
             Add-LVLine $sb ('<div class="meta">{0} &middot; {1} within {2} &middot; {3} occurrence(s)</div>' -f `
                 (ConvertTo-LVHtmlEncoded ((@($c.RuleIds) -join ' + '))), (ConvertTo-LVHtmlEncoded $c.Type),
                 (ConvertTo-LVHtmlEncoded $c.Timespan), @($c.Windows).Count)
@@ -1188,14 +1230,19 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             foreach ($fp in @($c.FalsePositives | Where-Object { $_ })) {
                 Add-LVLine $sb ('<div class="row"><div class="lbl">Could be innocent when</div><div class="val">{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $fp))
             }
-            Add-LVLine $sb '</div>'
+            Add-LVLine $sb '</article>'
         }
-        Add-LVLine $sb '<h2 id="findings-heading">Every signature</h2>'
-    } else {
-        Add-LVLine $sb '<h2 id="findings-heading">Findings</h2>'
+        Add-LVLine $sb '</section>'
     }
 
-    Add-LVLine $sb '<div class="filterbar" id="finding-filters" aria-labelledby="filter-title">'
+    Add-LVLine $sb '<section aria-labelledby="findings-heading"><h2 id="findings-heading">'
+    if ($correlated.Count -gt 0) {
+        Add-LVLine $sb 'Every signature</h2>'
+    } else {
+        Add-LVLine $sb 'Findings</h2>'
+    }
+
+    Add-LVLine $sb '<div class="filterbar" id="finding-filters" role="region" aria-labelledby="filter-title">'
     Add-LVLine $sb '<div class="filter-title" id="filter-title">Filter findings</div><div class="filter-controls">'
     foreach ($verdict in @('critical', 'actionable', 'investigate', 'unknown', 'informational', 'benign')) {
         $count = @($Result.Findings | Where-Object { $_.Verdict -eq $verdict }).Count
@@ -1207,15 +1254,29 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
     Add-LVLine $sb '<button class="reset" id="reset-filters" type="button">Reset</button></div>'
     Add-LVLine $sb '<div class="filter-status" id="filter-status" aria-live="polite"></div></div>'
     Add-LVLine $sb '<noscript><div class="sub no-script">Filtering is unavailable because scripting is disabled; all findings are shown.</div></noscript>'
-    Add-LVLine $sb '<div id="finding-list" aria-labelledby="findings-heading">'
+    Add-LVLine $sb '<div id="finding-list" role="region" aria-labelledby="findings-heading">'
+    $findingIndex = 0
     foreach ($f in $Result.Findings) {
+        $findingIndex++
         $hex = $script:LVVerdictHex[$f.Verdict]
         if (-not $hex) { $hex = '#6c7086' }
+        $findingVerdict = [string]$f.Verdict
+        $findingRuleId = if ($f.PSObject.Properties['RuleId'] -and $null -ne $f.RuleId -and [string]$f.RuleId) { [string]$f.RuleId } else { 'unmatched' }
+        $findingConfidence = if ($f.PSObject.Properties['Confidence'] -and $null -ne $f.Confidence -and [string]$f.Confidence) { [string]$f.Confidence } else { 'not recorded' }
+        $findingVerified = if ($f.PSObject.Properties['Verified'] -and $null -ne $f.Verified -and [string]$f.Verified) { [string]$f.Verified } else { 'not recorded' }
+        $findingStale = if ($f.PSObject.Properties['RuleStale'] -and $f.RuleStale) { '; stale guidance' } else { '' }
+        $findingVerdictHtml = ConvertTo-LVHtmlEncoded $findingVerdict
+        $findingRuleIdHtml = ConvertTo-LVHtmlEncoded $findingRuleId
+        $findingConfidenceHtml = ConvertTo-LVHtmlEncoded $findingConfidence
+        $findingVerifiedHtml = ConvertTo-LVHtmlEncoded $findingVerified
 
-        Add-LVLine $sb ('<article class="f finding" data-verdict="{0}" style="border-left-color:{1}">' -f `
-            (ConvertTo-LVHtmlEncoded $f.Verdict), $hex)
-        Add-LVLine $sb ('<h2><span class="badge" style="color:{0}">{1}</span>{2}</h2>' -f $hex, $f.Verdict, (ConvertTo-LVHtmlEncoded $f.Title))
-        Add-LVLine $sb ('<div class="meta">{0} &middot; {1} occurrence(s) &middot; {2}/day &middot; {3} to {4} &middot; rule {5} ({6}{7}{8})</div>' -f (ConvertTo-LVHtmlEncoded $f.Key), $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen), $f.RuleId, $f.Confidence, $(if ($f.Verified) { ', verified ' + $f.Verified } else { '' }), $(if ($f.PSObject.Properties['RuleStale'] -and $f.RuleStale) { ', stale guidance' } else { '' }))
+        Add-LVLine $sb ('<article class="f finding" data-verdict="{0}" data-rule-id="{1}" data-confidence="{2}" data-verified="{3}" style="--verdict-color:{4}" aria-labelledby="finding-heading-{5}">' -f `
+            $findingVerdictHtml, $findingRuleIdHtml, $findingConfidenceHtml, $findingVerifiedHtml, $hex, $findingIndex)
+        Add-LVLine $sb ('<h3 id="finding-heading-{0}"><span class="badge" data-verdict="{1}" style="--verdict-color:{2}">Verdict: {3}</span> {4}</h3>' -f `
+            $findingIndex, $findingVerdictHtml, $hex, $findingVerdictHtml.ToUpperInvariant(), (ConvertTo-LVHtmlEncoded $f.Title))
+        Add-LVLine $sb ('<div class="meta">{0} &middot; {1} occurrence(s) &middot; {2}/day &middot; {3} to {4} &middot; rule {5} &middot; confidence {6} &middot; verified {7}{8}</div>' -f `
+            (ConvertTo-LVHtmlEncoded $f.Key), $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen),
+            $findingRuleIdHtml, $findingConfidenceHtml, $findingVerifiedHtml, $findingStale)
         if ($f.PSObject.Properties['Burst'] -and $f.Burst) {
             Add-LVLine $sb ('<div class="row"><div class="lbl">Burst</div><div>{0} &middot; {1} occurrence(s) in {2} minute(s)</div></div>' -f (Format-LVWhen $f.BurstOnset), $f.BurstCount, $f.BurstWindowMinutes)
         }
@@ -1272,10 +1333,10 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         Add-LVLine $sb ('<pre class="ev">{0}</pre>' -f (ConvertTo-LVHtmlEncoded $f.SampleMessage))
         Add-LVLine $sb '</article>'
     }
-    Add-LVLine $sb '<div class="empty" id="filter-empty" hidden>No findings match the selected filters.</div></div>'
+    Add-LVLine $sb '<div class="empty" id="filter-empty" hidden>No findings match the selected filters.</div></div></section>'
 
     if (@($Result.CrashArtifacts).Count -gt 0) {
-        Add-LVLine $sb '<div class="f" style="border-left-color:#cba6f7"><h2>Crash evidence on disk</h2>'
+        Add-LVLine $sb '<section class="f" aria-labelledby="crash-heading"><h2 id="crash-heading">Crash evidence on disk</h2>'
         Add-LVLine $sb '<div class="meta">Report.wer fields and supported kernel dump headers are decoded. Naming a driver from a dump stack still needs a debugger and symbols.</div>'
         foreach ($c in $Result.CrashArtifacts) {
             Add-LVLine $sb ('<div class="row"><div class="lbl">{0}</div><div>{1:yyyy-MM-dd HH:mm} &middot; {2}</div></div>' -f $c.Kind, $c.When, (ConvertTo-LVHtmlEncoded $c.Path))
@@ -1287,9 +1348,10 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
                 Add-LVLine $sb ('<div class="meta">Not decoded: {0}</div>' -f (ConvertTo-LVHtmlEncoded $c.DecodeStatus))
             }
         }
-        Add-LVLine $sb '</div>'
+        Add-LVLine $sb '</section>'
     }
 
+    Add-LVLine $sb '</main>'
     if (@($Result.Findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation }).Count -gt 0) {
         Add-LVLine $sb '<footer>Generated by LogVerdict. Verdicts, actions and unlabelled explanations come only from the curated rule database. Any optional local-model text is isolated inside a MODEL-GENERATED CANDIDATE block, contains no remediation, and is not a ruling.</footer>'
     } else {

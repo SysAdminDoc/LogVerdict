@@ -3932,6 +3932,44 @@ Describe 'Report rendering' {
         }
     }
 
+    It 'renders an accessible report structure with non-colour verdict cues' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $finding = $r.Findings[0] | Select-Object *
+            $finding.RuleId = 'T-<rule>&'
+            $finding.Confidence = 'high&'
+            $finding | Add-Member -NotePropertyName Verified -NotePropertyValue '2026-08-02 <UTC>' -Force
+            $result.Findings = @($finding)
+            $result | Add-Member -NotePropertyName Correlations -NotePropertyValue @([pscustomobject]@{
+                Verdict='critical'; Title='Together'; RuleIds=@('T-1'); Type='co-occurrence'; Timespan='10m'
+                Windows=@([pscustomobject]@{ Start=[datetime]'2026-07-30 10:00:00'; End=[datetime]'2026-07-30 10:01:00'; Occurrences=@() })
+                InvolvedKeys=@('Acme/99'); Plain='plain'; Why='why'; Action='action'; FalsePositives=@()
+            }) -Force
+
+            $html = ConvertTo-LVHtmlReport -Result $result
+            $html | Should -Match '<nav aria-label="Report navigation"><a class="skip-link" href="#finding-list">Skip to findings</a>'
+            $html | Should -Match '<main id="main-content" tabindex="-1">'
+            $html | Should -Match '<section aria-labelledby="findings-heading"><h2 id="findings-heading">'
+            $html | Should -Match '<article class="f finding" data-verdict="actionable"'
+            $html | Should -Match '<h3 id="finding-heading-1"><span class="badge" data-verdict="actionable"'
+            $html | Should -Match 'Verdict: ACTIONABLE'
+            $html | Should -Match 'data-rule-id="T-&lt;rule&gt;&amp;"'
+            $html | Should -Match 'data-confidence="high&amp;"'
+            $html | Should -Match 'data-verified="2026-08-02 &lt;UTC&gt;"'
+            $html | Should -Match 'rule T-&lt;rule&gt;&amp;'
+            $html | Should -Match 'confidence high&amp;'
+            $html | Should -Match 'verified 2026-08-02 &lt;UTC&gt;'
+            $html | Should -Match '<h3 id="correlation-heading-1"><span class="badge" data-verdict="critical"'
+            $html | Should -Not -Match '<div class="h"><span class="v"'
+            $html | Should -Not -Match '<h2><span class="badge"'
+            $html | Should -Match '@media\(prefers-color-scheme:light\)'
+            $html | Should -Match '@media\(forced-colors:active\)'
+            $html | Should -Match '@media\(prefers-reduced-motion:reduce\)'
+            $html | Should -Match '\.badge\[data-verdict="actionable"\]:before'
+        }
+    }
+
     It 'prints as a light document and keeps finding cards together' {
         InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
             param($r)
