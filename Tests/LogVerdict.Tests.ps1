@@ -840,7 +840,7 @@ Describe 'Bundled Microsoft error catalog' {
           foreach ($entry in @($catalog)) {
               $entry.sourceRepository | Should -Match '^MicrosoftDocs/'
               $entry.sourcePath | Should -Match '^(desktop-src|windows-driver-docs-pr|support)/'
-              $entry.sourceRevision | Should -Match '^(?:[0-9a-f]{40}|source-archive)$'
+              $entry.sourceRevision | Should -Match '^[0-9a-f]{40}$'
               $entry.licence | Should -BeExactly 'CC-BY-4.0'
               $entry.sourceDocumentHash | Should -Match '^[0-9a-f]{64}$'
           }
@@ -872,10 +872,19 @@ Describe 'Bundled Microsoft error catalog' {
             $sha.Dispose()
         }
         $current.entries = @($current.entries | Select-Object -First 2)
-        foreach ($entry in $current.entries) {
-            foreach ($property in @('sourceRepository', 'sourcePath', 'sourceRevision', 'licence', 'sourceDocumentHash')) {
-                $entry.PSObject.Properties.Remove($property)
+        $entrySha = [Security.Cryptography.SHA256]::Create()
+        try {
+            foreach ($entry in $current.entries) {
+                foreach ($property in @('sourceRepository', 'sourcePath', 'sourceRevision', 'licence', 'sourceDocumentHash')) {
+                    $entry.PSObject.Properties.Remove($property)
+                }
+                $entrySourceText = '{0}|{1}|{2}|{3}|{4}' -f $entry.reference, $entry.source,
+                    $entry.retrieved, $entry.kind, $entry.hex
+                $entry.sourceHash = ([BitConverter]::ToString($entrySha.ComputeHash(
+                    [Text.Encoding]::UTF8.GetBytes($entrySourceText)))).Replace('-', '').ToLowerInvariant()
             }
+        } finally {
+            $entrySha.Dispose()
         }
         $legacyPath = Join-Path $TestDrive 'error-codes-v2.json'
         $current | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $legacyPath -Encoding UTF8
@@ -885,6 +894,21 @@ Describe 'Bundled Microsoft error catalog' {
             $legacy = Get-LVErrorCatalog -Path $legacyPath
             $legacy.schemaVersion | Should -Be 2
             @($legacy.entries).Count | Should -Be 2
+        }
+    }
+
+    It 'binds schema v3 entry hashes to licensed-source provenance' {
+        $repoRoot = Split-Path $PSScriptRoot -Parent
+        $document = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/error-codes.json') -Raw | ConvertFrom-Json
+        $document.entries = @($document.entries | Select-Object -First 2)
+        $document.entries[0].sourcePath = 'windows-driver-docs-pr/debugger/tampered.md'
+        $tamperedPath = Join-Path $TestDrive 'error-codes-tampered.json'
+        $document | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $tamperedPath -Encoding UTF8
+
+        InModuleScope LogVerdict -Parameters @{ tamperedPath = $tamperedPath } {
+            param($tamperedPath)
+            $catalogPath = $tamperedPath
+            { Get-LVErrorCatalog -Path $catalogPath } | Should -Throw '*sourceHash*'
         }
     }
 

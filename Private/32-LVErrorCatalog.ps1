@@ -282,13 +282,19 @@ function Get-LVErrorCatalog {
     if ([string]$catalog.sourceHash -notmatch '^(?i:[0-9a-f]{64})$') {
         throw ("Error catalog '{0}' has no valid sourceHash." -f $source)
     }
+    $sourceManifests = @{}
     if ($version -ge 3) {
         foreach ($manifest in @($catalog.sources)) {
-            if (-not $manifest.repository -or -not $manifest.revision -or
+            if ([string]$manifest.repository -notmatch '^MicrosoftDocs/(?:win32|windows-driver-docs|SupportArticles-docs)$' -or
+                [string]$manifest.revision -notmatch '^(?i:[0-9a-f]{40})$' -or
                 [string]$manifest.licence -ne 'CC-BY-4.0' -or
                 [string]$manifest.licenceHash -notmatch '^(?i:[0-9a-f]{64})$') {
                 throw ("Error catalog '{0}' contains incomplete licensed source manifest metadata." -f $source)
             }
+            if ($sourceManifests.ContainsKey([string]$manifest.repository)) {
+                throw ("Error catalog '{0}' contains duplicate source manifest '{1}'." -f $source, $manifest.repository)
+            }
+            $sourceManifests[[string]$manifest.repository] = $manifest
         }
     } else {
         foreach ($reference in @($catalog.sources)) {
@@ -327,9 +333,24 @@ function Get-LVErrorCatalog {
             [string]$entry.licence -ne 'CC-BY-4.0')) {
             throw ("Error catalog '{0}' entry '{1}' has invalid licensed-source provenance metadata." -f $source, $entry.id)
         }
+        if ($version -ge 3) {
+            $entryRepository = [string]$entry.sourceRepository
+            $entryPath = [string]$entry.sourcePath
+            if (-not $sourceManifests.ContainsKey($entryRepository) -or
+                [string]$entry.sourceRevision -ine [string]$sourceManifests[$entryRepository].revision -or
+                $entryPath -notmatch '^(?:desktop-src|windows-driver-docs-pr|support)/' -or
+                $entryPath -match '\\' -or $entryPath -match '(?:^|/)\.\.?(?:/|$)') {
+                throw ("Error catalog '{0}' entry '{1}' has provenance that does not match its licensed source manifest." -f $source, $entry.id)
+            }
+        }
         $hex = ConvertTo-LVErrorHex -Value ([string]$entry.hex)
         if (-not $hex) { throw ("Error catalog '{0}' entry '{1}' has an invalid hexadecimal value." -f $source, $entry.id) }
-        $expectedSourceHash = Get-LVErrorCatalogSha256 -Text ('{0}|{1}|{2}|{3}|{4}' -f $entry.reference, $entry.source, $entry.retrieved, $entry.kind, $hex)
+        $sourceHashText = '{0}|{1}|{2}|{3}|{4}' -f $entry.reference, $entry.source, $entry.retrieved, $entry.kind, $hex
+        if ($version -ge 3) {
+            $sourceHashText += '|{0}|{1}|{2}|{3}|{4}' -f $entry.sourceRepository, $entry.sourcePath,
+                $entry.sourceRevision, $entry.licence, $entry.sourceDocumentHash
+        }
+        $expectedSourceHash = Get-LVErrorCatalogSha256 -Text $sourceHashText
         if ([string]$entry.sourceHash -ine $expectedSourceHash) {
             throw ("Error catalog '{0}' entry '{1}' has a sourceHash that does not match its source metadata." -f $source, $entry.id)
         }

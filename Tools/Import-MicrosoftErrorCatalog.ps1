@@ -120,6 +120,9 @@ function Get-LVCcByRepository {
             $revision = [string]$gitRevision
         }
     }
+    if ($revision -eq 'source-archive' -and -not $AllowIncomplete) {
+        throw ("Repository '{0}' is not a Git checkout with a verifiable commit revision." -f $Repository)
+    }
     return [pscustomobject]@{
         Root = $root
         Repository = $Repository
@@ -475,12 +478,16 @@ foreach ($entry in $unique) {
         }
         $entry | Add-Member -NotePropertyName applicability -NotePropertyValue $applicability -Force
     }
-    $entry | Add-Member -NotePropertyName sourceHash -NotePropertyValue (Get-LVTextSha256 -Text ('{0}|{1}|{2}|{3}|{4}' -f $entry.reference, $entry.source, $entry.retrieved, $entry.kind, $entry.hex)) -Force
     foreach ($field in @('reference', 'sourceRepository', 'sourcePath', 'sourceRevision', 'licence', 'sourceDocumentHash', 'sourceHash')) {
+        if ($field -eq 'sourceHash') { continue }
         if ([string]::IsNullOrWhiteSpace([string]$entry.$field)) {
             throw ("Catalog entry '{0}' has no licensed source metadata field '{1}'." -f $entry.id, $field)
         }
     }
+    $sourceHashText = '{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}' -f $entry.reference, $entry.source,
+        $entry.retrieved, $entry.kind, $entry.hex, $entry.sourceRepository, $entry.sourcePath,
+        $entry.sourceRevision, $entry.licence, $entry.sourceDocumentHash
+    $entry | Add-Member -NotePropertyName sourceHash -NotePropertyValue (Get-LVTextSha256 -Text $sourceHashText) -Force
     $entry | Add-Member -NotePropertyName normalized -NotePropertyValue (ConvertTo-LVNormalizedCode -Kind $entry.kind -Hex $entry.hex) -Force
 }
 $sourceHash = Get-LVTextSha256 -Text (ConvertTo-Json -InputObject @($sources) -Depth 8 -Compress)

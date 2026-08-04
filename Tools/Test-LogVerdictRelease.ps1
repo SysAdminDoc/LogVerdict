@@ -186,7 +186,7 @@ foreach ($entry in $catalog) {
     }
     if ($entry.sourceRepository -notmatch '^MicrosoftDocs/' -or
         $entry.sourcePath -notmatch '^(desktop-src|windows-driver-docs-pr|support)/' -or
-        $entry.sourceRevision -notmatch '^(?i:[0-9a-f]{40}|source-archive)$' -or
+        $entry.sourceRevision -notmatch '^(?i:[0-9a-f]{40})$' -or
         $entry.licence -ne 'CC-BY-4.0' -or
         $entry.sourceDocumentHash -notmatch '^(?i:[0-9a-f]{64})$') {
         throw ("Typed error catalog entry '{0}' failed licensed-source provenance validation." -f $entry.id)
