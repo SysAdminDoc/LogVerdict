@@ -50,6 +50,12 @@ $script:LVRuleConfidence = @('high', 'medium', 'low', 'draft')
 $script:LVRuleRegexMatchTimeout = [TimeSpan]::FromMilliseconds(100)
 $script:LVCompiledRegexCache = @{}
 
+# Coverage has one reader-facing vocabulary. The ValidateSet on the constructor
+# below is the source of truth; its values are reflected into this list after the
+# function is declared. Offline EVTX manifests use lifecycle states such as queued,
+# parsed, and skipped, which are mapped at the coverage boundary instead.
+$script:LVCoverageStatuses = @()
+
 # Numeric, error-code, and version slots can carry a small diagnostic vocabulary.
 # Identity and volatile slots are never promoted even when a tiny sample makes them
 # look low-cardinality; doing so would split on timestamps and expose paths or accounts.
@@ -663,6 +669,25 @@ function Write-LVTextFile {
     [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
 }
 
+function ConvertTo-LVCoverageStatus {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$Status,
+        [int64]$ObservedRecords = 0
+    )
+
+    $value = ([string]$Status).Trim().ToLowerInvariant()
+    switch ($value) {
+        'parsed'  { return $(if ($ObservedRecords -gt 0) { 'readable' } else { 'empty' }) }
+        'queued'  { return 'not-observed' }
+        'skipped' { return 'not-observed' }
+        default {
+            if ($script:LVCoverageStatuses -contains $value) { return $value }
+            return 'unreadable'
+        }
+    }
+}
+
 function New-LVCoverageRecord {
     <#
         .SYNOPSIS
@@ -681,7 +706,11 @@ function New-LVCoverageRecord {
         [Parameter(Mandatory)][string]$Source,
         [Parameter(Mandatory)][string]$Kind,
         [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][string]$Status,
+        [Parameter(Mandatory)]
+        [ValidateSet('readable', 'empty', 'partial', 'artifact-read', 'executed',
+            'disabled', 'policy-disabled', 'provider-absent', 'not-observed',
+            'unreadable', 'truncated', 'timeout', 'filtered')]
+        [string]$Status,
         [AllowNull()][string]$Reason,
         [AllowNull()][string]$Path,
         [AllowNull()][Nullable[datetime]]$WindowStart,
@@ -727,6 +756,16 @@ function New-LVCoverageRecord {
         Origin            = $Origin
         CollectionBudget  = $budgetSummary
     }
+}
+
+$coverageStatusParameter = (Get-Command -Name New-LVCoverageRecord -CommandType Function -ErrorAction Stop).Parameters['Status']
+$script:LVCoverageStatuses = @(
+    $coverageStatusParameter.Attributes |
+        Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] } |
+        ForEach-Object { $_.ValidValues }
+)
+if ($script:LVCoverageStatuses.Count -eq 0) {
+    throw 'LogVerdict: coverage status vocabulary is missing its ValidateSet.'
 }
 
 function New-LVPerformanceRecord {

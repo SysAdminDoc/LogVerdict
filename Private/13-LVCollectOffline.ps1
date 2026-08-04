@@ -873,14 +873,20 @@ function Invoke-LVOfflineScan {
 
         $coverageSources = New-Object System.Collections.Generic.List[object]
         foreach ($source in @($evtxPlan.Manifest)) {
-            $coverageSources.Add((New-LVCoverageRecord -Source 'offline-evtx' -Kind 'file' -Name $source.Name -Status $source.Status `
+            $coverageStatus = ConvertTo-LVCoverageStatus -Status $source.Status -ObservedRecords $source.RecordCount
+            $coverageSources.Add((New-LVCoverageRecord -Source 'offline-evtx' -Kind 'file' -Name $source.Name -Status $coverageStatus `
                 -Reason $source.Reason -Path $source.Path -WindowStart ($started.AddDays(-1 * [Math]::Abs($effectiveDays))) -WindowEnd $started `
                 -Cap $MaxPerChannel -ObservedRecords $source.RecordCount -RecordGap $null -ParserError $(if ($source.Status -eq 'unreadable') { $source.Reason } else { $null }) `
                 -SizeBytes $source.SizeBytes -ParseMilliseconds $source.ParseMilliseconds -SHA256 $source.SHA256 `
                 -CollectionBudget $CollectionBudget -Origin ([string]$source.Origin))) | Out-Null
         }
         if ($sourceReport -and $sourceReport.PSObject.Properties['Coverage']) {
-            foreach ($source in @($sourceReport.Coverage | Where-Object { $_ })) { $coverageSources.Add($source) | Out-Null }
+            foreach ($source in @($sourceReport.Coverage | Where-Object { $_ })) {
+                $normalized = $source | Select-Object *
+                $observed = if ($normalized.PSObject.Properties['ObservedRecords']) { [int64]$normalized.ObservedRecords } else { 0 }
+                $normalized.Status = ConvertTo-LVCoverageStatus -Status ([string]$normalized.Status) -ObservedRecords $observed
+                $coverageSources.Add($normalized) | Out-Null
+            }
         }
 
         $healthProfiles = @()

@@ -153,9 +153,9 @@ function ConvertTo-LVProviderCoverage {
     $rows = New-Object System.Collections.Generic.List[object]
     foreach ($item in @($Coverage | Where-Object { $_ })) {
         $status = [string](Get-LVProviderProperty -InputObject $item -Name 'status')
-        if ($status -notin @('readable', 'empty', 'not-observed', 'unreadable', 'truncated', 'timeout', 'skipped')) { $status = 'unreadable' }
         $observed = 0
         [void][int]::TryParse([string](Get-LVProviderProperty -InputObject $item -Name 'observedRecords'), [ref]$observed)
+        $status = ConvertTo-LVCoverageStatus -Status $status -ObservedRecords $observed
         $reason = ConvertTo-LVRedactedText -Text ([string](Get-LVProviderProperty -InputObject $item -Name 'reason')) -MachineName $env:COMPUTERNAME
         $rows.Add((New-LVCoverageRecord -Source 'provider' -Kind 'extension' -Name (('{0}/{1}' -f $Provider.Id, [string](Get-LVProviderProperty -InputObject $item -Name 'name'))) `
                 -Status $status -Reason $reason -ObservedRecords $observed -CollectionBudget $CollectionBudget -Origin 'provider')) | Out-Null

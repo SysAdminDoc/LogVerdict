@@ -306,6 +306,21 @@ Describe 'Export adapters and contract builders' {
         }
     }
 
+    It 'rejects offline lifecycle states from the reader-facing coverage contract' {
+        InModuleScope LogVerdict -Parameters @{ InputResult = $script:AdapterResult } {
+            param($InputResult)
+            $legacy = $InputResult | Select-Object *
+            $legacy | Add-Member -NotePropertyName Coverage -NotePropertyValue @([pscustomobject]@{
+                Source = 'offline-evtx'; Kind = 'file'; Name = 'System.evtx'; Status = 'parsed'
+                ObservedRecords = 1; SkippedRecords = 0
+            }) -Force
+            $report = ConvertTo-LVReportContract -Result $legacy
+            Test-LVReportContract -InputObject $report -Quiet | Should -BeFalse
+            { New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name 'System' -Status 'parsed' } |
+                Should -Throw '*ValidateSet*'
+        }
+    }
+
     It 'diffs review artifacts by stable id and validates their exchange envelope' {
         InModuleScope LogVerdict {
             $previous = [pscustomobject]@{
@@ -2627,9 +2642,10 @@ Describe 'Event collection failure handling' {
                 }
             }
             $budget = New-LVCollectionBudget -MaxBytes 100000 -MaxRecords 1 -MaxSeconds 60
-            $rec = @(Get-LVEventRecord -Channel @('Fake', 'Later') -DaysBack 30 -CollectionBudget $budget)
+            $rec = @(Get-LVEventRecord -Channel @('Fake', 'Later', 'Never') -DaysBack 30 -CollectionBudget $budget)
             $rec.Count | Should -Be 1
-            @($script:LVEventCoverage | Where-Object Status -eq 'truncated').Count | Should -Be 2
+            @($script:LVEventCoverage | Where-Object Status -eq 'truncated').Count | Should -Be 3
+            @($script:LVEventCoverage | Where-Object { $_.Name -in @('Later', 'Never') }).Count | Should -Be 2
             $budget.RecordsRead | Should -Be 1
         }
     }
@@ -6255,8 +6271,26 @@ Describe 'Offline evidence analysis' {
             @($result.Performance | Where-Object Name -eq 'scan total').Count | Should -Be 1
             ($result.Performance | ConvertTo-Json -Depth 5) | Should -Not -Match 'bad block|ARCHIVE-HOST|single\.evtx'
             @($result.CoverageNotes | Where-Object { $_ -match 'SHA-256 [0-9A-F]{64}' }).Count | Should -Be 1
+            ($result.Coverage | Where-Object { $_.Source -eq 'offline-evtx' } | Select-Object -First 1).Status | Should -BeExactly 'readable'
+            @($result.Coverage | Where-Object { $_.Status -eq 'parsed' }).Count | Should -Be 0
             $manifest = Format-LVEvidenceManifest -Result $result -Content @()
             $manifest | Should -Match ('SHA-256 ' + $result.EvidenceManifest[0].SHA256)
+        }
+    }
+
+    It 'maps a parsed EVTX with no records to empty coverage' {
+        $evtx = Join-Path $TestDrive 'empty.evtx'
+        [IO.File]::WriteAllBytes($evtx, [byte[]](0x45, 0x56, 0x54, 0x58, 0x03))
+        InModuleScope LogVerdict -Parameters @{ EvtxPath = $evtx } {
+            param($EvtxPath)
+            Mock Get-WinEvent {
+                param($Oldest)
+                if ($Oldest) { return [pscustomobject]@{ LogName = 'System'; TimeCreated = (Get-Date).AddHours(-1) } }
+                return @()
+            }
+            $result = Invoke-LVOfflineScan -EvidencePath $EvtxPath -DaysBack 1 -SkipTextLogs -SkipReliability
+            $result.EvidenceManifest[0].Status | Should -BeExactly 'parsed'
+            ($result.Coverage | Where-Object { $_.Source -eq 'offline-evtx' } | Select-Object -First 1).Status | Should -BeExactly 'empty'
         }
     }
 

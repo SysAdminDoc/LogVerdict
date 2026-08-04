@@ -203,7 +203,7 @@ function Test-LVReportContract {
         foreach ($name in @('Source', 'Kind', 'Name', 'Status', 'ObservedRecords', 'SkippedRecords')) {
             if (-not $coverage.PSObject.Properties[$name]) { $problems.Add("coverage is missing '$name'") | Out-Null }
         }
-        if ([string]$coverage.Status -notin @('readable', 'empty', 'artifact-read', 'executed', 'disabled', 'policy-disabled', 'provider-absent', 'not-observed', 'unreadable', 'truncated', 'timeout', 'filtered', 'parsed', 'queued', 'skipped')) {
+        if ($script:LVCoverageStatuses -notcontains ([string]$coverage.Status).ToLowerInvariant()) {
             $problems.Add(("coverage status '{0}' is unsupported" -f $coverage.Status)) | Out-Null
         }
     }

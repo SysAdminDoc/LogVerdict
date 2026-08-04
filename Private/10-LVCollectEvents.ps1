@@ -285,7 +285,7 @@ function Get-LVEventRecord {
                 -Reason ('The shared collection {0} budget stopped this channel before it was read.' -f $budgetStop) `
                 -WindowStart $windowStart -WindowEnd (Get-Date) -Cap $MaxPerChannel `
                 -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
-            break
+            continue
         }
 
         # A denied channel answers the FilterHashtable query with "no events found",
@@ -334,7 +334,7 @@ function Get-LVEventRecord {
                     -Reason 'The shared collection record budget was exhausted before the channel was read.' `
                     -WindowStart $windowStart -WindowEnd (Get-Date) -Cap $MaxPerChannel `
                     -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
-                break
+                continue
             }
             $events = Get-WinEvent -FilterHashtable $filter -MaxEvents $readLimit -ErrorAction Stop
         } catch {
