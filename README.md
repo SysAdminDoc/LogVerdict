@@ -88,7 +88,7 @@ The artifact carries stable unknown/candidate IDs, source/provider/event context
 - **Coverage** makes the trust boundary explicit. Readable channels, event horizons, denied sources, crash artifacts and curated correlations have one page rather than being buried in a sidebar.
 - **Activity** shows the live collect, reduce, correlate, resolve and report stages, the full run transcript and a compact run summary.
 - **Save report** writes the same text, JSON and HTML bundle the console tool produces.
-- The scan runs on a background thread, so the window stays responsive and can be cancelled mid-run.
+- The scan runs on a background thread, so the window stays responsive. Overview shows a visible Cancel action, live elapsed time, and a realistic look-back-specific timing range; cancellation stops the worker, reports partial coverage, and saves no incomplete report.
 - Look-back, source switches, harmless-finding visibility, and window size are remembered per user in `%LOCALAPPDATA%\LogVerdict\settings.json`. A missing, corrupt, future, or unreadable settings file falls back to safe defaults.
 - Windows High Contrast changes the full interface to the active system colours, including verdict labels and keyboard focus, and switching it off restores the normal dark theme without restarting.
 

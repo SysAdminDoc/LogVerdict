@@ -4012,6 +4012,32 @@ Describe 'GUI pure presentation logic' {
         }
     }
 
+    It 'gives the Overview a bounded timing hint for each look-back tier' {
+        InModuleScope LogVerdict {
+            Get-LVGuiScanTimingHint -DaysBack 1 | Should -BeExactly 'Typical 1-day scan: under 30 seconds. All-channel sweeps can take longer.'
+            Get-LVGuiScanTimingHint -DaysBack 7 | Should -BeExactly 'Typical 7-day scan: 30-90 seconds. All-channel sweeps can take longer.'
+            Get-LVGuiScanTimingHint -DaysBack 30 | Should -BeExactly 'Typical 30-day scan: 1-3 minutes. All-channel sweeps can take longer.'
+            Get-LVGuiScanTimingHint -DaysBack 3650 | Should -BeExactly 'Typical 3650-day scan: 2-5 minutes. All-channel sweeps can take longer.'
+        }
+    }
+
+    It 'keeps cancellation visible, timed, and explicit about partial coverage' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $gui = Get-Content -LiteralPath (Join-Path $root 'Public/Show-LogVerdictGui.ps1') -Raw
+        $xaml = Get-Content -LiteralPath (Join-Path $root 'Private/50-LVGuiXaml.ps1') -Raw
+        $hostFile = Get-Content -LiteralPath (Join-Path $root 'Private/51-LVGuiHost.ps1') -Raw
+
+        $xaml | Should -Match 'x:Name="BtnOverviewCancel"'
+        $xaml | Should -Match 'x:Name="TxtOverviewTimingHint"'
+        $gui | Should -Match '\$state\.ScanStartedAt\s*=\s*Get-Date'
+        $gui | Should -Match 'Running for \{0:N1\}s'
+        $gui | Should -Match 'Stop-LVScanJob -Job \$state\.Job'
+        $gui | Should -Match 'coverage is partial and no report was saved'
+        $gui | Should -Match 'BtnOverviewCancel\.Add_Click'
+        $gui | Should -Match '\$window\.Add_Closing'
+        $hostFile | Should -Match 'Get-LVGuiScanTimingHint'
+    }
+
     It 'filters by enabled verdict and literal case-insensitive text' {
         InModuleScope LogVerdict {
             $row = [pscustomobject]@{ Verdict='investigate'; Haystack='Disk [2] Failure' }
