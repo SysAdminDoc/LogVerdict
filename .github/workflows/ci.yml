@@ -19,7 +19,7 @@ jobs:
         shell: [powershell, pwsh]
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install pinned test tools
         shell: ${{ matrix.shell }}
@@ -56,9 +56,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           .\Tools\Test-LogVerdictGui.ps1 -Theme Normal -ScalePercent 125
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not $?) { exit 1 }
           .\Tools\Test-LogVerdictGui.ps1 -Theme HighContrast -ScalePercent 125
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not $?) { exit 1 }
 
       - name: Run structured coverage gate in STA
         shell: ${{ matrix.shell }}
@@ -72,7 +72,7 @@ jobs:
 
       - name: Upload structured coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: logverdict-coverage-${{ matrix.shell }}
           path: coverage-${{ matrix.shell }}.json
@@ -85,25 +85,29 @@ jobs:
           $runtime = '${{ matrix.shell }}'
           $report = Join-Path $env:GITHUB_WORKSPACE ("performance-{0}.json" -f $runtime)
           .\Tools\Test-LogVerdictPerformance.ps1 -OutputPath $report -BudgetPath .\Data\performance-budgets.json
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not $?) { exit 1 }
 
       - name: Upload content-free performance report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: logverdict-performance-${{ matrix.shell }}
           path: performance-${{ matrix.shell }}.json
           if-no-files-found: warn
 
       - name: Run analyzer
-        if: matrix.shell == 'pwsh'
         shell: ${{ matrix.shell }}
-        run: Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1 -EnableExit
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1 -EnableExit
 
       - name: Run offline release gates
         if: matrix.shell == 'pwsh'
         shell: ${{ matrix.shell }}
-        run: .\Tools\Test-LogVerdictRelease.ps1
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\Tools\Test-LogVerdictRelease.ps1
+          if (-not $?) { exit 1 }
 
   package:
     name: Build and verify release assets
@@ -111,7 +115,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install pinned build tools
         shell: pwsh
@@ -123,7 +127,10 @@ jobs:
 
       - name: Build unsigned executables
         shell: pwsh
-        run: .\Tools\Build-LogVerdictExe.ps1
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\Tools\Build-LogVerdictExe.ps1
+          if (-not $?) { exit 1 }
 
       - name: Regenerate package metadata from local assets
         shell: pwsh
@@ -132,6 +139,7 @@ jobs:
           $version = (& .\Tools\Get-LogVerdictVersion.ps1).Trim()
           $date = (Get-Date).ToString('yyyy-MM-dd')
           .\Tools\New-PackageManifests.ps1 -Version $version -AssetDirectory (Join-Path $root 'dist') -ReleaseDate $date -OutputDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging')
+          if (-not $?) { exit 1 }
 
       - name: Generate SPDX SBOM and build provenance
         shell: pwsh
@@ -139,6 +147,16 @@ jobs:
           $root = (Get-Location).Path
           $version = (& .\Tools\Get-LogVerdictVersion.ps1).Trim()
           .\Tools\New-LogVerdictSupplyChain.ps1 -Version $version -AssetDirectory (Join-Path $root 'dist') -OutputDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain') -SourceDirectory $root
+          if (-not $?) { exit 1 }
+
+      - name: Verify supply-chain metadata directly
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = (Get-Location).Path
+          $version = (& .\Tools\Get-LogVerdictVersion.ps1).Trim()
+          .\Tools\Test-LogVerdictSupplyChain.ps1 -Version $version -MetadataDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain') -AssetDirectory (Join-Path $root 'dist') -SourceDirectory $root
+          if (-not $?) { exit 1 }
 
       - name: Validate package hashes and version provenance
         shell: pwsh
@@ -153,9 +171,9 @@ jobs:
           $screenshot = Join-Path $env:RUNNER_TEMP 'logverdict-gui-normal.png'
           $screenshotMetadata = Join-Path $env:RUNNER_TEMP 'logverdict-gui-normal-screenshot.json'
           .\Tools\Test-LogVerdictGuiArtifact.ps1 -GuiPath .\dist\LogVerdict-GUI.exe -EvidencePath $normal -Theme Normal -ScreenshotPath $screenshot -ScreenshotMetadataPath $screenshotMetadata
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not $?) { exit 1 }
           .\Tools\Test-LogVerdictGuiArtifact.ps1 -GuiPath .\dist\LogVerdict-GUI.exe -EvidencePath $highContrast -Theme HighContrast
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not $?) { exit 1 }
 
       - name: Verify packaged GUI placement in coverage gate
         shell: pwsh
@@ -168,7 +186,7 @@ jobs:
 
       - name: Upload packaged GUI smoke evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: logverdict-gui-smoke
           path: |
