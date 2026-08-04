@@ -1823,6 +1823,84 @@ Describe 'SetupDiag Panther integration' {
         }
     }
 
+    It 'reads the persisted XML artifact without executing SetupDiag' {
+        $artifact = Join-Path $TestDrive 'SetupDiagResults.xml'
+        $when = (Get-Date).AddMinutes(-10).ToString('o')
+        @"
+<?xml version="1.0" encoding="utf-8"?>
+<SetupDiag xmlns="https://learn.microsoft.com/windows/deployment/upgrade/setupdiag">
+  <Version>1.7.0.0</Version>
+  <ProfileName>FindSPFatalError</ProfileName>
+  <ProfileGuid>A4028172-1B09-48F8-AD3B-86CDD7D55852</ProfileGuid>
+  <SystemInfo><UpgradeEndTime>$when</UpgradeEndTime></SystemInfo>
+  <FailureData>Error: SetupDiag reports Fatal Error.</FailureData>
+  <FailureDetails>ErrorCode = 0x80070057, LastOperation = Gather data, LastPhase = Downlevel</FailureDetails>
+  <Remediation>Remove the incompatible component and retry the upgrade.</Remediation>
+</SetupDiag>
+"@ | Set-Content -LiteralPath $artifact -Encoding UTF8
+
+        InModuleScope LogVerdict -Parameters @{ artifact=$artifact; root=$script:SetupDiagFixtureRoot } {
+            param($artifact, $root)
+            Mock Invoke-LVSetupDiagProcess { throw 'persisted artifact should avoid execution' }
+            $status = Get-LVSetupDiagRecord -DaysBack 1 -ExecutableCandidate @((Join-Path $root 'missing.exe')) `
+                -LogCandidate @($root) -ArtifactCandidate @($artifact) -RegistryCandidate @()
+            $status.Status | Should -BeExactly 'artifact-read'
+            $status.Used | Should -BeFalse
+            $status.ExecutionStatus | Should -BeExactly 'not-executed'
+            $status.Provenance | Should -BeExactly 'read-artifact'
+            $status.ArtifactKind | Should -BeExactly 'xml'
+            $status.ArtifactPath | Should -BeExactly (Get-Item -LiteralPath $artifact).FullName
+            $status.ProfileGuid | Should -BeExactly 'A4028172-1B09-48F8-AD3B-86CDD7D55852'
+            @($status.Records).Count | Should -Be 1
+            $status.Records[0].ProfileGuid | Should -BeExactly $status.ProfileGuid
+            $status.Records[0].Provenance | Should -BeExactly 'read-artifact'
+            $status.Records[0].ExecutionStatus | Should -BeExactly 'not-executed'
+            $status.Records[0].Message | Should -Match 'A4028172-1B09-48F8-AD3B-86CDD7D55852'
+            $signature = @(Group-LVSignature -Record @($status.Records[0]) -WindowDays 1)[0]
+            $finding = @(Resolve-LVVerdict -Signature @($signature) -Database (Get-LogVerdictDatabase))[0]
+            $finding.RuleId | Should -BeExactly 'LV-0327'
+            Assert-MockCalled Invoke-LVSetupDiagProcess -Times 0 -Exactly -Scope It
+        }
+    }
+
+    It 'reads the documented registry result shape without executing SetupDiag' {
+        InModuleScope LogVerdict -Parameters @{ root=$script:SetupDiagFixtureRoot } {
+            param($root)
+            $registry = [pscustomobject]@{
+                RegistryPath = 'HKLM:\SYSTEM\Setup\SetupDiag\Results'
+                ProfileName = 'FindSPFatalError'
+                ProfileGuid = 'A4028172-1B09-48F8-AD3B-86CDD7D55852'
+                SetupDiagVersion = '1.7.0.0'
+                UpgradeEndTime = (Get-Date).AddMinutes(-15).ToString('o')
+                FailureData = 'Error: SetupDiag reports Fatal Error.'
+                FailureDetails = 'ErrorCode = 0x80070057, LastOperation = Gather data, LastPhase = Downlevel'
+                Remediation = 'Retry after removing the incompatible component.'
+            }
+            Mock Invoke-LVSetupDiagProcess { throw 'persisted registry result should avoid execution' }
+            $status = Get-LVSetupDiagRecord -DaysBack 1 -ExecutableCandidate @((Join-Path $root 'missing.exe')) `
+                -LogCandidate @($root) -ArtifactCandidate @() -RegistryCandidate @($registry)
+            $status.Status | Should -BeExactly 'artifact-read'
+            $status.ArtifactKind | Should -BeExactly 'registry'
+            $status.ArtifactPath | Should -BeExactly 'HKLM:\SYSTEM\Setup\SetupDiag\Results'
+            $status.ExecutionStatus | Should -BeExactly 'not-executed'
+            @($status.Records).Count | Should -Be 1
+            $status.Records[0].ProfileGuid | Should -BeExactly 'A4028172-1B09-48F8-AD3B-86CDD7D55852'
+            $status.Records[0].ResultCode | Should -BeExactly '0x80070057'
+            Assert-MockCalled Invoke-LVSetupDiagProcess -Times 0 -Exactly -Scope It
+        }
+    }
+
+    It 'normalizes provider-qualified registry paths for coverage output' {
+        InModuleScope LogVerdict {
+            ConvertTo-LVSetupDiagRegistryPath `
+                -Path 'Microsoft.PowerShell.Core\Registry::HKEY_LOCAL_MACHINE\SYSTEM\Setup\SetupDiag\Results' |
+                Should -BeExactly 'HKLM:\SYSTEM\Setup\SetupDiag\Results'
+            ConvertTo-LVSetupDiagRegistryPath `
+                -Path 'HKEY_CURRENT_USER\SYSTEM\Setup\MoSetup\Volatile\SetupDiag' |
+                Should -BeExactly 'HKCU:\SYSTEM\Setup\MoSetup\Volatile\SetupDiag'
+        }
+    }
+
     It 'runs the available tool and returns its structured record' {
         InModuleScope LogVerdict -Parameters @{ exe=$script:SetupDiagExe; root=$script:SetupDiagFixtureRoot; json=$script:SetupDiagJson } {
             param($exe, $root, $json)
@@ -1837,7 +1915,9 @@ Describe 'SetupDiag Panther integration' {
             $status.Used | Should -BeTrue
             $status.Status | Should -BeExactly 'matched'
             $status.Profile | Should -BeExactly 'FindSPFatalError'
+            $status.ExecutionStatus | Should -BeExactly 'executed'
             @($status.Records).Count | Should -Be 1
+            $status.Records[0].Provenance | Should -BeExactly 'executed'
             Assert-MockCalled Invoke-LVSetupDiagProcess -Times 1 -Exactly -Scope It -ParameterFilter {
                 $ExecutablePath -eq $exe -and $LogsPath -eq $root -and $TimeoutSeconds -eq 120
             }
@@ -5513,11 +5593,11 @@ Describe 'Report redaction' {
                 MachineName = 'HOST-9'; Findings = @(); CrashArtifacts = @(); CoverageNotes = @()
                 SetupDiag = [pscustomobject]@{
                     Status='execution-failed'; Message='HOST-9 failed under C:\Users\bob\Panther'
-                    ExecutablePath='C:\Users\bob\SetupDiag.exe'; LogsPath='C:\Users\bob\Panther'
+                    ExecutablePath='C:\Users\bob\SetupDiag.exe'; LogsPath='C:\Users\bob\Panther'; ArtifactPath='C:\Users\bob\Logs\SetupDiagResults.xml'
                 }
             }
             $redacted = ConvertTo-LVRedactedResult -Result $result
-            foreach ($name in @('Message', 'ExecutablePath', 'LogsPath')) {
+            foreach ($name in @('Message', 'ExecutablePath', 'LogsPath', 'ArtifactPath')) {
                 $redacted.SetupDiag.$name | Should -Not -Match 'bob|HOST-9'
             }
             $redacted.SetupDiag.PSObject.Properties.Name | Should -Not -Contain 'Records'

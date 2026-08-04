@@ -484,8 +484,15 @@ function Get-LVSetupDiagValue {
         [Parameter(Mandatory)]$InputObject,
         [Parameter(Mandatory)][string]$Name
     )
-    $property = $InputObject.PSObject.Properties[$Name]
-    if ($property) { return $property.Value }
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        foreach ($key in $InputObject.Keys) {
+            if ([string]$key -ieq $Name) { return $InputObject[$key] }
+        }
+        return $null
+    }
+    foreach ($property in @($InputObject.PSObject.Properties)) {
+        if ([string]$property.Name -ieq $Name) { return $property.Value }
+    }
     return $null
 }
 
@@ -529,31 +536,103 @@ function ConvertFrom-LVSetupDiagDate {
     return $Fallback
 }
 
-function ConvertFrom-LVSetupDiagJson {
+function Get-LVSetupDiagXmlValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][System.Xml.XmlDocument]$Document,
+        [Parameter(Mandatory)][string[]]$Name
+    )
+
+    $wanted = @($Name | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() })
+    $values = New-Object System.Collections.Generic.List[string]
+    foreach ($node in @($Document.SelectNodes('//*'))) {
+        if ($wanted -notcontains ([string]$node.LocalName).ToLowerInvariant()) { continue }
+        $line = ConvertTo-LVSetupDiagLine $node.InnerText
+        if ($line -and -not $values.Contains($line)) { $values.Add($line) | Out-Null }
+    }
+    return ConvertTo-LVArrayOutput -Value @($values.ToArray())
+}
+
+function ConvertFrom-LVSetupDiagXml {
     <#
         .SYNOPSIS
-        Turn SetupDiag's documented JSON shape into one ordinary LogVerdict record.
+        Read the XML result Windows Setup leaves behind without invoking SetupDiag.
+
+        .DESCRIPTION
+        SetupDiag's XML namespace and optional fields have changed across releases, so
+        this adapter intentionally selects values by local element name and feeds the
+        result through the same normalized converter as JSON and registry data. DTDs
+        and external entity resolution are disabled because the file is machine input.
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$Json,
-        [Nullable[datetime]]$FallbackWhen
+        [Parameter(Mandatory)][string]$Xml,
+        [Nullable[datetime]]$FallbackWhen,
+        [AllowNull()][string]$ArtifactPath,
+        [AllowNull()][string]$ArtifactKind = 'xml'
     )
 
+    $reader = $null
+    $textReader = $null
     try {
-        $parsed = $Json | ConvertFrom-Json -ErrorAction Stop
+        $settings = New-Object System.Xml.XmlReaderSettings
+        $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+        $settings.XmlResolver = $null
+        $textReader = New-Object System.IO.StringReader($Xml)
+        $reader = [System.Xml.XmlReader]::Create($textReader, $settings)
+        $document = New-Object System.Xml.XmlDocument
+        $document.XmlResolver = $null
+        $document.Load($reader)
     } catch {
-        throw ('SetupDiag returned invalid JSON: {0}' -f $_.Exception.Message)
+        throw ('SetupDiag XML could not be read: {0}' -f $_.Exception.Message)
+    } finally {
+        if ($reader) { $reader.Dispose() }
+        if ($textReader) { $textReader.Dispose() }
     }
 
-    $result = @($parsed | Where-Object { $_ -and (Get-LVSetupDiagValue -InputObject $_ -Name 'ProfileName') } | Select-Object -Last 1)
-    if ($result.Count -eq 0) { throw 'SetupDiag JSON contains no ProfileName.' }
-    $item = $result[0]
-    $profileName = ConvertTo-LVSetupDiagLine (Get-LVSetupDiagValue -InputObject $item -Name 'ProfileName')
-    $version = ConvertTo-LVSetupDiagLine (Get-LVSetupDiagValue -InputObject $item -Name 'Version')
-    $guid = ConvertTo-LVSetupDiagLine (Get-LVSetupDiagValue -InputObject $item -Name 'ProfileGuid')
+    $failureData = @(Get-LVSetupDiagXmlValue -Document $document -Name @('FailureData'))
+    $systemInfo = [pscustomobject]@{
+        UpgradeEndTime   = @(Get-LVSetupDiagXmlValue -Document $document -Name @('UpgradeEndTime')) | Select-Object -Last 1
+        UpgradeStartTime = @(Get-LVSetupDiagXmlValue -Document $document -Name @('UpgradeStartTime')) | Select-Object -Last 1
+        ProviderLocale   = @(Get-LVSetupDiagXmlValue -Document $document -Name @('ProviderLocale', 'Locale', 'Culture', 'Language')) | Select-Object -Last 1
+    }
+    $item = [pscustomobject]@{
+        Version        = @(Get-LVSetupDiagXmlValue -Document $document -Name @('Version', 'SetupDiagVersion')) | Select-Object -Last 1
+        ProfileName    = @(Get-LVSetupDiagXmlValue -Document $document -Name @('ProfileName')) | Select-Object -Last 1
+        ProfileGuid    = @(Get-LVSetupDiagXmlValue -Document $document -Name @('ProfileGuid')) | Select-Object -Last 1
+        SystemInfo     = $systemInfo
+        FailureDetails = @(Get-LVSetupDiagXmlValue -Document $document -Name @('FailureDetails'))
+        LogErrorLine   = @(Get-LVSetupDiagXmlValue -Document $document -Name @('LogErrorLine'))
+        FailureData    = $failureData
+        Remediation    = @(Get-LVSetupDiagXmlValue -Document $document -Name @('Remediation'))
+        ResultCode     = @(Get-LVSetupDiagXmlValue -Document $document -Name @('ResultCode', 'ErrorCode')) | Select-Object -Last 1
+        ExtendCode     = @(Get-LVSetupDiagXmlValue -Document $document -Name @('ExtendCode', 'ExCode', 'ExtendedErrorCode')) | Select-Object -Last 1
+        Phase          = @(Get-LVSetupDiagXmlValue -Document $document -Name @('Phase', 'LastPhase', 'SetupPhase')) | Select-Object -Last 1
+        Operation      = @(Get-LVSetupDiagXmlValue -Document $document -Name @('Operation', 'LastOperation', 'SetupOperation', 'OperationName')) | Select-Object -Last 1
+        ProviderLocale = @(Get-LVSetupDiagXmlValue -Document $document -Name @('ProviderLocale', 'Locale', 'Culture', 'Language')) | Select-Object -Last 1
+    }
+    if (-not $item.ProfileName) { throw 'SetupDiag XML contains no ProfileName.' }
+    return ConvertTo-LVSetupDiagDecoded -Item $item -FallbackWhen $FallbackWhen `
+        -ArtifactPath $ArtifactPath -ArtifactKind $ArtifactKind -Provenance 'read-artifact'
+}
 
-    $systemInfo = Get-LVSetupDiagValue -InputObject $item -Name 'SystemInfo'
+function ConvertTo-LVSetupDiagDecoded {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Item,
+        [Nullable[datetime]]$FallbackWhen,
+        [AllowNull()][string]$ArtifactPath,
+        [AllowNull()][string]$ArtifactKind,
+        [Parameter(Mandatory)][ValidateSet('executed', 'read-artifact')][string]$Provenance
+    )
+
+    $profileName = ConvertTo-LVSetupDiagLine (@(Get-LVSetupDiagValue -InputObject $Item -Name 'ProfileName') | Select-Object -Last 1)
+    if (-not $profileName) { throw 'SetupDiag result contains no ProfileName.' }
+    $version = ConvertTo-LVSetupDiagLine (@(Get-LVSetupDiagValue -InputObject $Item -Name 'Version') | Select-Object -Last 1)
+    if (-not $version) { $version = ConvertTo-LVSetupDiagLine (@(Get-LVSetupDiagValue -InputObject $Item -Name 'SetupDiagVersion') | Select-Object -Last 1) }
+    $guid = ConvertTo-LVSetupDiagLine (@(Get-LVSetupDiagValue -InputObject $Item -Name 'ProfileGuid') | Select-Object -Last 1)
+
+    $systemInfo = Get-LVSetupDiagValue -InputObject $Item -Name 'SystemInfo'
     $when = $null
     if ($systemInfo) {
         $when = ConvertFrom-LVSetupDiagDate -Value (Get-LVSetupDiagValue -InputObject $systemInfo -Name 'UpgradeEndTime') -Fallback $null
@@ -561,51 +640,61 @@ function ConvertFrom-LVSetupDiagJson {
             $when = ConvertFrom-LVSetupDiagDate -Value (Get-LVSetupDiagValue -InputObject $systemInfo -Name 'UpgradeStartTime') -Fallback $null
         }
     }
+    if ($null -eq $when) {
+        $when = ConvertFrom-LVSetupDiagDate -Value (Get-LVSetupDiagValue -InputObject $Item -Name 'UpgradeEndTime') -Fallback $null
+    }
+    if ($null -eq $when) {
+        $when = ConvertFrom-LVSetupDiagDate -Value (Get-LVSetupDiagValue -InputObject $Item -Name 'UpgradeStartTime') -Fallback $null
+    }
     if ($null -eq $when) { $when = $FallbackWhen }
 
     if ($profileName -eq 'FindSuccessfulUpgrade') {
-        return [pscustomobject]@{ Successful=$true; Profile=$profileName; Version=$version; Record=$null; When=$when }
+        return [pscustomobject]@{
+            Successful = $true; Profile = $profileName; ProfileGuid = $guid; Version = $version
+            Record = $null; When = $when; Provenance = $Provenance; ExecutionStatus = $(if ($Provenance -eq 'read-artifact') { 'not-executed' } else { 'executed' })
+            ArtifactPath = $ArtifactPath; ArtifactKind = $ArtifactKind
+        }
     }
 
     $failure = New-Object System.Collections.Generic.List[string]
     foreach ($value in @(
-        (Get-LVSetupDiagValue -InputObject $item -Name 'FailureDetails'),
-        (Get-LVSetupDiagValue -InputObject $item -Name 'LogErrorLine')
-    ) + @(Get-LVSetupDiagValue -InputObject $item -Name 'FailureData')) {
+        (Get-LVSetupDiagValue -InputObject $Item -Name 'FailureDetails'),
+        (Get-LVSetupDiagValue -InputObject $Item -Name 'LogErrorLine')
+    ) + @(Get-LVSetupDiagValue -InputObject $Item -Name 'FailureData')) {
         $line = ConvertTo-LVSetupDiagLine $value
         if ($line -and -not $failure.Contains($line)) { $failure.Add($line) | Out-Null }
     }
 
     $remediation = New-Object System.Collections.Generic.List[string]
-    foreach ($value in @(Get-LVSetupDiagValue -InputObject $item -Name 'Remediation')) {
+    foreach ($value in @(Get-LVSetupDiagValue -InputObject $Item -Name 'Remediation')) {
         $line = ConvertTo-LVSetupDiagLine $value
         if ($line -and -not $remediation.Contains($line)) { $remediation.Add($line) | Out-Null }
     }
 
     $contextInput = [ordered]@{
         ResultCode = $null; ExtendCode = $null; Phase = $null; Operation = $null
-        ProviderLocale = $null; FailureDetails = (Get-LVSetupDiagValue -InputObject $item -Name 'FailureDetails')
-        LogErrorLine = (Get-LVSetupDiagValue -InputObject $item -Name 'LogErrorLine')
-        FailureData = (Get-LVSetupDiagValue -InputObject $item -Name 'FailureData')
+        ProviderLocale = $null; FailureDetails = (Get-LVSetupDiagValue -InputObject $Item -Name 'FailureDetails')
+        LogErrorLine = (Get-LVSetupDiagValue -InputObject $Item -Name 'LogErrorLine')
+        FailureData = (Get-LVSetupDiagValue -InputObject $Item -Name 'FailureData')
     }
     foreach ($name in @('ResultCode', 'Result', 'FailureCode', 'ErrorCode', 'Error')) {
-        $value = Get-LVSetupDiagValue -InputObject $item -Name $name
+        $value = Get-LVSetupDiagValue -InputObject $Item -Name $name
         if ($null -ne $value -and [string]$value) { $contextInput.ResultCode = $value; break }
     }
-    foreach ($name in @('ExtendCode', 'ExtendedErrorCode', 'ExtendedCode', 'ErrorExtendCode', 'Extend')) {
-        $value = Get-LVSetupDiagValue -InputObject $item -Name $name
+    foreach ($name in @('ExtendCode', 'ExtendedErrorCode', 'ExtendedCode', 'ErrorExtendCode', 'Extend', 'ExCode')) {
+        $value = Get-LVSetupDiagValue -InputObject $Item -Name $name
         if ($null -ne $value -and [string]$value) { $contextInput.ExtendCode = $value; break }
     }
     foreach ($name in @('Phase', 'LastPhase', 'SetupPhase')) {
-        $value = Get-LVSetupDiagValue -InputObject $item -Name $name
+        $value = Get-LVSetupDiagValue -InputObject $Item -Name $name
         if ($null -ne $value -and [string]$value) { $contextInput.Phase = $value; break }
     }
-    foreach ($name in @('Operation', 'LastOperation', 'SetupOperation')) {
-        $value = Get-LVSetupDiagValue -InputObject $item -Name $name
+    foreach ($name in @('Operation', 'LastOperation', 'SetupOperation', 'OperationName')) {
+        $value = Get-LVSetupDiagValue -InputObject $Item -Name $name
         if ($null -ne $value -and [string]$value) { $contextInput.Operation = $value; break }
     }
     foreach ($name in @('ProviderLocale', 'Locale', 'Culture', 'Language')) {
-        $value = Get-LVSetupDiagValue -InputObject $item -Name $name
+        $value = Get-LVSetupDiagValue -InputObject $Item -Name $name
         if ($null -ne $value -and [string]$value) { $contextInput.ProviderLocale = $value; break }
     }
     if (-not $contextInput.ProviderLocale -and $systemInfo) {
@@ -639,7 +728,7 @@ function ConvertFrom-LVSetupDiagJson {
         MachineName = $env:COMPUTERNAME
         RecordId = 1
         Area = 'Setup and upgrade'
-        Hint = 'Microsoft SetupDiag matched its curated upgrade-failure rules against the Panther log set.'
+        Hint = if ($Provenance -eq 'read-artifact') { 'Microsoft SetupDiag failure data was read from an existing persisted artifact; SetupDiag.exe was not executed.' } else { 'Microsoft SetupDiag matched its curated upgrade-failure rules against the Panther log set.' }
         SignatureKey = 'SetupDiag/' + $profileName.ToLowerInvariant()
         Message = $message -join ' '
         ResultCode = $errorContext.ResultCode
@@ -649,11 +738,17 @@ function ConvertFrom-LVSetupDiagJson {
         ProviderLocale = $errorContext.ProviderLocale
         FallbackMessage = $errorContext.FallbackMessage
         ErrorContext = $errorContext
+        ProfileGuid = $guid
+        Provenance = $Provenance
+        ExecutionStatus = $(if ($Provenance -eq 'read-artifact') { 'not-executed' } else { 'executed' })
+        ArtifactPath = $ArtifactPath
+        ArtifactKind = $ArtifactKind
     }
 
     return [pscustomobject]@{
         Successful = $false
         Profile = $profileName
+        ProfileGuid = $guid
         Version = $version
         Remediation = @($remediation.ToArray())
         ResultCode = $errorContext.ResultCode
@@ -663,24 +758,285 @@ function ConvertFrom-LVSetupDiagJson {
         ProviderLocale = $errorContext.ProviderLocale
         FallbackMessage = $errorContext.FallbackMessage
         ErrorContext = $errorContext
+        Provenance = $Provenance
+        ExecutionStatus = $(if ($Provenance -eq 'read-artifact') { 'not-executed' } else { 'executed' })
+        ArtifactPath = $ArtifactPath
+        ArtifactKind = $ArtifactKind
         Record = $record
         When = $when
     }
 }
 
+function ConvertFrom-LVSetupDiagJson {
+    <#
+        .SYNOPSIS
+        Turn SetupDiag's documented JSON shape into one ordinary LogVerdict record.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Json,
+        [Nullable[datetime]]$FallbackWhen
+    )
+
+    try {
+        $parsed = $Json | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw ('SetupDiag returned invalid JSON: {0}' -f $_.Exception.Message)
+    }
+
+    $result = @($parsed | Where-Object { $_ -and (Get-LVSetupDiagValue -InputObject $_ -Name 'ProfileName') } | Select-Object -Last 1)
+    if ($result.Count -eq 0) { throw 'SetupDiag JSON contains no ProfileName.' }
+    return ConvertTo-LVSetupDiagDecoded -Item $result[0] -FallbackWhen $FallbackWhen `
+        -Provenance 'executed'
+}
+
+function ConvertFrom-LVSetupDiagRegistryInput {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$InputObject,
+        [Nullable[datetime]]$FallbackWhen,
+        [Parameter(Mandatory)][string]$RegistryPath
+    )
+
+    $profileName = Get-LVSetupDiagValue -InputObject $InputObject -Name 'ProfileName'
+    if ($profileName) {
+        return ConvertTo-LVSetupDiagDecoded -Item $InputObject -FallbackWhen $FallbackWhen `
+            -ArtifactPath $RegistryPath -ArtifactKind 'registry' -Provenance 'read-artifact'
+    }
+
+    foreach ($property in @($InputObject.PSObject.Properties)) {
+        if ($property.Value -isnot [string]) { continue }
+        $text = [string]$property.Value
+        if ($text.TrimStart().StartsWith('<')) {
+            return ConvertFrom-LVSetupDiagXml -Xml $text -FallbackWhen $FallbackWhen `
+                -ArtifactPath $RegistryPath -ArtifactKind 'registry'
+        }
+        if ($text.TrimStart().StartsWith('{') -or $text.TrimStart().StartsWith('[')) {
+            try {
+                $parsed = $text | ConvertFrom-Json -ErrorAction Stop
+                $result = @($parsed | Where-Object { $_ -and (Get-LVSetupDiagValue -InputObject $_ -Name 'ProfileName') } | Select-Object -Last 1)
+                if ($result.Count -gt 0) {
+                    return ConvertTo-LVSetupDiagDecoded -Item $result[0] -FallbackWhen $FallbackWhen `
+                        -ArtifactPath $RegistryPath -ArtifactKind 'registry' -Provenance 'read-artifact'
+                }
+            } catch {
+                Write-Verbose ('SetupDiag registry value {0} was not structured JSON: {1}' -f $property.Name, $_.Exception.Message)
+            }
+        }
+    }
+    throw 'SetupDiag registry result contains no ProfileName.'
+}
+
+function ConvertTo-LVSetupDiagRegistryPath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    $normalized = $Path -replace '^Microsoft\.PowerShell\.Core\\Registry::', ''
+    $normalized = $normalized -replace '^HKEY_LOCAL_MACHINE\\', 'HKLM:\'
+    $normalized = $normalized -replace '^HKEY_CURRENT_USER\\', 'HKCU:\'
+    return $normalized
+}
+
+function Get-LVSetupDiagRegistryEntry {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string[]]$Path)
+
+    $entries = New-Object System.Collections.Generic.List[object]
+    foreach ($rootPath in @($Path | Where-Object { $_ } | Select-Object -Unique)) {
+        try {
+            if (-not (Test-Path -LiteralPath $rootPath)) { continue }
+            $root = Get-Item -LiteralPath $rootPath -ErrorAction Stop
+            $keys = @($root) + @(Get-ChildItem -LiteralPath $rootPath -Recurse -ErrorAction SilentlyContinue)
+            foreach ($key in @($keys | Where-Object { $_ } | Sort-Object -Property PSPath -Unique)) {
+                try {
+                    $properties = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction Stop
+                    $values = [ordered]@{}
+                    foreach ($property in @($properties.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' })) {
+                        if ($null -ne $property.Value) { $values[$property.Name] = $property.Value }
+                    }
+                    if ($values.Count -eq 0) { continue }
+                    $lastWrite = $null
+                    if ($key.PSObject.Properties['LastWriteTime']) { $lastWrite = $key.LastWriteTime }
+                    $keyPath = ConvertTo-LVSetupDiagRegistryPath -Path ([string]$key.PSPath)
+                    $entries.Add([pscustomobject]@{
+                        Input = [pscustomobject]$values
+                        Path = $keyPath
+                        KeyPath = $keyPath
+                        LastWriteTime = $lastWrite
+                    }) | Out-Null
+                } catch {
+                    Write-Verbose ('SetupDiag registry key {0} could not be read: {1}' -f $key.PSPath, $_.Exception.Message)
+                }
+            }
+        } catch {
+            Write-Verbose ('SetupDiag registry path {0} could not be read: {1}' -f $rootPath, $_.Exception.Message)
+        }
+    }
+    return ConvertTo-LVArrayOutput -Value @($entries.ToArray())
+}
+
+function Get-LVSetupDiagArtifact {
+    [CmdletBinding()]
+    param(
+        [int]$DaysBack = 30,
+        [AllowEmptyCollection()][string[]]$ArtifactCandidate,
+        [AllowEmptyCollection()][object[]]$RegistryCandidate
+    )
+
+    $cutoff = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
+    $fileCandidates = New-Object System.Collections.Generic.List[string]
+    $explicitFiles = $PSBoundParameters.ContainsKey('ArtifactCandidate')
+    if ($explicitFiles) {
+        foreach ($path in @($ArtifactCandidate)) { if ($path) { $fileCandidates.Add($path) | Out-Null } }
+    } else {
+        $systemDrive = $env:SystemDrive
+        if (-not $systemDrive) { $systemDrive = 'C:' }
+        $windows = $env:windir
+        if (-not $windows) { $windows = Join-Path $systemDrive 'Windows' }
+        $fileCandidates.Add((Join-Path $windows 'Logs\SetupDiag\SetupDiagResults.xml')) | Out-Null
+    }
+
+    $errors = New-Object System.Collections.Generic.List[string]
+    $files = foreach ($path in @($fileCandidates.ToArray() | Select-Object -Unique)) {
+        try {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+            $file = Get-Item -LiteralPath $path -ErrorAction Stop
+            if ($file.LastWriteTime -lt $cutoff) { continue }
+            $file
+        } catch {
+            $errors.Add(('SetupDiag artifact {0} could not be inspected: {1}' -f $path, $_.Exception.Message)) | Out-Null
+        }
+    }
+    foreach ($file in @($files | Sort-Object -Property LastWriteTime -Descending)) {
+        try {
+            $decoded = ConvertFrom-LVSetupDiagXml -Xml ([IO.File]::ReadAllText($file.FullName)) `
+                -FallbackWhen $file.LastWriteTime -ArtifactPath $file.FullName -ArtifactKind 'xml'
+            return [pscustomobject]@{
+                Decoded = $decoded; Path = $file.FullName; Kind = 'xml'; LastWriteTime = $file.LastWriteTime
+                Errors = @($errors.ToArray())
+            }
+        } catch {
+            $errors.Add(('SetupDiag XML artifact {0} could not be read: {1}' -f $file.FullName, $_.Exception.Message)) | Out-Null
+        }
+    }
+
+    $registryEntries = New-Object System.Collections.Generic.List[object]
+    $explicitRegistry = $PSBoundParameters.ContainsKey('RegistryCandidate')
+    if ($explicitRegistry) {
+        foreach ($candidate in @($RegistryCandidate)) {
+            if ($null -eq $candidate) { continue }
+            if ($candidate -is [string]) {
+                foreach ($entry in @(Get-LVSetupDiagRegistryEntry -Path @([string]$candidate))) { $registryEntries.Add($entry) | Out-Null }
+            } elseif ($candidate.PSObject.Properties['Input']) {
+                $registryEntries.Add($candidate) | Out-Null
+            } else {
+                $lastWrite = if ($candidate.PSObject.Properties['LastWriteTime']) { $candidate.LastWriteTime } else { Get-Date }
+                $registryPath = if ($candidate.PSObject.Properties['RegistryPath']) { [string]$candidate.RegistryPath } else { 'HKLM:\SYSTEM\Setup\SetupDiag\Results' }
+                $registryEntries.Add([pscustomobject]@{ Input=$candidate; Path=$registryPath; KeyPath=$registryPath; LastWriteTime=$lastWrite }) | Out-Null
+            }
+        }
+    } else {
+        foreach ($entry in @(Get-LVSetupDiagRegistryEntry -Path @(
+            'HKLM:\SYSTEM\Setup\SetupDiag\Results',
+            'HKLM:\SYSTEM\Setup\MoSetup\Volatile\SetupDiag'
+        ))) { $registryEntries.Add($entry) | Out-Null }
+    }
+
+    foreach ($entry in @($registryEntries.ToArray() | Sort-Object -Property LastWriteTime -Descending)) {
+        $fallback = $entry.LastWriteTime
+        if ($fallback -isnot [datetime] -or $fallback.Year -lt 1900) { $fallback = Get-Date }
+        try {
+            $registryPath = [string]$entry.Path
+            $decoded = ConvertFrom-LVSetupDiagRegistryInput -InputObject $entry.Input `
+                -FallbackWhen $fallback -RegistryPath $registryPath
+            return [pscustomobject]@{
+                Decoded = $decoded; Path = $registryPath; Kind = 'registry'; LastWriteTime = $fallback
+                Errors = @($errors.ToArray())
+            }
+        } catch {
+            $errors.Add(('SetupDiag registry artifact {0} could not be read: {1}' -f $entry.Path, $_.Exception.Message)) | Out-Null
+        }
+    }
+
+    if ($errors.Count -gt 0) {
+        return [pscustomobject]@{ Decoded=$null; Path=$null; Kind=$null; LastWriteTime=$null; Errors=@($errors.ToArray()) }
+    }
+    return $null
+}
+
 function Get-LVSetupDiagRecord {
     <#
         .SYNOPSIS
-        Use SetupDiag when present, otherwise explicitly retain the Panther fallback.
+        Read persisted SetupDiag results before using the optional executable.
+
+        .DESCRIPTION
+        Windows Setup already runs SetupDiag during a failed upgrade and leaves an XML
+        and registry result behind. Reading that result is local, non-elevated and more
+        reliable than trying to launch the executable again. The executable remains a
+        bounded enhancement for machines where no persisted result is available.
     #>
     [CmdletBinding()]
     param(
         [int]$DaysBack = 30,
         [AllowEmptyCollection()][string[]]$ExecutableCandidate,
         [AllowEmptyCollection()][string[]]$LogCandidate,
+        [AllowEmptyCollection()][string[]]$ArtifactCandidate,
+        [AllowEmptyCollection()][object[]]$RegistryCandidate,
         [int]$TimeoutSeconds = 120
     )
 
+    $artifactArgs = @{ DaysBack=$DaysBack }
+    if ($PSBoundParameters.ContainsKey('ArtifactCandidate')) {
+        $artifactArgs['ArtifactCandidate'] = $ArtifactCandidate
+    } elseif ($PSBoundParameters.ContainsKey('ExecutableCandidate') -or $PSBoundParameters.ContainsKey('LogCandidate')) {
+        # Explicit executable/log candidates are test seams. Do not let a real machine's
+        # SetupDiag history change the result of those isolated tests.
+        $artifactArgs['ArtifactCandidate'] = @()
+    }
+    if ($PSBoundParameters.ContainsKey('RegistryCandidate')) {
+        $artifactArgs['RegistryCandidate'] = $RegistryCandidate
+    } elseif ($PSBoundParameters.ContainsKey('ArtifactCandidate') -or $PSBoundParameters.ContainsKey('ExecutableCandidate') -or $PSBoundParameters.ContainsKey('LogCandidate')) {
+        $artifactArgs['RegistryCandidate'] = @()
+    }
+
+    $artifact = Get-LVSetupDiagArtifact @artifactArgs
+    if ($artifact -and $artifact.Decoded) {
+        $decoded = $artifact.Decoded
+        $artifactDescription = '{0} at {1}' -f $artifact.Kind, $artifact.Path
+        if ($decoded.Successful) {
+            $message = ('Read SetupDiag {0}; it reported {1}, so no failure record was added and built-in Panther lines remain available.' -f $artifactDescription, $decoded.Profile)
+            Write-LVLog -Level ok -Message $message
+            return [pscustomobject]@{
+                Available=$true; Used=$false; Status='artifact-read'; Message=$message; CoverageNote=$null
+                ExecutablePath=$null; LogsPath=$null; Profile=$decoded.Profile; ProfileGuid=$decoded.ProfileGuid
+                Provenance='read-artifact'; ExecutionStatus='not-executed'; ArtifactPath=$artifact.Path; ArtifactKind=$artifact.Kind
+                Records=@()
+            }
+        }
+
+        $cutoff = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
+        if ($decoded.When -and $decoded.When -lt $cutoff) {
+            $message = ('Read SetupDiag {0}; its {1} result predates the scan window, so no failure record was added.' -f $artifactDescription, $decoded.Profile)
+            Write-LVLog -Level info -Message $message
+            return [pscustomobject]@{
+                Available=$true; Used=$false; Status='artifact-read'; Message=$message; CoverageNote=$null
+                ExecutablePath=$null; LogsPath=$null; Profile=$decoded.Profile; ProfileGuid=$decoded.ProfileGuid
+                Provenance='read-artifact'; ExecutionStatus='not-executed'; ArtifactPath=$artifact.Path; ArtifactKind=$artifact.Kind
+                Records=@()
+            }
+        }
+
+        $message = ('Read SetupDiag {0}; its structured failure and remediation were merged into the scan without executing SetupDiag.exe.' -f $artifactDescription)
+        Write-LVLog -Level ok -Message $message
+        return [pscustomobject]@{
+            Available=$true; Used=$false; Status='artifact-read'; Message=$message; CoverageNote=$null
+            ExecutablePath=$null; LogsPath=$null; Profile=$decoded.Profile; ProfileGuid=$decoded.ProfileGuid
+            Provenance='read-artifact'; ExecutionStatus='not-executed'; ArtifactPath=$artifact.Path; ArtifactKind=$artifact.Kind
+            Records=@($decoded.Record)
+        }
+    }
+
+    $artifactError = if ($artifact -and @($artifact.Errors).Count -gt 0) { @($artifact.Errors) -join ' | ' } else { $null }
     $executableArgs = @{ Detailed=$true }
     if ($PSBoundParameters.ContainsKey('ExecutableCandidate')) { $executableArgs['CandidatePath'] = $ExecutableCandidate }
     $executableResult = Get-LVSetupDiagExecutable @executableArgs
@@ -690,6 +1046,11 @@ function Get-LVSetupDiagRecord {
             $message = ('SetupDiag candidate(s) were rejected by the Microsoft Authenticode trust policy; built-in Panther rules remain active. Rejected candidate count: {0}.' -f @($executableResult.Rejected).Count)
             Write-LVLog -Level warn -Message $message
             return [pscustomobject]@{ Available=$false; Used=$false; Status='untrusted'; Message=$message; CoverageNote=$message; ExecutablePath=$null; LogsPath=$null; Profile=$null; Records=@() }
+        }
+        if ($artifactError) {
+            $message = ('Persisted SetupDiag artifacts were present but unreadable ({0}); built-in Panther rules remain active.' -f $artifactError)
+            Write-LVLog -Level warn -Message $message
+            return [pscustomobject]@{ Available=$false; Used=$false; Status='artifact-unreadable'; Message=$message; CoverageNote=$message; ExecutablePath=$null; LogsPath=$null; Profile=$null; Records=@() }
         }
         $message = 'SetupDiag is not present; Panther failures will use LogVerdict built-in text rules.'
         Write-LVLog -Level info -Message $message
@@ -743,19 +1104,19 @@ function Get-LVSetupDiagRecord {
         if ($decoded.Successful) {
             $message = ('SetupDiag matched {0}; no failure record was added and built-in Panther lines remain available.' -f $decoded.Profile)
             Write-LVLog -Level ok -Message $message
-            return [pscustomobject]@{ Available=$true; Used=$true; Status='successful-upgrade'; Message=$message; ExecutablePath=$executable; LogsPath=$logSet[0].Path; Profile=$decoded.Profile; Records=@() }
+            return [pscustomobject]@{ Available=$true; Used=$true; Status='successful-upgrade'; Message=$message; ExecutablePath=$executable; LogsPath=$logSet[0].Path; Profile=$decoded.Profile; ProfileGuid=$decoded.ProfileGuid; Provenance='executed'; ExecutionStatus='executed'; Records=@() }
         }
 
         $cutoff = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
         if ($decoded.When -and $decoded.When -lt $cutoff) {
             $message = ('SetupDiag matched {0}, but the result predates the scan window; no failure record was added.' -f $decoded.Profile)
             Write-LVLog -Level info -Message $message
-            return [pscustomobject]@{ Available=$true; Used=$true; Status='stale-result'; Message=$message; ExecutablePath=$executable; LogsPath=$logSet[0].Path; Profile=$decoded.Profile; Records=@() }
+            return [pscustomobject]@{ Available=$true; Used=$true; Status='stale-result'; Message=$message; ExecutablePath=$executable; LogsPath=$logSet[0].Path; Profile=$decoded.Profile; ProfileGuid=$decoded.ProfileGuid; Provenance='executed'; ExecutionStatus='executed'; Records=@() }
         }
 
         $message = ('SetupDiag matched {0}; its structured failure and remediation were merged into the scan.' -f $decoded.Profile)
         Write-LVLog -Level ok -Message $message
-        return [pscustomobject]@{ Available=$true; Used=$true; Status='matched'; Message=$message; ExecutablePath=$executable; LogsPath=$logSet[0].Path; Profile=$decoded.Profile; Records=@($decoded.Record) }
+        return [pscustomobject]@{ Available=$true; Used=$true; Status='matched'; Message=$message; ExecutablePath=$executable; LogsPath=$logSet[0].Path; Profile=$decoded.Profile; ProfileGuid=$decoded.ProfileGuid; Provenance='executed'; ExecutionStatus='executed'; Records=@($decoded.Record) }
     } finally {
         Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
     }

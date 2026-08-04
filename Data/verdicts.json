@@ -4542,8 +4542,8 @@
       },
       "verdict": "actionable",
       "title": "SetupDiag identified the Windows upgrade failure",
-      "plain": "Microsoft SetupDiag matched the Panther logs against its curated upgrade-failure rules and returned a structured failure profile.",
-      "why": "SetupDiag is Microsoft's purpose-built analyzer for these logs. Its matched profile is stronger evidence than one isolated Panther error line because the rule evaluates the setup phase, operation and related log context together.",
+      "plain": "Microsoft SetupDiag returned a structured failure profile from the upgrade evidence, either by analyzing Panther logs or by leaving a persisted result.",
+      "why": "SetupDiag is Microsoft's purpose-built analyzer for upgrade failures. Its profile GUID and matched profile are stronger evidence than one isolated Panther error line because the rule evaluates the setup phase, operation and related log context together, even when LogVerdict can only read the result that Windows already persisted.",
       "action": "Read the Failure and Remediation fields in the raw evidence below and follow the SetupDiag guidance for this profile before retrying the upgrade.",
       "confidence": "high",
       "references": [

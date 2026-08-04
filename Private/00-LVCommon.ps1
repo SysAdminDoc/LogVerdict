@@ -1010,7 +1010,7 @@ function ConvertTo-LVRedactedResult {
         foreach ($prop in $Result.SetupDiag.PSObject.Properties) {
             $setupDiag | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
         }
-        foreach ($name in @('Message', 'ExecutablePath', 'LogsPath')) {
+        foreach ($name in @('Message', 'ExecutablePath', 'LogsPath', 'ArtifactPath')) {
             if ($setupDiag.PSObject.Properties[$name]) {
                 $setupDiag.$name = ConvertTo-LVRedactedText -Text ([string]$setupDiag.$name) -MachineName $machine
             }

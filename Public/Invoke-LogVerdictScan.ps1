@@ -288,7 +288,7 @@ function Invoke-LogVerdictScan {
         if ($setupTimer) {
             $setupTimer.Stop()
             $setupObserved = [int64]@($setupDiag.Records | Where-Object { $_ }).Count
-            $setupPerformanceStatus = if ($setupDiag.Status -in @('timeout', 'truncated')) { $setupDiag.Status } elseif ($setupDiag.Status -in @('absent', 'no-recent-logs', 'untrusted')) { 'not-observed' } elseif ($setupDiag.Status -in @('execution-failed', 'requires-elevation', 'invalid-output', 'no-output')) { 'unreadable' } elseif ($setupObserved -eq 0) { 'empty' } else { 'readable' }
+            $setupPerformanceStatus = if ($setupDiag.Status -in @('timeout', 'truncated')) { $setupDiag.Status } elseif ($setupDiag.Status -eq 'artifact-read') { 'artifact-read' } elseif ($setupDiag.Status -in @('matched', 'successful-upgrade', 'stale-result')) { 'executed' } elseif ($setupDiag.Status -in @('absent', 'no-recent-logs', 'untrusted')) { 'not-observed' } elseif ($setupDiag.Status -in @('execution-failed', 'requires-elevation', 'invalid-output', 'no-output', 'artifact-unreadable')) { 'unreadable' } elseif ($setupObserved -eq 0) { 'empty' } else { 'readable' }
             & $recordPerformance -Source 'setupdiag' -Kind 'tool' -Name 'SetupDiag tool' -Status $setupPerformanceStatus `
                 -ObservedRecords $setupObserved -SkippedRecords 0 -Cap $null -ElapsedMilliseconds ([int64][Math]::Round($setupTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
         }
@@ -559,9 +559,9 @@ function Invoke-LogVerdictScan {
         }
     }
     if ($setupDiagStatus) {
-        $setupStatus = if ($setupDiagStatus.Status -in @('timeout', 'truncated')) { $setupDiagStatus.Status } elseif ($setupDiagStatus.Status -in @('absent', 'no-recent-logs', 'untrusted')) { 'not-observed' } elseif ($setupDiagStatus.Status -in @('execution-failed', 'requires-elevation', 'invalid-output', 'no-output')) { 'unreadable' } else { 'readable' }
+        $setupStatus = if ($setupDiagStatus.Status -in @('timeout', 'truncated')) { $setupDiagStatus.Status } elseif ($setupDiagStatus.Status -eq 'artifact-read') { 'artifact-read' } elseif ($setupDiagStatus.Status -in @('matched', 'successful-upgrade', 'stale-result')) { 'executed' } elseif ($setupDiagStatus.Status -in @('absent', 'no-recent-logs', 'untrusted')) { 'not-observed' } elseif ($setupDiagStatus.Status -in @('execution-failed', 'requires-elevation', 'invalid-output', 'no-output', 'artifact-unreadable')) { 'unreadable' } else { 'readable' }
         $coverageSources.Add((New-LVCoverageRecord -Source 'SetupDiag' -Kind 'tool' -Name 'SetupDiag' -Status $setupStatus `
-            -Reason ([string]$setupDiagStatus.Message) -Path $setupDiagStatus.ExecutablePath -WindowStart $cutoff -WindowEnd $started `
+            -Reason ([string]$setupDiagStatus.Message) -Path $(if ($setupDiagStatus.ArtifactPath) { [string]$setupDiagStatus.ArtifactPath } else { [string]$setupDiagStatus.ExecutablePath }) -WindowStart $cutoff -WindowEnd $started `
             -ObservedRecords @($setupDiag.Records).Count -ParserError $(if ($setupStatus -eq 'unreadable') { [string]$setupDiagStatus.Message } else { $null }) -CollectionBudget $collectionBudget -Origin 'live')) | Out-Null
     }
     $reliabilityStatus = if ($SkipReliability) { 'not-observed' } elseif ($script:LVReliabilityBudgetStop) { $script:LVReliabilityBudgetStop } elseif (-not $script:LVReliabilityAvailable) { $script:LVReliabilityStatus } elseif (@($reliabilityRecords).Count -eq 0) { 'empty' } else { 'readable' }
