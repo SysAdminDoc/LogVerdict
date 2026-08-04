@@ -2,7 +2,7 @@
 
 <#!
 .SYNOPSIS
-Verify LogVerdict release SBOM and provenance records without network access.
+Verify LogVerdict release SPDX, CycloneDX, and provenance records without network access.
 #>
 [CmdletBinding()]
 param(
@@ -63,6 +63,39 @@ function Assert-LVHasProperty {
 
     if ($null -eq $Object -or -not $Object.PSObject.Properties[$Name]) {
         throw ("{0}: required property '{1}' is missing." -f $Message, $Name)
+    }
+}
+
+function Test-LVCycloneDxDocument {
+    param(
+        [Parameter(Mandatory)]$Document,
+        [Parameter(Mandatory)][string]$AssetName,
+        [Parameter(Mandatory)][string]$AssetHash,
+        [Parameter(Mandatory)][string]$Version
+    )
+
+    Assert-LVHasProperty -Object $Document -Name '$schema' -Message ("CycloneDX {0}" -f $AssetName)
+    Assert-LVEqual -Actual $Document.'$schema' -Expected 'https://cyclonedx.org/schema/bom-1.7.schema.json' -Message ("CycloneDX schema {0}" -f $AssetName)
+    Assert-LVEqual -Actual $Document.bomFormat -Expected 'CycloneDX' -Message ("CycloneDX format {0}" -f $AssetName)
+    Assert-LVEqual -Actual $Document.specVersion -Expected '1.7' -Message ("CycloneDX version {0}" -f $AssetName)
+    if ([string]$Document.serialNumber -notmatch '^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
+        throw ("CycloneDX serial number is invalid for {0}." -f $AssetName)
+    }
+    if ([int]$Document.version -lt 1) { throw ("CycloneDX document version is invalid for {0}." -f $AssetName) }
+    Assert-LVHasProperty -Object $Document -Name 'metadata' -Message ("CycloneDX {0}" -f $AssetName)
+    Assert-LVHasProperty -Object $Document.metadata -Name 'timestamp' -Message ("CycloneDX metadata {0}" -f $AssetName)
+    $components = @($Document.components | Where-Object { $_ })
+    if ($components.Count -ne 1) { throw ("CycloneDX must describe exactly one component for {0}." -f $AssetName) }
+    $component = $components[0]
+    Assert-LVEqual -Actual $component.type -Expected 'application' -Message ("CycloneDX component type {0}" -f $AssetName)
+    Assert-LVEqual -Actual $component.name -Expected $AssetName -Message ("CycloneDX component name {0}" -f $AssetName)
+    Assert-LVEqual -Actual $component.version -Expected $Version -Message ("CycloneDX component version {0}" -f $AssetName)
+    $hashes = @($component.hashes | Where-Object { $_.alg -eq 'SHA-256' })
+    if ($hashes.Count -ne 1) { throw ("CycloneDX must contain one SHA-256 hash for {0}." -f $AssetName) }
+    Assert-LVEqual -Actual $hashes[0].content -Expected $AssetHash -Message ("CycloneDX asset hash {0}" -f $AssetName)
+    $properties = @($component.properties | Where-Object { $_ })
+    if (@($properties | Where-Object { $_.name -eq 'logverdict:provenance-signed' -and $_.value -eq 'false' }).Count -ne 1) {
+        throw ("CycloneDX must label the provenance unsigned for {0}." -f $AssetName)
     }
 }
 
@@ -172,8 +205,10 @@ foreach ($asset in $assets) {
     if ([string]$asset.name -notin @('LogVerdict.exe', 'LogVerdict-GUI.exe')) { throw ("Unexpected release asset '{0}'." -f $asset.name) }
     if ([string]$asset.sha256 -notmatch '^[0-9a-f]{64}$') { throw ("Invalid release hash for {0}." -f $asset.name) }
     $spdxPath = Join-Path $MetadataDirectory ([string]$asset.sbom)
+    $cycloneDxPath = Join-Path $MetadataDirectory ([string]$asset.cyclonedx)
     $provenancePath = Join-Path $MetadataDirectory ([string]$asset.provenance)
     Assert-LVEqual -Actual (Get-LVFileSha256 -Path $spdxPath) -Expected $asset.sbomSha256 -Message ("SBOM hash {0}" -f $asset.name)
+    Assert-LVEqual -Actual (Get-LVFileSha256 -Path $cycloneDxPath) -Expected $asset.cyclonedxSha256 -Message ("CycloneDX hash {0}" -f $asset.name)
     Assert-LVEqual -Actual (Get-LVFileSha256 -Path $provenancePath) -Expected $asset.provenanceSha256 -Message ("Provenance hash {0}" -f $asset.name)
 
     if ($AssetDirectory) {
@@ -191,6 +226,9 @@ foreach ($asset in $assets) {
     if ($checksum.Count -ne 1) { throw ("SPDX is missing one SHA-256 checksum for {0}." -f $asset.name) }
     Assert-LVEqual -Actual $checksum[0].checksum -Expected $asset.sha256 -Message ("SPDX asset hash {0}" -f $asset.name)
 
+    $cycloneDx = Read-LVJson -Path $cycloneDxPath
+    Test-LVCycloneDxDocument -Document $cycloneDx -AssetName ([string]$asset.name) -AssetHash ([string]$asset.sha256) -Version $Version
+
     $provenance = Read-LVJson -Path $provenancePath
     Assert-LVEqual -Actual $provenance.schemaVersion -Expected 1 -Message ("Provenance schema version {0}" -f $asset.name)
     Assert-LVEqual -Actual $provenance.name -Expected 'LogVerdict.BuildProvenance' -Message ("Provenance name {0}" -f $asset.name)
@@ -207,6 +245,8 @@ foreach ($asset in $assets) {
     Assert-LVEqual -Actual $provenance.source.manifestSha256 -Expected $index.sourceManifestSha256 -Message ("Provenance source manifest {0}" -f $asset.name)
     Assert-LVEqual -Actual $provenance.dependencyManifestSha256 -Expected $index.dependencyManifestSha256 -Message ("Provenance dependency manifest {0}" -f $asset.name)
     Assert-LVEqual -Actual $provenance.sbom.sha256 -Expected $asset.sbomSha256 -Message ("Provenance SBOM hash {0}" -f $asset.name)
+    Assert-LVEqual -Actual $provenance.cyclonedx.path -Expected $asset.cyclonedx -Message ("Provenance CycloneDX path {0}" -f $asset.name)
+    Assert-LVEqual -Actual $provenance.cyclonedx.sha256 -Expected $asset.cyclonedxSha256 -Message ("Provenance CycloneDX hash {0}" -f $asset.name)
     if ($provenance.verification.signed -ne $false -or $provenance.build.unsigned -ne $true) { throw ("Unsigned verification contract failed for {0}." -f $asset.name) }
 }
 

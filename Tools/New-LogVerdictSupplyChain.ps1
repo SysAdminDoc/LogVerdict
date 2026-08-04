@@ -5,10 +5,11 @@
 Write hash-verifiable SPDX and build-provenance records for release assets.
 
 .DESCRIPTION
-The records are deliberately portable and unsigned. Each release executable gets
-an SPDX 2.3 document and a provenance record containing the source revision,
-source-tree hash, build runtime, and exact content hashes for the pinned build and
-test modules. The companion verifier can validate the records offline.
+The records are deliberately portable and unsigned. Each release asset gets an
+SPDX 2.3 document, a CycloneDX 1.7 document, and a provenance record containing
+the source revision, source-tree hash, build runtime, and exact content hashes for
+the pinned build and test modules. The companion verifier can validate the records
+offline.
 #>
 [CmdletBinding()]
 param(
@@ -249,8 +250,10 @@ foreach ($name in $assetNames) {
     $assetHash = Get-LVFileSha256 -Path $assetPath
     $safeName = [IO.Path]::GetFileNameWithoutExtension($name)
     $spdxName = $safeName + '.spdx.json'
+    $cycloneDxName = $safeName + '.cyclonedx.json'
     $provenanceName = $safeName + '.provenance.json'
     $spdxPath = Join-Path $OutputDirectory $spdxName
+    $cycloneDxPath = Join-Path $OutputDirectory $cycloneDxName
     $provenancePath = Join-Path $OutputDirectory $provenanceName
     $namespace = 'https://github.com/{0}/releases/download/v{1}/{2}' -f $Repository, $Version, $spdxName
 
@@ -293,6 +296,39 @@ foreach ($name in $assetNames) {
     }
     Write-LVJsonFile -Path $spdxPath -Value $spdx -Depth 20
 
+    $cycloneComponent = [ordered]@{
+        type = 'application'
+        'bom-ref' = 'pkg:generic/logverdict/' + $Version + '/' + $safeName
+        group = 'SysAdminDoc'
+        name = $name
+        version = $Version
+        description = 'Unsigned LogVerdict release asset; verify the companion provenance record and SHA-256 digest before use.'
+        hashes = @([ordered]@{ alg = 'SHA-256'; content = $assetHash })
+        licenses = @(
+            [ordered]@{ license = [ordered]@{ id = 'MIT' } }
+            [ordered]@{ license = [ordered]@{ id = 'CC-BY-4.0' } }
+        )
+        properties = @(
+            [ordered]@{ name = 'logverdict:source-revision'; value = $revision }
+            [ordered]@{ name = 'logverdict:source-tree-sha256'; value = $sourceManifest.sourceTreeSha256 }
+            [ordered]@{ name = 'logverdict:provenance-signed'; value = 'false' }
+            [ordered]@{ name = 'logverdict:provenance-note'; value = 'Self-asserted and unsigned; verify the published SHA-256 digest and companion provenance record.' }
+        )
+    }
+    $cycloneDx = [ordered]@{
+        '$schema' = 'https://cyclonedx.org/schema/bom-1.7.schema.json'
+        bomFormat = 'CycloneDX'
+        specVersion = '1.7'
+        serialNumber = 'urn:uuid:' + ([Guid]::NewGuid().ToString())
+        version = 1
+        metadata = [ordered]@{
+            timestamp = $createdAt
+            tools = @([ordered]@{ vendor = 'SysAdminDoc'; name = 'LogVerdict supply-chain metadata'; version = '1' })
+        }
+        components = @($cycloneComponent)
+    }
+    Write-LVJsonFile -Path $cycloneDxPath -Value $cycloneDx -Depth 20
+
     $provenance = [ordered]@{
         schemaVersion = 1
         name = 'LogVerdict.BuildProvenance'
@@ -325,6 +361,10 @@ foreach ($name in $assetNames) {
             path = $spdxName
             sha256 = Get-LVFileSha256 -Path $spdxPath
         }
+        cyclonedx = [ordered]@{
+            path = $cycloneDxName
+            sha256 = Get-LVFileSha256 -Path $cycloneDxPath
+        }
         verification = [ordered]@{
             artifactSha256 = $assetHash
             signed = $false
@@ -337,6 +377,8 @@ foreach ($name in $assetNames) {
         sha256 = $assetHash
         sbom = $spdxName
         sbomSha256 = Get-LVFileSha256 -Path $spdxPath
+        cyclonedx = $cycloneDxName
+        cyclonedxSha256 = Get-LVFileSha256 -Path $cycloneDxPath
         provenance = $provenanceName
         provenanceSha256 = Get-LVFileSha256 -Path $provenancePath
     }

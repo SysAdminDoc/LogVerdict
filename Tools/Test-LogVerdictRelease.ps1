@@ -6,8 +6,9 @@ Run the offline release integrity gates for LogVerdict.
 Checks the single version source against the module manifest, README badge,
 package metadata, typed error catalog, and verdict database. When -AssetDirectory
 is supplied, package hashes are checked against the exact built executables too.
-When -SupplyChainDirectory is supplied, the SPDX and provenance records in that
-directory are also checked offline against the source checkout and assets.
+When -SupplyChainDirectory is supplied, the SPDX, CycloneDX 1.7, and provenance
+records in that directory are also checked offline against the source checkout and
+assets.
 The script never downloads or publishes anything. A stale advisory cache is a
 warning during ordinary quality checks and a blocker when -ReleaseValidation is
 supplied.
@@ -622,6 +623,7 @@ if ($SupplyChainDirectory) {
         throw '-AssetDirectory is required when validating supply-chain metadata.'
     }
     & (Join-Path $PSScriptRoot 'Test-LogVerdictSupplyChain.ps1') -Version $version -MetadataDirectory $SupplyChainDirectory -AssetDirectory $AssetDirectory -SourceDirectory $repoRoot
+    Write-Verbose 'Verified SPDX 2.3, CycloneDX 1.7, and unsigned provenance records for every release asset.'
 }
 
 Write-Output ("Release gates passed for LogVerdict v{0}: {1} typed catalog entries." -f $version, $catalog.Count)

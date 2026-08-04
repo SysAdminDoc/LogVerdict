@@ -5968,11 +5968,21 @@ Describe 'Release supply-chain metadata' {
         foreach ($asset in @($index.assets)) {
             $asset.sha256 | Should -Match '^[0-9a-f]{64}$'
             (Test-Path -LiteralPath (Join-Path $metadataDirectory $asset.sbom)) | Should -BeTrue
+            (Test-Path -LiteralPath (Join-Path $metadataDirectory $asset.cyclonedx)) | Should -BeTrue
             (Test-Path -LiteralPath (Join-Path $metadataDirectory $asset.provenance)) | Should -BeTrue
             $spdx = Get-Content -LiteralPath (Join-Path $metadataDirectory $asset.sbom) -Raw | ConvertFrom-Json
             $spdx.spdxVersion | Should -BeExactly 'SPDX-2.3'
+            $cycloneDx = Get-Content -LiteralPath (Join-Path $metadataDirectory $asset.cyclonedx) -Raw | ConvertFrom-Json
+            $cycloneDx.'$schema' | Should -BeExactly 'https://cyclonedx.org/schema/bom-1.7.schema.json'
+            $cycloneDx.bomFormat | Should -BeExactly 'CycloneDX'
+            $cycloneDx.specVersion | Should -BeExactly '1.7'
+            $cycloneDx.components[0].name | Should -BeExactly $asset.name
+            $cycloneDx.components[0].hashes[0].content | Should -BeExactly $asset.sha256
+            @($cycloneDx.components[0].properties | Where-Object { $_.name -eq 'logverdict:provenance-signed' -and $_.value -eq 'false' }).Count | Should -Be 1
             $provenance = Get-Content -LiteralPath (Join-Path $metadataDirectory $asset.provenance) -Raw | ConvertFrom-Json
             $provenance.subject[0].digest.sha256 | Should -BeExactly $asset.sha256
+            $provenance.cyclonedx.path | Should -BeExactly $asset.cyclonedx
+            $provenance.cyclonedx.sha256 | Should -BeExactly $asset.cyclonedxSha256
             $provenance.build.unsigned | Should -BeTrue
         }
         $generated.AssetCount | Should -Be 2

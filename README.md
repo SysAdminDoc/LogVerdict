@@ -250,17 +250,19 @@ Double-clicked, it holds the console window open until you press Enter. Run from
 
 It is **unsigned by design** - this project does not code-sign. SmartScreen will warn on first run: choose **More info** then **Run anyway**.
 
-Release builds publish an SPDX 2.3 SBOM and a companion unsigned provenance record beside
-each executable. The records include the asset SHA-256, source revision and source-tree
-hash, build runtime, and content hashes for the pinned Pester, PSScriptAnalyzer, and
-ps2exe modules. They can be checked without network access:
+Release builds publish SPDX 2.3 and CycloneDX 1.7 SBOMs plus a companion unsigned
+provenance record beside each asset. The CycloneDX documents declare the published
+[CycloneDX 1.7 JSON schema](https://cyclonedx.org/schema/bom-1.7.schema.json) and label
+the provenance as self-asserted and unsigned. Every record includes the asset SHA-256,
+source revision and source-tree hash, build runtime, and content hashes for the pinned
+Pester, PSScriptAnalyzer, and ps2exe modules. They can be checked without network access:
 
 ```powershell
 .\Tools\Test-LogVerdictRelease.ps1 -ManifestDirectory .\Packaging -AssetDirectory .\dist -SupplyChainDirectory .\Packaging\supply-chain
 ```
 
-The provenance is evidence about how an artifact was built, not a code signature; the
-executables remain unsigned by design.
+The provenance is evidence about how an artifact was built, not a code signature. Verify
+the published SHA-256 before use; the assets remain unsigned by design.
 
 CI also runs `Tools\Test-LogVerdictPerformance.ps1` on both supported PowerShell
 runtimes. It creates small, large, malformed-text, malformed-EVTX, and reduction inputs only in
