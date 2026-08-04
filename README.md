@@ -132,6 +132,30 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Output format selection | The window always saves Text, JSON, CSV, HTML, and the Markdown ticket summary together | `-Format` (`Text`, `Json`, `Csv`, `Html`, `Markdown`, or `All`) |
 | Console lifecycle | Not applicable to a persistent window | `-NoReport`, `-Pause`, `-NoPause` |
 
+### Windows log-parsing benchmark
+
+The repository carries a 2,000-row, fingerprint-only annotation manifest at
+[`Data/windows-log-benchmark.json`](Data/windows-log-benchmark.json) for the
+`Windows_2k` sample from [Loghub](https://github.com/logpai/loghub). The raw
+Windows log is not committed: the fetch tool downloads the structured projection
+at a pinned commit and verifies its SHA-256 before scoring it. The current masker
+baseline is 1.0000 grouping purity and 0.6750 parsing accuracy; those values are
+guarded by the manifest's regression budgets. The annotations are MIT-licensed;
+the upstream corpus remains subject to Loghub's research-use terms and attribution
+requirements.
+
+```powershell
+$bench = Join-Path ([IO.Path]::GetTempPath()) 'LogVerdict-WindowsBenchmark'
+.\Tools\Fetch-LogVerdictWindowsBenchmark.ps1 -OutputDirectory $bench -RunBenchmark `
+    -BenchmarkOutputPath (Join-Path $bench 'benchmark-result.json')
+```
+
+`Test-LogVerdictWindowsBenchmark.ps1` hashes every supplied line against its
+annotation, runs the real template masker, and reports grouping purity, parsing
+accuracy, reduction ratio, and the declared regression budgets. The result contains
+counts and masked projections only; it never writes the source log or raw message
+content.
+
 Named `-Channel` values take precedence over `-AllChannels` and `-DiagnosticChannels` when
 wrappers pass a broad default alongside an explicit list. Supplying both broad switches is
 rejected; choose one channel tier.

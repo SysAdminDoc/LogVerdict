@@ -89,6 +89,8 @@
         'Data\report-contract.schema.json'
         'Data\review-artifact.schema.json'
         'Data\suppressions.schema.json'
+        'Data\windows-log-benchmark.json'
+        'Data\windows-log-benchmark.schema.json'
         'Data\verdicts.json'
         'Data\verdicts.schema.json'
     )

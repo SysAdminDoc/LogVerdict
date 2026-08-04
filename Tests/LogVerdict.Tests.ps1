@@ -6963,6 +6963,84 @@ Describe 'Evidence bundle' {
     }
 }
 
+Describe 'Windows log parsing benchmark' {
+    It 'ships a pinned content-free annotation manifest' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $manifest = Get-Content -LiteralPath (Join-Path $root 'Data\windows-log-benchmark.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $schema = Get-Content -LiteralPath (Join-Path $root 'Data\windows-log-benchmark.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+
+        $manifest.schemaVersion | Should -Be 1
+        $manifest.annotationLicense | Should -BeExactly 'MIT'
+        $manifest.source.revision | Should -Match '^[0-9a-f]{40}$'
+        $manifest.source.sha256 | Should -Match '^[0-9a-f]{64}$'
+        @($manifest.annotations).Count | Should -Be 2000
+        $manifest.budgets.minimumGroupingPurity | Should -Be 0.99
+        $manifest.budgets.minimumParsingAccuracy | Should -Be 0.65
+        $schema.properties.annotationLicense.const | Should -BeExactly 'MIT'
+        $schema.properties.source.required | Should -Contain 'sha256'
+    }
+
+    It 'evaluates a local fixture through the real template masker' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $corpusPath = Join-Path $TestDrive 'windows-fixture.csv'
+        $annotationPath = Join-Path $TestDrive 'windows-annotations.json'
+        $outputPath = Join-Path $TestDrive 'windows-result.json'
+        $rows = @(
+            [pscustomobject][ordered]@{ LineId=1; Date='2026-08-03'; Time='10:00:00'; Level='Error'; Component='Disk'; Content='Disk error 123'; EventId='E1'; EventTemplate='Disk error <*>' }
+            [pscustomobject][ordered]@{ LineId=2; Date='2026-08-03'; Time='10:00:01'; Level='Error'; Component='Disk'; Content='Disk error 124'; EventId='E1'; EventTemplate='Disk error <*>' }
+            [pscustomobject][ordered]@{ LineId=3; Date='2026-08-03'; Time='10:00:02'; Level='Info'; Component='Service'; Content='Service started'; EventId='E2'; EventTemplate='Service started' }
+        )
+        $csv = (($rows | ConvertTo-Csv -NoTypeInformation) -join [Environment]::NewLine) + [Environment]::NewLine
+        [IO.File]::WriteAllText($corpusPath, $csv, (New-Object Text.UTF8Encoding($false)))
+        $hashText = {
+            param([string]$Text)
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)))).Replace('-', '').ToLowerInvariant() }
+            finally { $sha.Dispose() }
+        }.GetNewClosure()
+        $annotations = @($rows | ForEach-Object {
+            [pscustomobject][ordered]@{
+                id = 'fixture-{0}' -f $_.LineId
+                lineId = [int]$_.LineId
+                lineSha256 = & $hashText ([string]$_.Content)
+                eventId = [string]$_.EventId
+                eventTemplate = [string]$_.EventTemplate
+                component = [string]$_.Component
+                level = [string]$_.Level
+                stratum = [string]$_.Component
+            }
+        })
+        $fileSha = [Security.Cryptography.SHA256]::Create()
+        try { $sourceSha = ([BitConverter]::ToString($fileSha.ComputeHash([IO.File]::ReadAllBytes($corpusPath)))).Replace('-', '').ToLowerInvariant() }
+        finally { $fileSha.Dispose() }
+        $manifest = [pscustomobject][ordered]@{
+            schemaVersion = 1
+            name = 'fixture'
+            annotationLicense = 'MIT'
+            source = [pscustomobject][ordered]@{
+                dataset = 'fixture'
+                file = 'Windows_2k.log_structured.csv'
+                revision = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+                uri = 'https://raw.githubusercontent.com/logpai/loghub/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/Windows/Windows_2k.log_structured.csv'
+                sourceLicense = 'fixture'
+                sha256 = $sourceSha
+            }
+            budgets = [pscustomobject][ordered]@{ minimumRows=3; minimumGroupingPurity=1.0; minimumParsingAccuracy=1.0 }
+            annotations = $annotations
+        }
+        [IO.File]::WriteAllText($annotationPath, ($manifest | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
+
+        $tool = Join-Path $root 'Tools\Test-LogVerdictWindowsBenchmark.ps1'
+        $output = @(& $tool -CorpusPath $corpusPath -AnnotationPath $annotationPath -OutputPath $outputPath)
+        $result = Get-Content -LiteralPath $outputPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        ($output -join [Environment]::NewLine) | Should -Match 'Windows benchmark: 3 rows'
+        $result.Rows | Should -Be 3
+        $result.Metrics.GroupingPurity | Should -Be 1
+        $result.Metrics.ParsingAccuracy | Should -Be 1
+        $result.Failures | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Content-free performance benchmark gate' {
     BeforeAll {
         $root = Split-Path $PSScriptRoot -Parent
@@ -6988,6 +7066,37 @@ Describe 'Content-free performance benchmark gate' {
         $raw = Get-Content -LiteralPath $report -Raw
         $raw | Should -Not -Match 'Message|SampleMessage|MachineName|Path|C:\\|secret'
         $output -join "`n" | Should -Match 'Performance gate: passed'
+    }
+}
+
+Describe 'Windows log parsing benchmark' {
+    It 'ships fingerprint-only MIT annotations with a pinned external corpus' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $manifestPath = Join-Path $root 'Data\windows-log-benchmark.json'
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $manifest.schemaVersion | Should -Be 1
+        $manifest.annotationLicense | Should -BeExactly 'MIT'
+        $manifest.source.revision | Should -Match '^[0-9a-f]{40}$'
+        $manifest.source.sha256 | Should -Match '^[0-9a-f]{64}$'
+        @($manifest.annotations).Count | Should -Be $manifest.budgets.minimumRows
+        @($manifest.annotations | Select-Object -ExpandProperty id -Unique).Count | Should -Be @($manifest.annotations).Count
+        @($manifest.annotations | Where-Object { $_.lineSha256 -notmatch '^[0-9a-f]{64}$' }).Count | Should -Be 0
+        @($manifest.annotations | Where-Object { $_.PSObject.Properties.Name -contains 'content' }).Count | Should -Be 0
+        @($manifest.annotations | Select-Object -ExpandProperty eventId -Unique).Count | Should -BeGreaterThan 1
+    }
+
+    It 'keeps the fetch and scoring tools pinned, external-data-only, and content-free' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $fetch = Get-Content -LiteralPath (Join-Path $root 'Tools\Fetch-LogVerdictWindowsBenchmark.ps1') -Raw
+        $score = Get-Content -LiteralPath (Join-Path $root 'Tools\Test-LogVerdictWindowsBenchmark.ps1') -Raw
+        $fetch | Should -Match 'ExpectedSha256'
+        $fetch | Should -Match 'raw\.githubusercontent\.com/logpai/loghub'
+        $fetch | Should -Match 'Refusing to use an unreviewed source revision'
+        $score | Should -Match 'ConvertTo-LVTemplateData'
+        $score | Should -Match 'GroupingPurity'
+        $score | Should -Match 'ParsingAccuracy'
+        $score | Should -Match 'lineSha256'
+        $score | Should -Not -Match '\$.*Content.*ConvertTo-Json'
     }
 }
 

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/SysAdminDoc/LogVerdict/blob/main/Data/windows-log-benchmark.schema.json",
+  "title": "LogVerdict Windows log parsing benchmark annotations",
+  "description": "Content-free line fingerprints and template labels for the external Windows benchmark corpus. The corpus is never committed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name", "annotationLicense", "source", "budgets", "annotations"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "annotationLicense": { "const": "MIT" },
+    "description": { "type": "string" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dataset", "file", "revision", "uri", "sourceLicense", "sha256"],
+      "properties": {
+        "dataset": { "type": "string", "minLength": 1 },
+        "file": { "type": "string", "minLength": 1 },
+        "revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "uri": { "type": "string", "format": "uri" },
+        "sourceLicense": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimumRows", "minimumGroupingPurity", "minimumParsingAccuracy"],
+      "properties": {
+        "minimumRows": { "type": "integer", "minimum": 1 },
+        "minimumGroupingPurity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "minimumParsingAccuracy": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "annotations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "lineId", "lineSha256", "eventId", "eventTemplate", "component", "level", "stratum"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$" },
+          "lineId": { "type": "integer", "minimum": 1 },
+          "lineSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "eventId": { "type": "string", "pattern": "^E[0-9]+$" },
+          "eventTemplate": { "type": "string", "minLength": 1 },
+          "component": { "type": "string", "minLength": 1 },
+          "level": { "type": "string", "minLength": 1 },
+          "stratum": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}
