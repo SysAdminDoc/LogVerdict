@@ -1,0 +1,278 @@
+function New-LVGuiActions {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '',
+        Justification = 'This constructor returns the set of GUI actions used by the window.')]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Context)
+
+    $ui = $Context.Ui
+    $state = $Context.State
+    $window = $Context.Window
+    $pageControl = $Context.PageControl
+    $navControl = $Context.NavControl
+    $activityMaxLines = $Context.ActivityMaxLines
+    $activityMaxCharacters = $Context.ActivityMaxCharacters
+
+    $setStatus = {
+        param([string]$Message)
+        $ui.TxtStatus.Text = $Message
+    }.GetNewClosure()
+
+    $showPage = {
+        param([string]$Name)
+        if (-not $pageControl.ContainsKey($Name)) { return }
+        foreach ($key in $pageControl.Keys) {
+            $pageControl[$key].Visibility = $(if ($key -eq $Name) { 'Visible' } else { 'Collapsed' })
+            $navControl[$key].IsChecked = ($key -eq $Name)
+        }
+        $state.CurrentPage = $Name
+    }.GetNewClosure()
+
+    $chipContent = {
+        param([string]$Label, $Count)
+        $dock = New-Object System.Windows.Controls.DockPanel
+        $number = New-Object System.Windows.Controls.TextBlock
+        $number.Text = [string]$Count
+        $number.FontWeight = 'SemiBold'
+        $number.Margin = New-Object System.Windows.Thickness(7, 0, 0, 0)
+        [System.Windows.Controls.DockPanel]::SetDock($number, [System.Windows.Controls.Dock]::Right)
+        $caption = New-Object System.Windows.Controls.TextBlock
+        $caption.Text = $Label
+        $null = $dock.Children.Add($number)
+        $null = $dock.Children.Add($caption)
+        return $dock
+    }.GetNewClosure()
+
+    $applyFilter = {
+        if ($null -eq $state.View) { return }
+        $state.View.Refresh()
+
+        $shown = @($state.View).Count
+        $total = 0
+        if ($state.Rows) { $total = $state.Rows.Count }
+
+        if ($shown -eq $total) {
+            $ui.TxtShown.Text = ('{0} finding(s)' -f $total)
+        } else {
+            $ui.TxtShown.Text = ('{0} of {1}' -f $shown, $total)
+        }
+
+        if ($shown -eq 0 -and $total -gt 0) {
+            $ui.TxtEmptyTitle.Text = 'Nothing matches the filter'
+            $ui.TxtEmptyBody.Text = 'All ' + $total + ' finding(s) are hidden. Clear the search box, reset a structured filter, or switch a verdict back on in the left panel.'
+            $ui.PnlEmpty.Visibility = 'Visible'
+        } elseif ($shown -eq 0) {
+            $ui.PnlEmpty.Visibility = 'Visible'
+        } else {
+            $ui.PnlEmpty.Visibility = 'Collapsed'
+        }
+    }.GetNewClosure()
+
+    $resolveFinding = {
+        param($Row)
+        if ($null -eq $Row -or $null -eq $state.FindingStore) { return $null }
+        $index = -1
+        if ($Row.PSObject.Properties['FindingIndex']) { $index = [int]$Row.FindingIndex }
+        if ($index -lt 0 -or $index -ge $state.FindingStore.Count) { return $null }
+        return $state.FindingStore[$index]
+    }.GetNewClosure()
+
+    $showDetail = {
+        param($Row)
+
+        if ($null -eq $Row) {
+            $ui.ScrDetail.Visibility = 'Collapsed'
+            $ui.TxtNoSelection.Visibility = 'Visible'
+            $ui.BtnCopy.IsEnabled = $false
+            return
+        }
+
+        $finding = & $resolveFinding $Row
+        if ($null -eq $finding) {
+            $ui.ScrDetail.Visibility = 'Collapsed'
+            $ui.TxtNoSelection.Visibility = 'Visible'
+            $ui.BtnCopy.IsEnabled = $false
+            return
+        }
+        $detail = ConvertTo-LVGuiDetail -Finding $finding
+
+        $ui.TxtNoSelection.Visibility = 'Collapsed'
+        $ui.ScrDetail.Visibility = 'Visible'
+        $ui.BtnCopy.IsEnabled = $true
+
+        $ui.TxtDetailVerdict.Text = $detail.VerdictLabel
+        $ui.PillDetail.Background = $detail.VerdictFill
+        $ui.TxtDetailVerdict.Foreground = $detail.VerdictInk
+        $ui.TxtDetailTitle.Text = $detail.Title
+        $ui.TxtDetailMeta.Text = $detail.Meta
+        $ui.TxtPlain.Text  = $detail.Plain
+        $ui.TxtWhy.Text    = $detail.Why
+        $ui.TxtAction.Text = $detail.Action
+
+        if ($detail.FalsePositive.Count -gt 0) {
+            $ui.LstFalsePositives.ItemsSource = [string[]]$detail.FalsePositive
+            $ui.PnlFalsePositives.Visibility = 'Visible'
+        } else {
+            $ui.PnlFalsePositives.Visibility = 'Collapsed'
+        }
+
+        $referenceBuckets = Get-LVGuiReferenceBucket -Reference $detail.Reference
+        $ui.LstRefs.ItemsSource = [string[]]$referenceBuckets.Allowed
+        $ui.LstUnsafeRefs.ItemsSource = [string[]]$referenceBuckets.Blocked
+        if (@($referenceBuckets.Allowed).Count -gt 0 -or @($referenceBuckets.Blocked).Count -gt 0) {
+            $ui.PnlRefs.Visibility = 'Visible'
+        } else {
+            $ui.PnlRefs.Visibility = 'Collapsed'
+        }
+
+        $ui.TxtSample.Text = $detail.SampleText
+        $ui.TxtProvenance.Text = $detail.Provenance
+    }.GetNewClosure()
+
+    $renderActivity = {
+        $needle = $ui.TxtActivitySearch.Text.Trim()
+        $ui.TxtActivitySearchHint.Visibility = $(if ($needle) { 'Collapsed' } else { 'Visible' })
+        $visibleLines = @($state.ActivityLines | Where-Object {
+                -not $needle -or $_.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0
+            })
+        $prefix = if ($state.ActivityDropped -gt 0) {
+            '[!] Earlier activity omitted after the {0}-line / {1:N0}-character display limit.' -f $activityMaxLines, $activityMaxCharacters
+        } else { $null }
+        if ($prefix) {
+            $ui.TxtActivityLog.Text = $prefix + [Environment]::NewLine + ($visibleLines -join [Environment]::NewLine)
+        } else {
+            $ui.TxtActivityLog.Text = $visibleLines -join [Environment]::NewLine
+        }
+        $ui.TxtActivityLog.ScrollToEnd()
+    }.GetNewClosure()
+
+    $appendLog = {
+        param([string]$Level, [string]$Stamp, [string]$Message)
+
+        $marks = @{ info = '[ ]'; ok = '[+]'; warn = '[!]'; error = '[x]'; step = '===' }
+        $mark = $marks[$Level]
+        if (-not $mark) { $mark = '[ ]' }
+
+        # The scan ran in a worker runspace, so the module's own transcript is empty in
+        # this one. Rebuilding it here is what stops the exported LogVerdict-Run.log
+        # from being a blank file whenever the report came from the window.
+        $transcriptLine = '{0} {1} {2}' -f $Stamp, $mark, $Message
+        Add-LVLogLine -List $script:LVLogLines -Line $transcriptLine
+
+        $clock = $Stamp
+        if ($Stamp.Length -ge 19) { $clock = $Stamp.Substring(11, 8) }
+        $panelLine = '{0}  {1} {2}{3}' -f $clock, $mark, $Message, [Environment]::NewLine
+
+        $activityLine = $panelLine.TrimEnd()
+        if ($activityLine.Length -gt $activityMaxCharacters) {
+            $activityLine = $activityLine.Substring(0, $activityMaxCharacters)
+            $state.ActivityDropped++
+        }
+        $state.ActivityLines.Add($activityLine) | Out-Null
+        $state.ActivityCharacters += $activityLine.Length + 1
+        while ($state.ActivityLines.Count -gt $activityMaxLines -or $state.ActivityCharacters -gt $activityMaxCharacters) {
+            $removedLine = [string]$state.ActivityLines[0]
+            $state.ActivityLines.RemoveAt(0)
+            $state.ActivityCharacters = [Math]::Max(0, $state.ActivityCharacters - $removedLine.Length - 1)
+            $state.ActivityDropped++
+        }
+        & $renderActivity
+        $ui.TxtActivityLastLine.Text = $Message
+        $ui.TxtStatus.Text = $Message
+    }.GetNewClosure()
+
+    $drainLog = {
+        if ($null -eq $state.Sink) { return }
+        $item = $null
+        while ($state.Sink.TryDequeue([ref]$item)) {
+            # Cap the split at 3 so a message carrying its own pipe characters survives.
+            $split = ([string]$item).Split(@('|'), 3, [System.StringSplitOptions]::None)
+            if ($split.Count -eq 3) {
+                & $appendLog $split[0] $split[1] $split[2]
+            } else {
+                & $appendLog 'info' ('{0:yyyy-MM-dd HH:mm:ss}' -f (Get-Date)) ([string]$item)
+            }
+        }
+    }.GetNewClosure()
+
+    $setScanning = {
+        param([bool]$On)
+        $state.Scanning = $On
+        $ui.BtnOverviewScan.IsEnabled = -not $On
+        $ui.BtnOverviewCancel.Visibility = $(if ($On) { 'Visible' } else { 'Collapsed' })
+        $ui.BtnActivityRunAgain.IsEnabled = -not $On
+        $ui.PbScan.Visibility = $(if ($On) { 'Visible' } else { 'Collapsed' })
+        $ui.PbScan.IsIndeterminate = $On
+        if ($On) {
+            $ui.BtnCopySummary.IsEnabled = $false
+        } elseif ($state.Result) {
+            $ui.BtnCopySummary.IsEnabled = $true
+        }
+        foreach ($n in @('BtnElevate')) {
+            $ui[$n].IsEnabled = -not $On
+        }
+        foreach ($n in @('TxtOverviewDays', 'ChkOverviewAllChannels', 'ChkOverviewIncludeText',
+                'ChkOverviewDiagnosticChannels', 'ChkOverviewIncludeBenign', 'ChkOverviewIncludeLowConfidence', 'TxtOverviewChannels',
+                'TxtOverviewDatabase', 'BtnOverviewBrowseDatabase', 'TxtOverviewSuppression', 'BtnOverviewBrowseSuppression', 'ChkOverviewSkipReliability',
+                'TxtOverviewOutputDir', 'BtnOverviewBrowseOutput', 'ChkOverviewRedact',
+                'ChkOverviewEvidence', 'BtnResetSettings', 'BtnCoverageElevate', 'BtnSideElevate')) {
+            $ui[$n].IsEnabled = -not $On
+        }
+        if ($On) {
+            $ui.BtnOverviewScan.Content = 'Scanning...'
+            $ui.TxtActivityState.Text = 'Scanning...'
+            $ui.TxtActivityHeadline.Text = 'Collecting and reducing diagnostic records'
+        } else {
+            $ui.BtnOverviewScan.Content = 'Run scan'
+        }
+    }.GetNewClosure()
+
+    $syncOverviewOptions = {
+        $hintDays = 30
+        if ([int]::TryParse($ui.TxtOverviewDays.Text.Trim(), [ref]$hintDays) -and $hintDays -ge 1 -and $hintDays -le 3650) {
+            $ui.TxtOverviewTimingHint.Text = Get-LVGuiScanTimingHint -DaysBack $hintDays
+        }
+    }.GetNewClosure()
+
+    $resetOverviewOptions = {
+        $ui.TxtOverviewDays.Text = '30'
+        $ui.TxtOverviewTimingHint.Text = Get-LVGuiScanTimingHint -DaysBack 30
+        $ui.ChkOverviewAllChannels.IsChecked = $false
+        $ui.ChkOverviewIncludeText.IsChecked = $true
+        $ui.ChkOverviewDiagnosticChannels.IsChecked = $false
+        $ui.ChkOverviewIncludeBenign.IsChecked = $false
+        $ui.ChkOverviewIncludeLowConfidence.IsChecked = $false
+        $ui.TxtOverviewChannels.Text = ''
+        $ui.TxtOverviewDatabase.Text = ''
+        $ui.TxtOverviewSuppression.Text = ''
+        $ui.ChkOverviewSkipReliability.IsChecked = $false
+        $ui.TxtOverviewOutputDir.Text = ''
+        $ui.ChkOverviewRedact.IsChecked = $false
+        $ui.ChkOverviewEvidence.IsChecked = $false
+        & $syncOverviewOptions
+        $window.WindowState = 'Normal'
+        $window.Width = 1440
+        $window.Height = 800
+    }.GetNewClosure()
+
+
+    $renderResult = {
+        param($Result)
+        Set-LVGuiResultView -Context $Context -Result $Result
+    }.GetNewClosure()
+
+    return [ordered]@{
+        SetStatus = $setStatus
+        ShowPage = $showPage
+        ChipContent = $chipContent
+        ApplyFilter = $applyFilter
+        ResolveFinding = $resolveFinding
+        ShowDetail = $showDetail
+        RenderActivity = $renderActivity
+        AppendLog = $appendLog
+        DrainLog = $drainLog
+        SetScanning = $setScanning
+        RenderResult = $renderResult
+        SyncOverviewOptions = $syncOverviewOptions
+        ResetOverviewOptions = $resetOverviewOptions
+    }
+}

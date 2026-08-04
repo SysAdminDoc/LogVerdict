@@ -14,6 +14,27 @@ BeforeAll {
             $sha.Dispose()
         }
     }
+
+    function Get-LVGuiSourceText {
+        $root = Split-Path $PSScriptRoot -Parent
+        return @(
+            Get-Content -LiteralPath (Join-Path $root 'Public\Show-LogVerdictGui.ps1') -Raw
+            Get-Content -LiteralPath (Join-Path $root 'Private\51-LVGuiHost.ps1') -Raw
+            Get-Content -LiteralPath (Join-Path $root 'Private\51-LVGuiSession.ps1') -Raw
+            Get-Content -LiteralPath (Join-Path $root 'Private\52-LVGuiRender.ps1') -Raw
+            Get-Content -LiteralPath (Join-Path $root 'Private\53-LVGuiActions.ps1') -Raw
+            Get-Content -LiteralPath (Join-Path $root 'Private\54-LVGuiEvents.ps1') -Raw
+        ) -join [Environment]::NewLine
+    }
+
+    function Get-LVScanSourceText {
+        $root = Split-Path $PSScriptRoot -Parent
+        return @(
+            Get-Content -LiteralPath (Join-Path $root 'Public\Invoke-LogVerdictScan.ps1') -Raw
+            Get-Content -LiteralPath (Join-Path $root 'Private\12-LVScanPipeline.ps1') -Raw
+            Get-Content -LiteralPath (Join-Path $root 'Private\13-LVCollectOffline.ps1') -Raw
+        ) -join [Environment]::NewLine
+    }
 }
 Describe 'Case profiles and responder handoffs' {
     BeforeAll {
@@ -257,9 +278,9 @@ Describe 'Case profiles and responder handoffs' {
 
     It 'wires the profile path through console, scan, and GUI entry points' {
         $root = Split-Path $PSScriptRoot -Parent
-        $scan = Get-Content -LiteralPath (Join-Path $root 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $scan = Get-LVScanSourceText
         $entry = Get-Content -LiteralPath (Join-Path $root 'Invoke-LogVerdict.ps1') -Raw
-        $gui = Get-Content -LiteralPath (Join-Path $root 'Public\Show-LogVerdictGui.ps1') -Raw
+        $gui = Get-LVGuiSourceText
         $guiEntry = Get-Content -LiteralPath (Join-Path $root 'LogVerdict-GUI.ps1') -Raw
         $scan | Should -Match 'CaseProfilePath'
         $entry | Should -Match 'CaseProfilePath'
@@ -987,7 +1008,7 @@ Describe 'Entry script launch behaviour' {
         $text | Should -Match 'Redact\s*=\s*\$Redact'
         $text | Should -Match '\[switch\]\$PromoteToRule'
         $text | Should -Match 'PromoteToRule\s*=\s*\$PromoteToRule'
-        $scan = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $scan = Get-LVScanSourceText
         $scan | Should -Match '\[switch\]\$Redact'
         $scan | Should -Match 'Redact\s*=\s*\$Redact'
         $scan | Should -Match '\$modelRequested\s*=\s*\[bool\]\(\$ExplainUnknown\s+-or\s+\$PromoteToRule\)'
@@ -1006,7 +1027,7 @@ Describe 'Entry script launch behaviour' {
         $text | Should -Match '\[string\]\$HistoryPath'
         $text | Should -Match 'HistoryPath\s*=\s*\$HistoryPath'
         $text | Should -Match '\[ValidateRange\(1, 3650\)\]\[int\]\$HistoryWindowDays'
-        $scan = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $scan = Get-LVScanSourceText
         $scan | Should -Match 'HistoryWindowDays\s*=\s*30'
         $scan | Should -Match 'Update-LVScanHistory'
     }
@@ -1014,7 +1035,7 @@ Describe 'Entry script launch behaviour' {
     It 'exposes optional offline advisory settings without coupling them to verdicts' {
         $root = Split-Path $PSScriptRoot -Parent
         $entry = Get-Content -LiteralPath (Join-Path $root 'Invoke-LogVerdict.ps1') -Raw
-        $scan = Get-Content -LiteralPath (Join-Path $root 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $scan = Get-LVScanSourceText
         $entry | Should -Match '\[string\]\$AdvisoryPath'
         $entry | Should -Match 'AdvisoryPackage\s*=\s*\$AdvisoryPackage'
         $entry | Should -Match 'AdvisoryVersion\s*=\s*\$AdvisoryVersion'
@@ -1026,7 +1047,7 @@ Describe 'Entry script launch behaviour' {
     It 'bounds the public scan window consistently' {
         $root = Split-Path $PSScriptRoot -Parent
         $entry = Get-Content -LiteralPath (Join-Path $root 'Invoke-LogVerdict.ps1') -Raw
-        $scan = Get-Content -LiteralPath (Join-Path $root 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $scan = Get-LVScanSourceText
         $entry | Should -Match '\[ValidateRange\(1, 3650\)\]\[int\]\$DaysBack'
         $scan | Should -Match '\[ValidateRange\(1, 3650\)\]\[int\]\$DaysBack'
         { Invoke-LogVerdictScan -DaysBack 0 } | Should -Throw
@@ -1034,7 +1055,7 @@ Describe 'Entry script launch behaviour' {
     }
 
     It 'gives named channels precedence and rejects contradictory broad modes' {
-        $scan = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $scan = Get-LVScanSourceText
         $scan.IndexOf('if ($Channel)') | Should -BeLessThan $scan.IndexOf('} elseif ($AllChannels)')
         $scan | Should -Match 'if \(\$AllChannels -and \$DiagnosticChannels\)'
         $scan | Should -Match 'Choose only one broad channel mode'
@@ -2656,8 +2677,7 @@ Describe 'SetupDiag Panther integration' {
     }
 
     It 'publishes status without duplicating raw SetupDiag records' {
-        $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Invoke-LogVerdictScan.ps1'
-        $text = Get-Content -LiteralPath $path -Raw
+        $text = Get-LVScanSourceText
         $text | Should -Match 'if \(\$property\.Name -ne ''Records''\)'
         $text | Should -Match 'SetupDiag\s+= \$setupDiagStatus'
         $text | Should -Match 'CoverageNote'
@@ -2815,7 +2835,7 @@ Describe 'Crash artifact header decoding' {
     }
 
     It 'reports an absent crash source as skipped rather than as health' {
-        $scan = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Invoke-LogVerdictScan.ps1') -Raw
+        $scan = Get-LVScanSourceText
         $scan | Should -Match 'source was absent or empty, not a clean-health signal'
         $scan | Should -Match 'were not checked'
     }
@@ -5237,9 +5257,9 @@ Describe 'GUI markup' {
             }
             $script:LVGuiSortKey.Keys | Should -Not -Contain 'WHERE FROM'
             $xaml | Should -Not -Match 'Width="0"'
-            $gui = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1') -Raw
-            $gui | Should -Not -Match '\$ui\.(TxtLog|BtnToggleLog|RowLog|TxtLastLine)'
         }
+        $gui = Get-LVGuiSourceText
+        $gui | Should -Not -Match '\$ui\.(TxtLog|BtnToggleLog|RowLog|TxtLastLine)'
     }
 
     It 'keeps unsafe references as inert GUI text and guards navigation' {
@@ -5255,7 +5275,7 @@ Describe 'GUI markup' {
             @($buckets.Blocked).Count | Should -Be 4
             $buckets.Blocked -join ' ' | Should -Match 'javascript:alert(1)|file:///C:/Windows/hosts|\\server\\share\\rule.html|ms-settings:privacy'
         }
-        $gui = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1') -Raw
+        $gui = Get-LVGuiSourceText
         $gui | Should -Match 'Get-LVAllowedUriProblem'
         $gui | Should -Match 'Start-Process -FilePath \$uri'
     }
@@ -5445,8 +5465,7 @@ Describe 'GUI settings persistence' {
     }
 
     It 'lets an explicit look-back override persisted state and saves restore bounds on close' {
-        $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Show-LogVerdictGui.ps1'
-        $text = Get-Content -LiteralPath $path -Raw
+        $text = Get-LVGuiSourceText
         $text | Should -Match "PSBoundParameters\.ContainsKey\('DaysBack'\)"
         $text | Should -Match 'Get-LVGuiSetting'
         $text | Should -Match 'Save-LVGuiSetting'
@@ -5471,8 +5490,7 @@ Describe 'GUI and console feature parity' {
     }
 
     It 'wires every deterministic live scan choice into the engine arguments' {
-        $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Show-LogVerdictGui.ps1'
-        $text = Get-Content -LiteralPath $path -Raw
+        $text = Get-LVGuiSourceText
         foreach ($argument in @('Channel', 'AllChannels', 'DiagnosticChannels', 'SkipTextLogs',
                 'SkipReliability', 'IncludeBenign', 'IncludeLowConfidence', 'DatabasePath', 'SuppressionPath')) {
             $text | Should -Match ("scanArgs\['{0}'\]|{0}\s*=" -f $argument) -Because "$argument must reach Invoke-LogVerdictScan"
@@ -5480,8 +5498,7 @@ Describe 'GUI and console feature parity' {
     }
 
     It 'wires report destination, redaction, and evidence choices into export' {
-        $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Show-LogVerdictGui.ps1'
-        $text = Get-Content -LiteralPath $path -Raw
+        $text = Get-LVGuiSourceText
         $text | Should -Match "exportArgs\['OutputDir'\]"
         $text | Should -Match 'Redact\s*=\s*\[bool\]\$ui\.ChkOverviewRedact\.IsChecked'
         $text | Should -Match 'IncludeEvidence\s*=\s*\[bool\]\$ui\.ChkOverviewEvidence\.IsChecked'
@@ -5512,6 +5529,28 @@ Describe 'GUI and console feature parity' {
 }
 
 Describe 'GUI pure presentation logic' {
+    It 'builds a headless render projection without WPF controls' {
+        InModuleScope LogVerdict {
+            $finding = [pscustomobject]@{
+                Key='event|System|7'; Source='event'; Channel='System'; Provider='Test'; Id=7
+                Count=2; PerDay=1; LastSeen=(Get-Date); UndatedCount=0; SampleMessage='x'
+                Verdict='investigate'; Title='T'; RuleId='LV-1'
+            }
+            $projection = Get-LVGuiRenderProjection -Result ([pscustomobject]@{
+                Findings = @($finding)
+                Correlations = @([pscustomobject]@{ Id='C-1'; InvolvedKeys=@('event|System|7') })
+            })
+
+            @($projection.FindingStore).Count | Should -Be 1
+            @($projection.Rows).Count | Should -Be 1
+            $projection.Rows[0].FindingIndex | Should -Be 0
+            @($projection.Rows[0].CorrelationIds) | Should -BeExactly @('C-1')
+            $projection.VerdictCounts.investigate | Should -Be 1
+            @($projection.VerdictCounts.Keys).Count | Should -Be 6
+            @($projection.CorrelationIdsByKey['event|System|7']) | Should -BeExactly @('C-1')
+        }
+    }
+
     It 'builds a redacted clipboard payload without retaining machine or account identifiers' {
         InModuleScope LogVerdict {
             $finding = [pscustomobject]@{
@@ -5535,7 +5574,7 @@ Describe 'GUI pure presentation logic' {
     }
 
     It 'routes the clipboard handler through the redaction toggle and states the copied mode' {
-        $gui = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1') -Raw
+        $gui = Get-LVGuiSourceText
         $gui | Should -Match 'ConvertTo-LVGuiClipboardText'
         $gui | Should -Match 'Redact:\(\[bool\]\$ui\.ChkOverviewRedact\.IsChecked\)'
         $gui | Should -Match '\$clipboard\.Status'
@@ -5576,7 +5615,7 @@ Describe 'GUI pure presentation logic' {
 
     It 'keeps cancellation visible, timed, and explicit about partial coverage' {
         $root = Split-Path $PSScriptRoot -Parent
-        $gui = Get-Content -LiteralPath (Join-Path $root 'Public/Show-LogVerdictGui.ps1') -Raw
+        $gui = Get-LVGuiSourceText
         $xaml = Get-Content -LiteralPath (Join-Path $root 'Private/50-LVGuiXaml.ps1') -Raw
         $hostFile = Get-Content -LiteralPath (Join-Path $root 'Private/51-LVGuiHost.ps1') -Raw
 
@@ -5710,17 +5749,20 @@ Describe 'GUI pure presentation logic' {
     }
 
     It 'keeps the public window file as wiring over the pure helpers' {
-        $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Show-LogVerdictGui.ps1'
-        $text = Get-Content -LiteralPath $path -Raw
-        $text | Should -Match 'Test-LVGuiFindingVisible'
-        $text | Should -Match 'Get-LVGuiVerdictCount'
-        $text | Should -Match 'ConvertTo-LVGuiDetail'
-        $text | Should -Not -Match '\$state\.Chips\[\$Item\.Verdict\]'
+        $public = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Show-LogVerdictGui.ps1') -Raw
+        $helpers = Get-LVGuiSourceText
+        $public | Should -Match 'New-LVGuiSession'
+        $public | Should -Match 'New-LVGuiActions'
+        $public | Should -Match 'Register-LVGui'
+        $helpers | Should -Match 'Test-LVGuiFindingVisible'
+        $helpers | Should -Match 'Get-LVGuiVerdictCount'
+        $helpers | Should -Match 'ConvertTo-LVGuiDetail'
+        $public | Should -Not -Match '\$state\.Chips\[\$Item\.Verdict\]'
     }
 
     It 'passes optional advisory settings through the GUI wiring' {
         $root = Split-Path $PSScriptRoot -Parent
-        $gui = Get-Content -LiteralPath (Join-Path $root 'Public/Show-LogVerdictGui.ps1') -Raw
+        $gui = Get-LVGuiSourceText
         $entry = Get-Content -LiteralPath (Join-Path $root 'LogVerdict-GUI.ps1') -Raw
         $gui | Should -Match '\[string\]\$AdvisoryPath'
         $gui | Should -Match "scanArgs\['AdvisoryPackage'\]"
@@ -5730,8 +5772,7 @@ Describe 'GUI pure presentation logic' {
     }
 
     It 'keeps an advisory-enabled headless render refreshing its filter and finding count' {
-        $root = Split-Path $PSScriptRoot -Parent
-        $gui = Get-Content -LiteralPath (Join-Path $root 'Public/Show-LogVerdictGui.ps1') -Raw
+        $gui = Get-LVGuiSourceText
         $gui | Should -Match '\$advisoryState\s*=\s*if\s*\(\$advisory\.Matched\)'
         $gui | Should -Not -Match '\$state\s*=\s*if\s*\(\$advisory\.Matched\)'
 
@@ -5896,7 +5937,7 @@ Describe 'Operator-state-safe tooling' {
 
     It 'requires an explicit caller-owned screenshot directory instead of an environment hook' {
         $root = Split-Path $PSScriptRoot -Parent
-        $gui = Get-Content -LiteralPath (Join-Path $root 'Public/Show-LogVerdictGui.ps1') -Raw
+        $gui = Get-LVGuiSourceText
         $entry = Get-Content -LiteralPath (Join-Path $root 'LogVerdict-GUI.ps1') -Raw
         $gui | Should -Not -Match 'LOGVERDICT_GUI_SCREENSHOT_PATH'
         $gui | Should -Match 'ScreenshotDirectory'
@@ -5907,8 +5948,7 @@ Describe 'Operator-state-safe tooling' {
     }
 
     It 'bounds the GUI activity buffer and filters it literally' {
-        $root = Split-Path $PSScriptRoot -Parent
-        $gui = Get-Content -LiteralPath (Join-Path $root 'Public/Show-LogVerdictGui.ps1') -Raw
+        $gui = Get-LVGuiSourceText
         $gui | Should -Match '\$activityMaxLines\s*=\s*\$script:LVMaxGuiActivityLines'
         $gui | Should -Match '\$activityMaxCharacters\s*=\s*524288'
         $gui | Should -Match 'ActivityCharacters'
@@ -6093,15 +6133,15 @@ Describe 'GUI row projection' {
 
 Describe 'GUI list binding safety' {
     It 'keeps the findings list virtualized and resolves detail by index' {
-        InModuleScope LogVerdict {
+        $guiText = Get-LVGuiSourceText
+        InModuleScope LogVerdict -Parameters @{ GuiText = $guiText } {
+            param($GuiText)
             $xaml = Get-LVGuiXaml
             $xaml | Should -Match 'VirtualizingPanel\.IsVirtualizing="True"'
             $xaml | Should -Match 'VirtualizingPanel\.VirtualizationMode="Recycling"'
-            $gui = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1'
-            $text = Get-Content -LiteralPath $gui -Raw
-            $text | Should -Match 'FindingStore'
-            $text | Should -Match 'FindingIndex'
-            $text | Should -Not -Match '\$Row\.Finding\b'
+            $GuiText | Should -Match 'FindingStore'
+            $GuiText | Should -Match 'FindingIndex'
+            $GuiText | Should -Not -Match '\$Row\.Finding\b'
         }
     }
 
@@ -6109,8 +6149,7 @@ Describe 'GUI list binding safety' {
         # A string is IEnumerable. Assigning one directly to ItemsSource binds to its
         # characters, and a rule caveat renders one letter per line - which is exactly
         # what happened until it was caught on screen. Every assignment must cast.
-        $gui = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1'
-        $assignments = [regex]::Matches((Get-Content -LiteralPath $gui -Raw), '(?m)\.ItemsSource\s*=\s*(.+)$')
+        $assignments = [regex]::Matches((Get-LVGuiSourceText), '(?m)\.ItemsSource\s*=\s*(.+)$')
         @($assignments).Count | Should -BeGreaterThan 0
         foreach ($a in $assignments) {
             $rhs = $a.Groups[1].Value.Trim()
@@ -6572,7 +6611,7 @@ Describe 'GUI colour contrast' {
     }
 
     It 'subscribes to High Contrast changes and unsubscribes when the window closes' {
-        $gui = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1') -Raw
+        $gui = Get-LVGuiSourceText
         $gui | Should -Match 'SystemParameters\]::add_StaticPropertyChanged'
         $gui | Should -Match 'SystemParameters\]::remove_StaticPropertyChanged'
         $gui | Should -Match "PropertyName -ne 'HighContrast'"
@@ -6620,7 +6659,7 @@ Describe 'GUI coverage surfacing' {
     It 'surfaces correlations in the window, not only in the console report' {
         # The window silently dropping something the console shows is how the same scan
         # ends up telling you different things depending on how you ran it.
-        $gui = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1') -Raw
+        $gui = Get-LVGuiSourceText
         $gui | Should -Match 'Format-LVCorrelation'
         $gui | Should -Match 'LstCorrelationPage'
         $xaml = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Private\50-LVGuiXaml.ps1') -Raw

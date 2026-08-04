@@ -223,7 +223,10 @@ $databaseUsage = 'Update-LogVerdictDatabase -ReleaseTag v{0}' -f $version
 if ($readme -notmatch [regex]::Escape($databaseUsage)) {
     throw ("README usage examples do not reference the current release tag v{0}." -f $version)
 }
-$guiHost = Get-Content -LiteralPath (Join-Path $repoRoot 'Public/Show-LogVerdictGui.ps1') -Raw -Encoding UTF8
+$guiHost = @(
+    Get-Content -LiteralPath (Join-Path $repoRoot 'Public/Show-LogVerdictGui.ps1') -Raw -Encoding UTF8
+    Get-Content -LiteralPath (Join-Path $repoRoot 'Private/54-LVGuiEvents.ps1') -Raw -Encoding UTF8
+) -join [Environment]::NewLine
 $expectedGuiBinding = "`$ui.TxtVersion.Text = 'v{0}' -f `$script:LVVersion"
 if ($guiHost -notmatch [regex]::Escape($expectedGuiBinding)) {
     throw 'GUI version text is not bound to the shared VERSION source.'

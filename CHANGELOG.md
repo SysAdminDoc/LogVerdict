@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [0.8.2] - 2026-08-02
 
+- Split the live scan pipeline and WPF GUI into independently testable collection, resolution, rendering, action, and event layers while keeping the public commands as thin entry points.
 - Migrated the Pester suite and CI/GUI runners to Pester 6.0.1 on Windows PowerShell 5.1 and PowerShell 7.6 LTS, including configuration-driven NUnit output and the current mock assertion syntax.
 - Made provider-template imports accept the UTF-8 BOM emitted by Windows PowerShell 5.1 file exports.
 - Added a CycloneDX 1.7 SBOM beside each SPDX document and marked the accompanying SLSA-shaped provenance as self-asserted and unsigned; offline verification now checks both SBOM formats and the published SHA-256 values.

@@ -16,11 +16,7 @@
 # laptops, 760 becomes 950 real pixels against a work area of roughly 1032. Anything
 # above about 800 here pushes the status bar behind the taskbar on a 1080p machine.
 
-function Get-LVGuiXaml {
-    [CmdletBinding()]
-    param()
-
-    $xaml = @'
+$script:LVGuiXamlMarkup = @'
 <Window
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -1398,5 +1394,10 @@ function Get-LVGuiXaml {
   </Grid>
 </Window>
 '@
-    return ConvertTo-LVLocalizedXaml -Xaml $xaml
+
+function Get-LVGuiXaml {
+    [CmdletBinding()]
+    param()
+
+    return ConvertTo-LVLocalizedXaml -Xaml $script:LVGuiXamlMarkup
 }
