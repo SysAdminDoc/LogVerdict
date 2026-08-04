@@ -530,6 +530,44 @@ param([hashtable]$Context)
         Test-LogVerdictProvider -Path $script:ProviderRoot -Quiet | Should -BeTrue
     }
 
+    It 'keeps an explicitly UTC provider record in the local basis used by event correlation' {
+        InModuleScope LogVerdict {
+            $localWallClock = [datetime]::SpecifyKind([datetime]'2026-08-02T12:00:00', [DateTimeKind]::Unspecified)
+            $localOffset = [TimeZoneInfo]::Local.GetUtcOffset($localWallClock)
+            $providerInstant = ([datetimeoffset]::new($localWallClock, $localOffset)).ToUniversalTime().ToString(
+                'yyyy-MM-ddTHH:mm:ss.fffffffZ', [Globalization.CultureInfo]::InvariantCulture)
+            $provider = [pscustomobject]@{ Id = 'time.provider'; Version = '1.0.0'; Trust = 'untrusted'; ProjectionFields = @() }
+            $payload = [pscustomobject]@{
+                records = @([pscustomobject]@{
+                    id = 900; channel = 'vendor'; message = 'provider event'; timeCreated = $providerInstant; level = 2
+                })
+            }
+            $normalized = ConvertTo-LVProviderResult -Provider $provider -Payload $payload `
+                -CollectionBudget (New-LVCollectionBudget -MaxBytes 1MB -MaxRecords 10 -MaxSeconds 60)
+            $normalized.Records[0].TimeCreated | Should -Be $localWallClock
+
+            $eventRecord = [pscustomobject]@{
+                Source = 'event'; Channel = 'System'; Provider = 'fixture-event'; Id = 901
+                Level = 2; LevelName = 'Error'; TimeCreated = $localWallClock; MachineName = 'FIXTURE'; RecordId = 1
+                Message = 'event at the same instant'
+            }
+            $reduction = Get-LVSignatureReduction -Record @($eventRecord, $normalized.Records[0]) -WindowDays 1
+            $eventSignature = @($reduction.Signatures | Where-Object Provider -eq 'fixture-event')[0]
+            $providerSignature = @($reduction.Signatures | Where-Object Provider -eq 'extension:time.provider')[0]
+            $findings = @(
+                [pscustomobject]@{ RuleId = 'EVENT-TIME'; Key = $eventSignature.Key; Title = 'event'; Times = @($eventSignature.Times) }
+                [pscustomobject]@{ RuleId = 'PROVIDER-TIME'; Key = $providerSignature.Key; Title = 'provider'; Times = @($providerSignature.Times) }
+            )
+            $database = [pscustomobject]@{ correlations = @([pscustomobject]@{
+                id = 'LVC-TIME'; status = 'stable'
+                correlation = [pscustomobject]@{ type = 'temporal'; rules = @('EVENT-TIME', 'PROVIDER-TIME'); timespan = '1m' }
+                verdict = 'investigate'; title = 'same instant'; plain = 'same instant'; why = 'same instant'
+                action = 'inspect'; confidence = 'high'
+            }) }
+            @(Resolve-LVCorrelation -Finding $findings -Database $database) | Should -HaveCount 1
+        }
+    }
+
     It 'requires explicit approval and normalizes redacted evidence without curated verdict fields' {
         { Invoke-LogVerdictProvider -Provider $script:ProviderRoot -Context @{ CollectionBudget = (InModuleScope LogVerdict { New-LVCollectionBudget -MaxBytes 1MB -MaxRecords 10 -MaxSeconds 60 }) } } |
             Should -Throw '*AllowUntrustedProvider*'
@@ -582,6 +620,51 @@ param([hashtable]$Context)
         (Get-Content -LiteralPath (Join-Path $reportDir 'LogVerdict-Report.html') -Raw) | Should -Match 'test\.provider'
         $standard = Export-LogVerdictStandard -Result $scan -Format Ocsf
         $standard.Document.scan.providerProjections[0].ProviderId | Should -BeExactly 'test.provider'
+    }
+
+    It 'normalizes provider timestamps before correlation and preserves source locale' {
+        InModuleScope LogVerdict {
+            $provider = [pscustomobject]@{
+                Id = 'time.provider'; Version = '1.0.0'; Trust = 'untrusted'; ProjectionFields = @()
+            }
+            $payload = [pscustomobject]@{
+                records = @([pscustomobject]@{
+                    id = 4242; channel = 'vendor-channel'; message = 'provider event'
+                    timeCreated = '2026-08-02T12:00:00Z'; level = 2; providerLocale = 'de-DE'
+                })
+                coverage = @()
+            }
+            $budget = New-LVCollectionBudget -MaxBytes 1MB -MaxRecords 10 -MaxSeconds 60
+            $normalized = ConvertTo-LVProviderResult -Provider $provider -Payload $payload -CollectionBudget $budget
+            $providerTime = $normalized.Records[0].TimeCreated
+            $expectedTime = [datetime]::MinValue
+            [datetime]::TryParse(
+                '2026-08-02T12:00:00Z',
+                [Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::RoundtripKind,
+                [ref]$expectedTime) | Should -BeTrue
+            $expectedLocalTime = $expectedTime.ToLocalTime()
+            $providerTime.Kind | Should -Be ([DateTimeKind]::Local)
+            $providerTime | Should -Be $expectedLocalTime
+            $normalized.Records[0].ProviderLocale | Should -BeExactly 'de-DE'
+
+            $findings = @(
+                [pscustomobject]@{ RuleId = 'TIME-P'; Key = 'provider'; Title = 'provider'; Times = @($providerTime) }
+                [pscustomobject]@{ RuleId = 'TIME-E'; Key = 'event'; Title = 'event'; Times = @($expectedLocalTime) }
+            )
+            $database = [pscustomobject]@{
+                rules = @(
+                    [pscustomobject]@{ id = 'TIME-P'; status = 'stable'; verified = '2026-08-01' }
+                    [pscustomobject]@{ id = 'TIME-E'; status = 'stable'; verified = '2026-08-01' }
+                )
+                correlations = @([pscustomobject]@{
+                    id = 'TIME-C'; status = 'stable'; verified = '2026-08-01'; provenance = 'internal-observation'
+                    correlation = [pscustomobject]@{ type = 'temporal'; rules = @('TIME-P', 'TIME-E'); timespan = '1m' }
+                    verdict = 'actionable'; title = 'same instant'; plain = 'same instant'; why = 'test'; action = 'test'; confidence = 'high'
+                })
+            }
+            @(Resolve-LVCorrelation -Finding $findings -Database $database).Count | Should -Be 1
+        }
     }
 
     It 'rejects a changed entrypoint or fixture before it can run' {
@@ -3405,6 +3488,11 @@ Describe 'Verdict resolution' {
                 (Resolve-LVVerdict -Signature @($sig) -Database $db)[0].RuleId | Should -Be 'LOC-1'
 
                 $script:LVUICulture = 'de-DE'
+                (Resolve-LVVerdict -Signature @($sig) -Database $db)[0].Verdict | Should -Be 'unknown'
+
+                $sig | Add-Member -NotePropertyName ProviderLocale -NotePropertyValue 'en-US' -Force
+                (Resolve-LVVerdict -Signature @($sig) -Database $db)[0].RuleId | Should -Be 'LOC-1'
+                $sig.ProviderLocale = 'de-DE'
                 (Resolve-LVVerdict -Signature @($sig) -Database $db)[0].Verdict | Should -Be 'unknown'
             } finally {
                 $script:LVUICulture = $original

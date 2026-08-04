@@ -144,9 +144,9 @@ $script:LVShortHashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
 $script:LVVerificationMaxAgeMonths = 24
 $script:LVDefaultStaleAfterDays = 180
 
-# The machine's UI language, captured once. Rules whose messagePattern is matched
-# against localized event text declare the locale they were written for, and are
-# skipped when it does not match rather than silently failing to fire.
+# The reviewing machine's UI language is only the fallback for legacy signatures
+# that carry no source/provider locale. New event and offline records preserve the
+# locale of the machine that rendered their provider message.
 $script:LVUICulture = (Get-UICulture).Name
 
 $script:LVLogLines = New-Object System.Collections.Generic.List[string]

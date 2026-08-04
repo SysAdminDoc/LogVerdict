@@ -202,7 +202,19 @@ function ConvertTo-LVProviderResult {
         $rawTime = Get-LVProviderProperty -InputObject $raw -Name 'timeCreated'
         if ($rawTime) {
             $parsedTime = [datetime]::MinValue
-            if ([datetime]::TryParse([string]$rawTime, [ref]$parsedTime)) { $time = $parsedTime.ToUniversalTime() }
+            if ([datetime]::TryParse(
+                    [string]$rawTime,
+                    [Globalization.CultureInfo]::InvariantCulture,
+                    [Globalization.DateTimeStyles]::RoundtripKind,
+                    [ref]$parsedTime)) {
+                # Event-log, text-log, and Reliability timestamps are local wall-clock
+                # values internally. RoundtripKind preserves an explicitly zoned value;
+                # only UTC needs projecting into that shared local basis. An unspecified
+                # value is already a local wall-clock value and must not be shifted.
+                $time = if ($parsedTime.Kind -eq [DateTimeKind]::Utc) {
+                    $parsedTime.ToLocalTime()
+                } else { $parsedTime }
+            }
         }
         $structured = Get-LVProviderProperty -InputObject $raw -Name 'structuredData'
         if ($structured) { $structured = ConvertTo-LVProviderStructuredData -StructuredData (ConvertTo-LVStructuredDataObject -InputObject $structured) -MachineName $env:COMPUTERNAME }

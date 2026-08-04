@@ -674,7 +674,7 @@ function Test-LVRuleMatch {
         # that produces them, so they need no such guard.
         if (Test-LVLocaleSensitiveMatch -Rule $Rule) {
             $assumed = $Rule.locale
-            if ($assumed -and -not (Test-LVLocaleMatch -Assumed $assumed)) { return $false }
+            if ($assumed -and -not (Test-LVLocaleMatch -Assumed $assumed -Signature $Signature)) { return $false }
         }
 
         $haystack = $Signature.SampleMessage
@@ -712,16 +712,30 @@ function Test-LVLocaleSensitiveMatch {
 function Test-LVLocaleMatch {
     <#
         .SYNOPSIS
-        Whether the machine's UI language matches what a rule assumes.
+        Whether the source/provider language matches what a rule assumes.
 
         .DESCRIPTION
         Compared on the language part only: a rule written against 'en-US' message text
-        matches an 'en-GB' machine, because the provider's English resources are the
-        same strings.
+        matches an 'en-GB' source, because the provider's English resources are the
+        same strings. Offline signatures carry the source ProviderLocale; only a legacy
+        signature with no locale falls back to the reviewing host's UI culture.
     #>
-    param([Parameter(Mandatory)][string]$Assumed)
+    param(
+        [Parameter(Mandatory)][string]$Assumed,
+        [AllowNull()]$Signature
+    )
 
-    $current = $script:LVUICulture
+    # Offline evidence carries the source machine's provider locale. Prefer it over
+    # the reviewer's UI culture so localized rules are evaluated in the language that
+    # produced the message, not the language of the analyst's workstation.
+    $current = if ($Signature) { [string](Get-LVErrorContextField -InputObject $Signature -Name 'ProviderLocale') } else { $null }
+    if (-not $current -and $Signature) {
+        foreach ($name in @('Locale', 'Culture', 'Language')) {
+            $current = [string](Get-LVErrorContextField -InputObject $Signature -Name $name)
+            if ($current) { break }
+        }
+    }
+    if (-not $current) { $current = $script:LVUICulture }
     if (-not $current) { return $true }
     $a = ($Assumed -split '-')[0]
     $c = ($current -split '-')[0]
