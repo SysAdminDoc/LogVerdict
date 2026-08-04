@@ -95,6 +95,13 @@ function ConvertTo-LVImportEventId {
 function Read-LVImportDocument {
     param([Parameter(Mandatory)][string]$Text)
 
+    # Windows PowerShell 5.1's ConvertFrom-Json does not accept a UTF-8 BOM
+    # when the input has already been decoded to a .NET string. File exports
+    # written by Set-Content -Encoding UTF8 carry that BOM, so remove only the
+    # leading marker before trying JSON or NDJSON parsing.
+    if ($Text.Length -gt 0 -and $Text[0] -eq [char]0xFEFF) {
+        $Text = $Text.Substring(1)
+    }
     try {
         return [pscustomobject]@{
             Document = ($Text | ConvertFrom-Json -ErrorAction Stop)
