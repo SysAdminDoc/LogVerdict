@@ -29,6 +29,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added versioned GUI/report localization resources with de-DE and ja-JP coverage, deterministic English fallback, packaged-resource embedding, and locale-aware text, HTML, and CSV presentation labels.
 - Extended content-free performance budgets with per-fixture parser-time ceilings, so EVTX parser regressions fail independently of end-to-end timing.
 - Cut reduction overhead by reusing compiled template matchers, a module-scoped SHA-256 provider, hash-set error-context buckets, and the populated all-channel metadata during probes; the aggregate performance gate now includes a 2,359-record reduction budget on both supported runtimes.
+- Added `LogVerdict-Ticket-Summary.md` and the Findings-page **Copy summary for ticket** action. Both share one bounded Markdown projection with worst verdict, suppression count, actionable findings, coverage caveats, version metadata, and the redaction toggle.
 
 - Added a user-visible GUI settings reset that atomically restores safe scan defaults,
   resets the window size and transient source/report fields, and reports persistence failures;

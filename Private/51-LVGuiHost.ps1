@@ -393,7 +393,7 @@ $script:LVGuiElement = @(
     'TxtDetailMeta', 'TxtPlain', 'TxtWhy', 'TxtAction',
     'PnlFalsePositives', 'LstFalsePositives', 'PnlRefs', 'LstRefs', 'LstUnsafeRefs',
     'TxtSample', 'TxtProvenance',
-    'BtnCopy', 'BtnSaveReport', 'BtnOpenReport',
+    'BtnCopy', 'BtnCopySummary', 'BtnSaveReport', 'BtnOpenReport',
     'RowLog', 'BtnToggleLog', 'TxtLastLine', 'TxtLog',
     'PbScan', 'TxtStatus', 'TxtFooter'
 )

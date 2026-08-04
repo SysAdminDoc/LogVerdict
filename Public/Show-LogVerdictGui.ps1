@@ -324,6 +324,11 @@ function Show-LogVerdictGui {
         $ui.BtnActivityRunAgain.IsEnabled = -not $On
         $ui.PbScan.Visibility = $(if ($On) { 'Visible' } else { 'Collapsed' })
         $ui.PbScan.IsIndeterminate = $On
+        if ($On) {
+            $ui.BtnCopySummary.IsEnabled = $false
+        } elseif ($state.Result) {
+            $ui.BtnCopySummary.IsEnabled = $true
+        }
         foreach ($n in @('TxtDays', 'ChkAllChannels', 'ChkSkipText', 'ChkIncludeBenign', 'BtnElevate')) {
             $ui[$n].IsEnabled = -not $On
         }
@@ -349,6 +354,7 @@ function Show-LogVerdictGui {
 
         $state.Result = $Result
         $state.FindingStore = @($Result.Findings)
+        $ui.BtnCopySummary.IsEnabled = $true
         $correlationIdsByKey = @{}
         foreach ($correlation in @($Result.Correlations | Where-Object { $_ })) {
             $correlationId = [string]$correlation.Id
@@ -620,6 +626,7 @@ function Show-LogVerdictGui {
     $ui.ChkOverviewIncludeBenign.IsChecked = $initialIncludeBenign
     $ui.BtnFindingsSave.IsEnabled = $false
     $ui.BtnFindingsOpen.IsEnabled = $false
+    $ui.BtnCopySummary.IsEnabled = $false
     $ui.BtnActivitySave.IsEnabled = $false
     $ui.BtnActivityOpen.IsEnabled = $false
 
@@ -921,6 +928,7 @@ function Show-LogVerdictGui {
         $ui.BtnSaveReport.IsEnabled = $false
         $ui.BtnFindingsOpen.IsEnabled = $false
         $ui.BtnFindingsSave.IsEnabled = $false
+        $ui.BtnCopySummary.IsEnabled = $false
         $ui.BtnActivityOpen.IsEnabled = $false
         $ui.BtnActivitySave.IsEnabled = $false
         $ui.TxtActivityReportState.Text = 'Not saved yet'
@@ -1038,6 +1046,19 @@ function Show-LogVerdictGui {
                 -MachineName $state.Result.MachineName -UserName $env:USERNAME
             [System.Windows.Clipboard]::SetText($clipboard.Text)
             & $setStatus $clipboard.Status
+        } catch {
+            & $setStatus ('Could not reach the clipboard: {0}' -f $_.Exception.Message)
+        }
+    })
+
+    $ui.BtnCopySummary.Add_Click({
+        if ($null -eq $state.Result) { return }
+        try {
+            $summary = ConvertTo-LVTicketSummary -Result $state.Result `
+                -Redact:([bool]$ui.ChkOverviewRedact.IsChecked) `
+                -MachineName $state.Result.MachineName -UserName $env:USERNAME
+            [System.Windows.Clipboard]::SetText($summary)
+            & $setStatus 'Ticket summary copied to the clipboard.'
         } catch {
             & $setStatus ('Could not reach the clipboard: {0}' -f $_.Exception.Message)
         }

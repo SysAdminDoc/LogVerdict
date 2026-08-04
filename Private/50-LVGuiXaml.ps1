@@ -1291,6 +1291,8 @@ function Get-LVGuiXaml {
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
               <Button x:Name="BtnCopy" Style="{StaticResource BaseButton}" Content="Copy finding"
                       Padding="11,6" IsEnabled="False"/>
+              <Button x:Name="BtnCopySummary" Style="{StaticResource BaseButton}" Margin="8,0,0,0"
+                      Content="Copy summary for ticket" Padding="11,6" IsEnabled="False"/>
               <Button x:Name="BtnSaveReport" Style="{StaticResource BaseButton}" Margin="8,0,0,0"
                       Content="Save report" Padding="11,6" IsEnabled="False"/>
               <Button x:Name="BtnOpenReport" Style="{StaticResource BaseButton}" Margin="8,0,0,0"

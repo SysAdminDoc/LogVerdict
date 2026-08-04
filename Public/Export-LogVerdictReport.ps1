@@ -11,8 +11,10 @@ function Export-LogVerdictReport {
         even when the script is right-click-elevated and starts in System32.
 
         .PARAMETER Format
-        Any of Text, Json, Csv, Html, or All. Default All. Csv writes one scalar row per
-        finding with a stable pipeline-friendly column contract.
+        Any of Text, Json, Csv, Html, Markdown, or All. Markdown writes a bounded,
+        prose-first ticket summary with the findings needing attention and coverage
+        caveats. Default All. Csv writes one scalar row per finding with a stable
+        pipeline-friendly column contract.
 
         .PARAMETER Redact
         Mask the account name, machine name, profile paths, SIDs and mail addresses out
@@ -44,7 +46,7 @@ function Export-LogVerdictReport {
     param(
         [Parameter(Mandatory, ValueFromPipeline)]$Result,
         [string]$OutputDir,
-        [ValidateSet('Text', 'Json', 'Csv', 'Html', 'All')][string[]]$Format = @('All'),
+        [ValidateSet('Text', 'Json', 'Csv', 'Html', 'Markdown', 'All')][string[]]$Format = @('All'),
         [switch]$Redact,
         [switch]$IncludeEvidence,
         [switch]$AllowRawEvidence
@@ -107,6 +109,12 @@ function Export-LogVerdictReport {
         if ($wantAll -or $Format -contains 'Html') {
             $p = Join-Path $OutputDir 'LogVerdict-Report.html'
             Write-LVTextFile -Path $p -Content (ConvertTo-LVHtmlReport -Result $Result)
+            $written.Add($p) | Out-Null
+        }
+
+        if ($wantAll -or $Format -contains 'Markdown') {
+            $p = Join-Path $OutputDir 'LogVerdict-Ticket-Summary.md'
+            Write-LVTextFile -Path $p -Content (ConvertTo-LVTicketSummary -Result $Result)
             $written.Add($p) | Out-Null
         }
 

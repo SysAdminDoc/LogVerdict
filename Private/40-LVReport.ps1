@@ -59,6 +59,139 @@ function Format-LVWhen {
     return ('{0:yyyy-MM-dd HH:mm}' -f $When)
 }
 
+function ConvertTo-LVTicketSummary {
+    <#
+        .SYNOPSIS
+        Render the bounded, prose-first Markdown handoff an MSP can paste into a ticket.
+
+        .DESCRIPTION
+        This deliberately projects the scan rather than copying the full report. It
+        leads with the worst curated verdict, keeps only findings that need attention,
+        explains how many repeated records were suppressed, and carries the coverage
+        caveats that keep a partial scan from sounding clean. The GUI uses this same
+        function for its clipboard action, so the pasted text cannot drift from the
+        file written by Export-LogVerdictReport.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Result,
+        [switch]$Redact,
+        [AllowNull()][string]$MachineName,
+        [AllowNull()][string]$UserName
+    )
+
+    $resolved = Resolve-LVScanInput -InputObject $Result -Role 'result'
+    $resolved = ConvertFrom-LVReportContract -InputObject $resolved
+    $builder = New-Object System.Text.StringBuilder
+
+    $clean = {
+        param([AllowNull()]$Value, [int]$Limit = 2000)
+        if ($null -eq $Value) { return '' }
+        $text = ([string]$Value) -replace '[\r\n]+', ' '
+        $text = $text.Trim()
+        if ($text.Length -gt $Limit) { return $text.Substring(0, $Limit - 3) + '...' }
+        return $text
+    }
+    $add = {
+        param([AllowEmptyString()][string]$Line = '')
+        [void]$builder.AppendLine($Line)
+    }
+
+    $version = if ($resolved.Version) { [string]$resolved.Version } else { [string]$script:LVVersion }
+    $databaseName = if ($resolved.DatabaseName) { [string]$resolved.DatabaseName } else { 'bundled database' }
+    $databaseDate = if ($resolved.DatabaseDate) { [string]$resolved.DatabaseDate } else { 'unknown' }
+    $worst = if ($resolved.WorstVerdict) { [string]$resolved.WorstVerdict } else { 'unknown' }
+    $findings = @($resolved.Findings | Where-Object {
+        $_ -and (Get-LVVerdictRank -Verdict ([string]$_.Verdict)) -ge (Get-LVVerdictRank -Verdict 'unknown')
+    } | Sort-Object @{ Expression = { Get-LVVerdictRank -Verdict ([string]$_.Verdict) }; Descending = $true },
+        @{ Expression = { [int64]$_.Count }; Descending = $true }, Title)
+    $reduction = $resolved.Reduction
+    $recordCount = if ($reduction) { [int64]$reduction.RecordCount } else { 0 }
+    $signatureCount = if ($reduction) { [int64]$reduction.SignatureCount } else { 0 }
+    $suppressed = [Math]::Max(0, $recordCount - $signatureCount)
+    $ratio = if ($reduction -and $null -ne $reduction.Ratio) { [string]$reduction.Ratio } else { 'n/a' }
+
+    & $add '# LogVerdict ticket summary'
+    & $add ''
+    & $add ('- **Worst verdict:** **{0}**' -f (& $clean $worst).ToUpperInvariant())
+    & $add ('- **Machine:** {0}' -f (& $clean $resolved.MachineName))
+    & $add ('- **Scanned:** {0} (last {1} day(s))' -f (& $clean $resolved.ScanTime), (& $clean $resolved.DaysBack))
+    & $add ('- **Tool:** LogVerdict {0}' -f (& $clean $version))
+    & $add ('- **Rule database:** {0}, updated {1}' -f (& $clean $databaseName), (& $clean $databaseDate))
+    & $add ('- **Suppressed repeats:** {0:N0} record(s) reduced to {1:N0} signature(s) ({2}:1)' -f $suppressed, $signatureCount, (& $clean $ratio))
+    & $add ('- **Findings needing attention:** {0}' -f $findings.Count)
+    & $add ''
+
+    & $add '## Findings needing attention'
+    if ($findings.Count -eq 0) {
+        & $add '- None. The scan produced no unknown, investigate, actionable, or critical findings.'
+    } else {
+        $index = 0
+        foreach ($finding in $findings) {
+            $index++
+            $verdict = (& $clean $finding.Verdict).ToUpperInvariant()
+            $action = if ($finding.Action) { & $clean $finding.Action } else { 'Review the full finding details.' }
+            & $add ('{0}. **{1} - {2}**' -f $index, $verdict, (& $clean $finding.Title))
+            & $add ('   - **Action:** {0}' -f $action)
+            & $add ('   - **Occurrences:** {0:N0} ({1}/day); last seen {2}' -f [int64]$finding.Count, (& $clean $finding.PerDay), (& $clean (Format-LVWhen $finding.LastSeen)))
+            & $add ('   - **Signature:** `{0}`' -f (& $clean $finding.Key))
+        }
+    }
+    & $add ''
+
+    $caveats = New-Object 'System.Collections.Generic.List[string]'
+    $seenCaveats = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($note in @($resolved.CoverageNotes | Where-Object { $_ })) {
+        $text = & $clean $note
+        if ($text -and $seenCaveats.Add($text)) { $caveats.Add($text) | Out-Null }
+    }
+    if ($resolved.HorizonWarning) {
+        $text = & $clean $resolved.HorizonWarning
+        if ($text -and $seenCaveats.Add($text)) { $caveats.Add($text) | Out-Null }
+    }
+    foreach ($source in @($resolved.Coverage | Where-Object { $_ -and $_.Status -notin @('readable', 'empty') })) {
+        $text = '{0}/{1} is {2}{3}' -f (& $clean $source.Source), (& $clean $source.Name), (& $clean $source.Status),
+            $(if ($source.Reason) { ': ' + (& $clean $source.Reason) } else { '' })
+        if ($seenCaveats.Add($text)) { $caveats.Add($text) | Out-Null }
+    }
+    foreach ($health in @($resolved.HealthProfiles | Where-Object { $_ -and $_.Status -notin @('available', 'healthy', 'readable') })) {
+        $text = 'Health profile {0} is {1}{2}' -f (& $clean $health.Name), (& $clean $health.Status),
+            $(if ($health.Advice) { ': ' + (& $clean $health.Advice) } elseif ($health.Reason) { ': ' + (& $clean $health.Reason) } else { '' })
+        if ($seenCaveats.Add($text)) { $caveats.Add($text) | Out-Null }
+    }
+
+    & $add '## Coverage caveats'
+    if ($caveats.Count -eq 0) {
+        & $add '- No coverage caveats were reported.'
+    } else {
+        foreach ($caveat in $caveats) { & $add ('- {0}' -f $caveat) }
+    }
+    & $add ''
+    & $add '> This is a ticket summary. Attach the full LogVerdict report when raw evidence or complete source detail is needed.'
+
+    $text = $builder.ToString().TrimEnd()
+    if ($Redact) {
+        $machine = if ($MachineName) { $MachineName } else { [string]$resolved.MachineName }
+        $user = if ($UserName) { $UserName } else { [string]$env:USERNAME }
+        $text = ConvertTo-LVRedactedText -Text $text -MachineName $machine -UserName $user
+    }
+
+    # Keep clipboard and attachment payloads comfortably below service-desk limits,
+    # even if a corrupted result contains thousands of unusually long findings.
+    $maxBytes = 24MB
+    $textBytes = [System.Text.Encoding]::UTF8.GetByteCount($text)
+    if ($textBytes -gt $maxBytes) {
+        $suffix = [Environment]::NewLine + [Environment]::NewLine + '> Summary truncated to remain below 24 MiB.'
+        $targetBytes = $maxBytes - [System.Text.Encoding]::UTF8.GetByteCount($suffix)
+        $targetChars = [Math]::Min($text.Length, [Math]::Max(0, [int]($text.Length * ($targetBytes / [double]$textBytes))))
+        while ($targetChars -gt 0 -and [System.Text.Encoding]::UTF8.GetByteCount($text.Substring(0, $targetChars)) -gt $targetBytes) {
+            $targetChars = [Math]::Max(0, $targetChars - 4096)
+        }
+        $text = $text.Substring(0, $targetChars).TrimEnd() + $suffix
+    }
+    return $text
+}
+
 function Write-LVConsoleReport {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Result)

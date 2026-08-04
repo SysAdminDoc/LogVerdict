@@ -110,6 +110,25 @@ Describe 'Case profiles and responder handoffs' {
         $standard.Document.scan.caseProfile.profileId | Should -BeExactly $profile.profileId
     }
 
+    It 'writes a bounded Markdown ticket summary with the same projection used by the GUI' {
+        $dir = Join-Path $TestDrive 'ticket-summary'
+        $export = Export-LogVerdictReport -Result $script:CaseResult -OutputDir $dir -Format Markdown 6>$null
+        $path = Join-Path $dir 'LogVerdict-Ticket-Summary.md'
+        $export.Files | Should -Contain $path
+        $summary = Get-Content -LiteralPath $path -Raw
+        $summary | Should -Match '# LogVerdict ticket summary'
+        $summary | Should -Match '\*\*Worst verdict:\*\* \*\*INVESTIGATE\*\*'
+        $summary | Should -Match 'Suppressed repeats.*0 record\(s\) reduced to 1 signature'
+        $summary | Should -Match '\*\*Action:\*\*\s+Review the full finding details\.'
+
+        InModuleScope LogVerdict -Parameters @{ InputResult = $script:CaseResult } {
+            param($InputResult)
+            $guiText = ConvertTo-LVTicketSummary -Result $InputResult
+            $fileText = Get-Content -LiteralPath (Join-Path $TestDrive 'ticket-summary\LogVerdict-Ticket-Summary.md') -Raw
+            $guiText | Should -BeExactly $fileText.TrimEnd()
+        }
+    }
+
     It 'round-trips a written JSON report through every result consumer and standard format' {
         $writtenDir = Join-Path $TestDrive 'roundtrip-written'
         Export-LogVerdictReport -Result $script:CaseResult -OutputDir $writtenDir -Format Json 6>$null | Out-Null
@@ -3967,8 +3986,30 @@ Describe 'GUI pure presentation logic' {
         $gui | Should -Match 'ConvertTo-LVGuiClipboardText'
         $gui | Should -Match 'Redact:\(\[bool\]\$ui\.ChkOverviewRedact\.IsChecked\)'
         $gui | Should -Match '\$clipboard\.Status'
+        $gui | Should -Match 'ConvertTo-LVTicketSummary'
+        $gui | Should -Match 'BtnCopySummary'
         $xaml = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Private\50-LVGuiXaml.ps1') -Raw
         $xaml | Should -Match 'Redact reports and clipboard'
+        $xaml | Should -Match 'Copy summary for ticket'
+    }
+
+    It 'redacts the shared ticket summary without retaining identifiers' {
+        InModuleScope LogVerdict {
+            $result = [pscustomobject]@{
+                Tool='LogVerdict'; Version='0.8.2'; MachineName='HOST-9'; ScanTime=(Get-Date)
+                DaysBack=30; WorstVerdict='actionable'; DatabaseName='test'; DatabaseDate='2026-08-03'
+                Reduction=[pscustomobject]@{ RecordCount=10; SignatureCount=2; Ratio=5 }
+                Findings=@([pscustomobject]@{
+                    Verdict='actionable'; Title='HOST-9 failure'; Action='Check C:\Users\jsmith\event.log'
+                    Count=4; PerDay=1; LastSeen=(Get-Date); Key='event|System|7'
+                }); CoverageNotes=@('Access to HOST-9 was partial'); Coverage=@(); HealthProfiles=@()
+                HorizonWarning=$null
+            }
+            $summary = ConvertTo-LVTicketSummary -Result $result -Redact -MachineName 'HOST-9' -UserName 'jsmith'
+            $summary | Should -Not -Match 'HOST-9|jsmith|C:\\Users\\jsmith'
+            $summary | Should -Match '<MACHINE>|<USER>'
+            $summary.Length | Should -BeLessThan 25000000
+        }
     }
 
     It 'filters by enabled verdict and literal case-insensitive text' {

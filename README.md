@@ -121,7 +121,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Opt-in diagnostic performance telemetry | Content-free source status, bounded counts, caps, and elapsed timing in JSON, text, HTML, CSV, and standard exports | `-PerformanceTelemetry` |
 | Content-free performance budgets | Temporary small, large, malformed-text, malformed-EVTX, and 2,359-record reduction fixtures; aggregate counts/status/timing only, checked on Windows PowerShell 5.1 and PowerShell 7.6 LTS | `Tools/Test-LogVerdictPerformance.ps1` |
 | Shared collection safety budgets | One byte, normalized-record, and elapsed-time allowance across live/offline collectors; incomplete sources remain `truncated` or `timeout` | `-MaxCollectionBytes`, `-MaxCollectionRecords`, `-MaxCollectionSeconds` |
-| Output format selection | The window always saves Text, JSON, CSV, and HTML together | `-Format` (`Text`, `Json`, `Csv`, `Html`, or `All`) |
+| Output format selection | The window always saves Text, JSON, CSV, HTML, and the Markdown ticket summary together | `-Format` (`Text`, `Json`, `Csv`, `Html`, `Markdown`, or `All`) |
 | Console lifecycle | Not applicable to a persistent window | `-NoReport`, `-Pause`, `-NoPause` |
 
 Named `-Channel` values take precedence over `-AllChannels` and `-DiagnosticChannels` when
@@ -144,6 +144,7 @@ LogVerdict.exe -SkipReliability                 skip Reliability Monitor
 LogVerdict.exe -IncludeEvidence -Redact          audit and zip a shareable evidence bundle
 LogVerdict.exe -IncludeEvidence -AllowRawEvidence  explicitly authorize a forensic raw bundle
 LogVerdict.exe -Format Csv                      write one flat row per finding for a pipeline
+LogVerdict.exe -Format Markdown                write a bounded summary ready to paste into a ticket
 LogVerdict.exe -ExplainUnknown                  draft explanations for unknowns with local Ollama
 LogVerdict.exe -PromoteToRule                   save safe candidates as inactive local rule drafts
 LogVerdict.exe -HistoryPath C:\Temp\lv-history.json  save bounded local trend history
@@ -153,6 +154,8 @@ LogVerdict.exe -AdvisoryPackage PowerShell -AdvisoryVersion 7.4.0  match the shi
 `-IncludeEvidence` writes a zip beside the report holding the reports, the matching text-log lines and, only with the explicit `-AllowRawEvidence` override, the scanned event channels as `.evtx`. Raw bundles are forensic artifacts and are never described as sanitized. `-Redact` runs a deterministic audit over the staged text, records hashed findings and substitution counts in `PRIVACY-AUDIT.json`, and refuses to create the zip if a known secret, SID, account/path identifier, or script-block marker remains. Combined with `-Redact` the channel exports are deliberately left out - `.evtx` is binary and carries the identifiers redaction removes from the text, and the manifest says so, so a withheld channel is never mistaken for a clean one.
 
 `-Redact` masks the account name, machine name, profile paths, SIDs and mail addresses out of the captured log messages before they are written. When combined with `-ExplainUnknown` or `-PromoteToRule`, the scan also masks the prompt-specific finding copy before it crosses the loopback Ollama boundary; the retained in-memory finding remains raw until report export. Use it when the report is going to a ticket or a vendor - the default report keeps everything, because locally that is the evidence. The GUI's **Redact reports and clipboard** toggle applies the same masking to copied findings, and its status line states whether the copied payload is redacted. The reports say when they were redacted, and say that an identifier Windows wrote in a form this tool does not recognize may still be in there: read before sending.
+
+`-Format Markdown` writes `LogVerdict-Ticket-Summary.md`, a bounded paste-ready handoff that leads with the worst verdict, the records-to-signatures suppression count, findings needing attention and their one-line actions, the tool/rule-database versions, and coverage caveats. The Findings page has **Copy summary for ticket**, which uses the same projection; its redaction state follows the **Redact reports and clipboard** toggle. The summary contains no raw evidence and stays below 24 MiB even when fed an unusually large result object.
 
 `-HistoryPath` opts into a local JSON history containing at most 30 recent scan summaries. It stores stable signature keys, counts, rates, verdict labels, and rule ids, not messages, paths, machine names, or account identifiers. `-HistoryWindowDays` bounds which prior scans are compared (default 30). Reports state the baseline method, comparison window, thresholds, missing-history state, and false-positive caveat. A trend signal is advisory only: it cannot raise a finding's verdict, `WorstVerdict`, or exit code.
 
