@@ -126,7 +126,7 @@ Describe 'Case profiles and responder handoffs' {
         Show-LogVerdictReport -Result $reloaded 6>$null
         @(Compare-LogVerdictScan -Before $reloaded -After $reloaded) | Should -BeNullOrEmpty
 
-        foreach ($format in @('Ecs', 'Ocsf', 'OpenTelemetry', 'Stix', 'Jsonl')) {
+        foreach ($format in @('Ecs', 'Ocsf', 'Sarif', 'OpenTelemetry', 'Stix', 'Jsonl')) {
             $standard = @(Export-LogVerdictStandard -Result $reloaded -Format $format)
             $standard.Count | Should -BeGreaterThan 0 -Because "$format must accept a reloaded report"
         }
@@ -3207,13 +3207,18 @@ Describe 'Report rendering' {
                 ObservedRecords=0; SkippedRecords=0; RecordGap=$null; ParserError=$null; SizeBytes=$null
                 ParseMilliseconds=4; SHA256=$null; Origin='live'
             })
-            $formats = @('Ecs', 'Ocsf', 'OpenTelemetry', 'Stix')
+            $formats = @('Ecs', 'Ocsf', 'Sarif', 'OpenTelemetry', 'Stix')
             foreach ($format in $formats) {
                 $export = Export-LogVerdictStandard -Result $result -Format $format
                 $json = $export.Document | ConvertTo-Json -Depth 30
                 $roundTrip = $json | ConvertFrom-Json
-                $roundTrip.schemaVersion | Should -BeExactly '1.0.0'
-                $roundTrip.adapter | Should -Not -BeNullOrEmpty
+                if ($format -eq 'Sarif') {
+                    $roundTrip.version | Should -BeExactly '2.1.0'
+                    @($roundTrip.runs).Count | Should -Be 1
+                } else {
+                    $roundTrip.schemaVersion | Should -BeExactly '1.0.0'
+                    $roundTrip.adapter | Should -Not -BeNullOrEmpty
+                }
                 $json | Should -Match 'Acme'
                 $json | Should -Match 'high'
                 $json | Should -Match 'coverage'
@@ -3258,6 +3263,55 @@ Describe 'Report rendering' {
         }
     }
 
+    It 'exports SARIF rules, verdict levels, fingerprints, and source locations' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $cbs = [pscustomobject]@{
+                Key='CBS/test'; Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0; Count=2
+                FirstSeen=(Get-Date '2026-07-30 10:00:00'); LastSeen=(Get-Date '2026-07-30 10:01:00')
+                Verdict='actionable'; Title='CBS failure'; Plain='CBS failure text'; Why='why'; Action='action'
+                RuleId='LV-0001'; Confidence='high'; RecordId=17; Samples=@('CBS failure'); Reference=$null; References=@()
+            }
+            $dism = [pscustomobject]@{
+                Key='DISM/test'; Source='textlog'; Channel='DISM'; Provider='DISM'; Id=0; Count=1
+                FirstSeen=(Get-Date '2026-07-30 11:00:00'); LastSeen=(Get-Date '2026-07-30 11:00:00')
+                Verdict='investigate'; Title='DISM failure'; Plain='DISM failure text'; Why='why'; Action='action'
+                RuleId='LV-0002'; Confidence='medium'; RecordId=23; Samples=@('DISM failure'); Reference=$null; References=@()
+            }
+            $result.Findings = @($r.Findings + $cbs + $dism)
+            $sarif = (Export-LogVerdictStandard -Result $result -Format Sarif).Document
+            $sarif.'$schema' | Should -Match 'sarif-schema-2\.1\.0\.json$'
+            $sarif.version | Should -BeExactly '2.1.0'
+            $run = $sarif.runs[0]
+            $run.tool.driver.name | Should -BeExactly 'LogVerdict'
+            $database = Get-LogVerdictDatabase
+            $activeRules = @($database.rules | Where-Object { Test-LVRuleActive -Rule $_ })
+            @($run.tool.driver.rules).Count | Should -Be $activeRules.Count
+            @($run.tool.driver.rules.id) | Should -Contain 'LV-0001'
+            @($run.results).Count | Should -Be 3
+
+            $eventResult = @($run.results | Where-Object { $_.properties.'logverdict.channel' -eq 'System' })[0]
+            $eventResult.level | Should -BeExactly 'error'
+            $eventResult.partialFingerprints.'logverdict.signature' | Should -BeExactly 'Acme/99'
+            $eventResult.locations[0].logicalLocations[0].fullyQualifiedName | Should -Match 'event/System/Acme/99'
+
+            $cbsResult = @($run.results | Where-Object { $_.properties.'logverdict.channel' -eq 'CBS' })[0]
+            $cbsResult.locations[0].physicalLocation.artifactLocation.uri | Should -BeExactly 'file:///C:/Windows/Logs/CBS/CBS.log'
+            $cbsResult.locations[0].physicalLocation.region.startLine | Should -Be 17
+            $cbsResult.locations[0].physicalLocation.region.endLine | Should -Be 17
+
+            $dismResult = @($run.results | Where-Object { $_.properties.'logverdict.channel' -eq 'DISM' })[0]
+            $dismResult.level | Should -BeExactly 'warning'
+            $dismResult.locations[0].physicalLocation.artifactLocation.uri | Should -BeExactly 'file:///C:/Windows/Logs/DISM/dism.log'
+            $dismResult.locations[0].physicalLocation.region.startLine | Should -Be 23
+            $json = $sarif | ConvertTo-Json -Depth 30
+            $roundTrip = $json | ConvertFrom-Json
+            $roundTrip.runs[0].tool.driver.rules[0].id | Should -Not -BeNullOrEmpty
+            $roundTrip.runs[0].results[0].partialFingerprints.'logverdict.signature' | Should -Not -BeNullOrEmpty
+        }
+    }
+
     It 'keeps every machine-readable standard timestamp in RFC3339 UTC form' {
         $result = $script:FakeResult | Select-Object *
         $result | Add-Member -NotePropertyName Coverage -NotePropertyValue @([pscustomobject]@{
@@ -3266,8 +3320,8 @@ Describe 'Report rendering' {
             Cap=20; ObservedRecords=0; SkippedRecords=0; RecordGap=$null; ParserError=$null
             SizeBytes=$null; ParseMilliseconds=4; SHA256=$null; Origin='live'
         })
-        $timestampPattern = '(?im)"(?:generatedAt|scanTime|scanTimes|firstObserved|lastObserved|windowStart|windowEnd|oldestRecord|timestampUtc|endTimestampUtc)"\s*:\s*"([^"]+)"'
-        foreach ($format in @('Ecs', 'Ocsf', 'OpenTelemetry', 'Stix')) {
+        $timestampPattern = '(?im)"(?:generatedAt|scanTime|scanTimes|firstObserved|lastObserved|windowStart|windowEnd|oldestRecord|timestampUtc|endTimestampUtc|startTimeUtc|endTimeUtc|firstDetectionTimeUtc|lastDetectionTimeUtc)"\s*:\s*"([^"]+)"'
+        foreach ($format in @('Ecs', 'Ocsf', 'Sarif', 'OpenTelemetry', 'Stix')) {
             $document = (Export-LogVerdictStandard -Result $result -Format $format).Document
             $json = $document | ConvertTo-Json -Depth 30
             $json | Should -Not -Match '(?i)/Date\('

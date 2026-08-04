@@ -605,6 +605,192 @@ function ConvertTo-LVEcsExport {
     }
 }
 
+function ConvertTo-LVSarifLevel {
+    param([AllowNull()][string]$Verdict)
+
+    $normalized = if ($Verdict) { $Verdict.ToLowerInvariant() } else { '' }
+    switch ($normalized) {
+        'critical'      { return 'error' }
+        'actionable'    { return 'error' }
+        'investigate'   { return 'warning' }
+        'unknown'       { return 'warning' }
+        'informational' { return 'note' }
+        'benign'        { return 'none' }
+        default         { return 'warning' }
+    }
+}
+
+function New-LVSarifMessage {
+    param([AllowNull()][string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    return [pscustomobject][ordered]@{ text = $Text }
+}
+
+function ConvertTo-LVSarifRuleDescriptor {
+    param([Parameter(Mandatory)]$Rule)
+
+    $descriptor = [ordered]@{ id = [string]$Rule.id }
+    $shortDescription = New-LVSarifMessage -Text ([string]$Rule.title)
+    $fullDescription = New-LVSarifMessage -Text ([string]$Rule.plain)
+    $help = New-LVSarifMessage -Text ([string]$Rule.action)
+    if ($shortDescription) { $descriptor.shortDescription = $shortDescription }
+    if ($fullDescription) { $descriptor.fullDescription = $fullDescription }
+    if ($help) { $descriptor.help = $help }
+
+    $properties = [ordered]@{}
+    if ($Rule.verdict) { $properties['logverdict.verdict'] = [string]$Rule.verdict }
+    if ($Rule.confidence) { $properties['logverdict.confidence'] = [string]$Rule.confidence }
+    $properties['logverdict.status'] = if ($Rule.status) { [string]$Rule.status } else { 'active' }
+    if ($Rule.verified) { $properties['logverdict.verified'] = [string]$Rule.verified }
+    $references = New-Object System.Collections.Generic.List[string]
+    foreach ($reference in @($Rule.references) + @($Rule.reference)) {
+        if ($reference -and -not $references.Contains([string]$reference)) { $references.Add([string]$reference) | Out-Null }
+    }
+    $properties['logverdict.references'] = @($references.ToArray())
+    $descriptor.properties = [pscustomobject]$properties
+    $descriptor.defaultConfiguration = [pscustomobject][ordered]@{
+        enabled = $true
+        level = ConvertTo-LVSarifLevel -Verdict ([string]$Rule.verdict)
+    }
+    return [pscustomobject]$descriptor
+}
+
+function ConvertTo-LVSarifLocation {
+    param([Parameter(Mandatory)]$Finding)
+
+    $source = [string]$Finding.event.source
+    $channel = [string]$Finding.event.channel
+    if ($source -eq 'textlog' -and $channel -in @('CBS', 'DISM')) {
+        $lineNumber = 1
+        $parsedLineNumber = 0
+        if ([int]::TryParse([string]$Finding.event.recordId, [ref]$parsedLineNumber) -and $parsedLineNumber -gt 0) {
+            $lineNumber = $parsedLineNumber
+        }
+        $path = if ($channel -eq 'CBS') { 'file:///C:/Windows/Logs/CBS/CBS.log' } else { 'file:///C:/Windows/Logs/DISM/dism.log' }
+        return [pscustomobject][ordered]@{
+            physicalLocation = [pscustomobject][ordered]@{
+                artifactLocation = [pscustomobject][ordered]@{ uri = $path }
+                region = [pscustomobject][ordered]@{ startLine = $lineNumber; endLine = $lineNumber }
+            }
+        }
+    }
+
+    $parts = @($source, $channel, [string]$Finding.event.provider, [string]$Finding.event.eventId) | Where-Object { $_ }
+    $name = ($parts -join '/')
+    if (-not $name) { $name = [string]$Finding.key }
+    return [pscustomobject][ordered]@{
+        logicalLocations = @([pscustomobject][ordered]@{
+            name = $name
+            fullyQualifiedName = $name
+            kind = 'resource'
+        })
+    }
+}
+
+function ConvertTo-LVSarifResult {
+    param(
+        [Parameter(Mandatory)]$Finding,
+        [Parameter(Mandatory)]$Context,
+        [int]$Index
+    )
+
+    $verdict = [string]$Finding.verdict
+    $kind = if ($verdict -eq 'benign') { 'pass' } elseif ($verdict -eq 'informational') { 'informational' } else { 'fail' }
+    $key = [string]$Finding.key
+    if (-not $key) { $key = 'finding-{0}' -f $Index }
+    $messageText = [string]$Finding.plain
+    if (-not $messageText) { $messageText = [string]$Finding.title }
+    if (-not $messageText) { $messageText = $key }
+    if (-not $messageText) { $messageText = 'LogVerdict finding.' }
+
+    $result = [ordered]@{
+        kind = $kind
+        level = ConvertTo-LVSarifLevel -Verdict $verdict
+        message = [pscustomobject][ordered]@{ text = $messageText }
+        locations = @((ConvertTo-LVSarifLocation -Finding $Finding))
+        partialFingerprints = [pscustomobject][ordered]@{ 'logverdict.signature' = $key }
+    }
+    if ($Finding.ruleId) { $result.ruleId = [string]$Finding.ruleId }
+
+    $count = [int]$Finding.event.count
+    if ($count -gt 0) { $result.occurrenceCount = $count }
+    $provenance = [ordered]@{}
+    if ($Finding.event.firstObserved) { $provenance.firstDetectionTimeUtc = [string]$Finding.event.firstObserved }
+    if ($Finding.event.lastObserved) { $provenance.lastDetectionTimeUtc = [string]$Finding.event.lastObserved }
+    if ($provenance.Count -gt 0) { $result.provenance = [pscustomobject]$provenance }
+
+    $properties = [ordered]@{
+        'logverdict.verdict' = $verdict
+        'logverdict.signature' = $key
+        'logverdict.source' = [string]$Finding.event.source
+        'logverdict.channel' = [string]$Finding.event.channel
+        'logverdict.provider' = [string]$Finding.event.provider
+        'logverdict.eventId' = [string]$Finding.event.eventId
+        'logverdict.confidence' = [string]$Finding.confidence
+        'logverdict.redacted' = [bool]$Context.privacy.redacted
+        'logverdict.references' = @($Finding.references)
+    }
+    if ($Finding.ruleId) { $properties['logverdict.ruleId'] = [string]$Finding.ruleId }
+    if ($Finding.action) { $properties['logverdict.action'] = [string]$Finding.action }
+    $result.properties = [pscustomobject]$properties
+    return [pscustomobject]$result
+}
+
+function ConvertTo-LVSarifExport {
+    param([Parameter(Mandatory)]$Model)
+
+    $database = Get-LogVerdictDatabase
+    $ruleDescriptors = foreach ($rule in @($database.rules | Where-Object { Test-LVRuleActive -Rule $_ })) {
+        ConvertTo-LVSarifRuleDescriptor -Rule $rule
+    }
+    $results = New-Object System.Collections.Generic.List[object]
+    $index = 0
+    foreach ($finding in @($Model.Findings)) {
+        $results.Add((ConvertTo-LVSarifResult -Finding $finding -Context $Model.Context -Index $index)) | Out-Null
+        $index++
+    }
+
+    $runProperties = [ordered]@{
+        'logverdict.adapter' = 'sarif'
+        'logverdict.schemaVersion' = $Model.Context.schemaVersion
+        'logverdict.tool' = [string]$Model.Context.scan.tool
+        'logverdict.scan' = $Model.Context.scan
+        'logverdict.privacy' = $Model.Context.privacy
+        'logverdict.coverage' = @($Model.Context.coverage)
+        'logverdict.healthProfiles' = @($Model.Context.healthProfiles)
+        'logverdict.advisories' = @($Model.Advisories)
+        'logverdict.correlations' = @($Model.Correlations)
+    }
+    $invocation = [ordered]@{ executionSuccessful = $true }
+    if ($Model.Context.scan.started) { $invocation.startTimeUtc = [string]$Model.Context.scan.started }
+    if ($Model.Context.scan.completed) { $invocation.endTimeUtc = [string]$Model.Context.scan.completed }
+    if ($null -ne $Model.Context.scan.exitCode) { $invocation.exitCode = [int]$Model.Context.scan.exitCode }
+
+    $driver = [pscustomobject][ordered]@{
+        name = 'LogVerdict'
+        version = [string]$Model.Context.scan.version
+        informationUri = 'https://github.com/SysAdminDoc/LogVerdict'
+        rules = @($ruleDescriptors)
+    }
+    $run = [pscustomobject][ordered]@{
+        tool = [pscustomobject][ordered]@{ driver = $driver }
+        language = 'en-US'
+        invocations = @([pscustomobject]$invocation)
+        results = @($results.ToArray())
+        properties = [pscustomobject]$runProperties
+    }
+    return [pscustomobject][ordered]@{
+        '$schema' = 'https://docs.oasis-open.org/sarif/sarif/v2.1.0/cs01/schemas/sarif-schema-2.1.0.json'
+        version = '2.1.0'
+        runs = @($run)
+        properties = [pscustomobject][ordered]@{
+            'logverdict.adapter' = 'sarif'
+            'logverdict.schemaVersion' = $Model.Context.schemaVersion
+        }
+    }
+}
+
 function ConvertTo-LVOcsfExport {
     param([Parameter(Mandatory)]$Model)
 
@@ -737,6 +923,7 @@ function ConvertTo-LVStandardDocument {
     $model = Get-LVStandardModel -Result $Result
     switch ($Format) {
         'Ecs' { return ConvertTo-LVEcsExport -Model $model }
+        'Sarif' { return ConvertTo-LVSarifExport -Model $model }
         'Ocsf' { return ConvertTo-LVOcsfExport -Model $model }
         'OpenTelemetry' { return ConvertTo-LVOtelExport -Model $model }
         'Stix' { return ConvertTo-LVStixExport -Model $model }

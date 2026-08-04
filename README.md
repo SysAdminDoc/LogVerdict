@@ -323,6 +323,9 @@ $r | Export-LogVerdictReport -OutputDir C:\Temp\lv
 # Versioned machine-interchange JSON for ECS, OCSF evidence, OpenTelemetry Logs, or STIX 2.1
 Export-LogVerdictStandard -Result $r -Format Ocsf -Path C:\Temp\lv\finding.ocsf.json -Redact
 
+# SARIF 2.1.0 for GitHub code scanning and SARIF viewers
+Export-LogVerdictStandard -Result $r -Format Sarif -Path C:\Temp\lv\finding.sarif.json -Redact
+
 # Bounded JSONL timeline: one compact record per line, streamed to an atomic file
 Export-LogVerdictStandard -Result $r -Format Jsonl -Path C:\Temp\lv\timeline.jsonl -Redact
 
@@ -331,7 +334,8 @@ Show-LogVerdictGui -DaysBack 7 -AutoScan
 ```
 
 `Export-LogVerdictStandard` uses one adapter contract across `Ecs`, `Ocsf`,
-`OpenTelemetry`, and `Stix`. Each JSON document declares `schemaVersion: 1.0.0`,
+`Sarif`, `OpenTelemetry`, and `Stix`. Each non-SARIF JSON document declares
+`schemaVersion: 1.0.0`,
 preserves finding confidence, rule references, source/channel/provider/EventID fields,
 timestamps, normalized coverage, configuration-health profiles, and explicit
 `privacy.redacted`/`privacy.rawEvidenceIncluded` state. `-Redact` applies the same
@@ -345,6 +349,13 @@ the complete normalized finding under `unmapped.logverdict.finding`. The adapter
 advisories and correlations are likewise under `unmapped.logverdict`; use the vendor
 extension as the source of verdicts and rules rather than treating the record as a native
 OCSF detection event.
+
+`-Format Sarif` emits a native SARIF 2.1.0 document. `tool.driver.rules[]` contains
+every active rule from the loaded verdict database; findings map to SARIF `results[]`
+with `level`, `message`, `occurrenceCount`, and `partialFingerprints` keyed by the
+LogVerdict signature. Event findings use `logicalLocations`; CBS and DISM findings use
+the corresponding log file with a matched-line `region`. Scan coverage, privacy,
+health, advisory, and correlation context remains available in SARIF property bags.
 
 `-Format Jsonl` uses the same versioned privacy and provenance envelope but writes a
 streaming timeline instead of an adapter document. It includes metadata, normalized event
