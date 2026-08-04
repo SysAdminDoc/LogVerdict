@@ -4571,6 +4571,27 @@ Describe 'Rule provenance' {
         }
     }
 
+    It 'reuses the populated channel metadata during the status probe' {
+        InModuleScope LogVerdict {
+            $metadataLog = [pscustomobject]@{
+                LogName = 'Fake'
+                RecordCount = 2
+                MaximumSizeInBytes = 1024
+                LogMode = 'Circular'
+                IsEnabled = $true
+                LogFilePath = 'C:\\Windows\\System32\\winevt\\Logs\\Fake.evtx'
+            }
+            Mock Get-WinEvent { $metadataLog } -ParameterFilter { $ListLog -eq '*' }
+            Mock Get-WinEvent { [pscustomobject]@{ TimeCreated = (Get-Date).AddDays(-1) } } -ParameterFilter { $LogName -eq 'Fake' }
+
+            Get-LVPopulatedChannel -MinimumRecords 1 | Out-Null
+            $status = Get-LVChannelStatus -Channel @('Fake') -Metadata $script:LVChannelMetadata
+            $status['Fake'].Access | Should -BeExactly 'readable'
+            $status['Fake'].RecordCount | Should -Be 2
+            Assert-MockCalled Get-WinEvent -Times 0 -ParameterFilter { $ListLog -eq 'Fake' }
+        }
+    }
+
     It 'does not invent a phantom source for a rule that has none' {
         # @($null) is a one-element array holding null, so an unfiltered wrap reported
         # every sourceless rule as having a source with no uri.
@@ -4955,12 +4976,13 @@ Describe 'Content-free performance benchmark gate' {
         $json = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
         $json.SchemaVersion | Should -Be 1
         $json.Passed | Should -BeTrue
-        @($json.Fixtures).Count | Should -Be 4
+        @($json.Fixtures).Count | Should -Be 5
         @($json.Fixtures | Where-Object { $_.Id -eq 'text-small' -and $_.Status -eq 'readable' }).Count | Should -Be 1
         @($json.Fixtures | Where-Object { $_.Id -eq 'text-large' -and $_.ObservedRecords -ge 10000 }).Count | Should -Be 1
         @($json.Fixtures | Where-Object { $_.Id -eq 'text-malformed' -and $_.UndatedRecords -eq 128 }).Count | Should -Be 1
         @($json.Fixtures | Where-Object { $_.Id -eq 'evtx-malformed' -and $_.Status -eq 'unreadable' }).Count | Should -Be 1
         @($json.Fixtures | Where-Object { $_.Id -eq 'evtx-malformed' -and $_.ParserMilliseconds -le 5000 }).Count | Should -Be 1
+        @($json.Fixtures | Where-Object { $_.Id -eq 'reduction-medium' -and $_.Status -eq 'reduced' -and $_.ObservedRecords -eq 12000 -and $_.InputLines -gt 0 }).Count | Should -Be 1
         $raw = Get-Content -LiteralPath $report -Raw
         $raw | Should -Not -Match 'Message|SampleMessage|MachineName|Path|C:\\|secret'
         $output -join "`n" | Should -Match 'Performance gate: passed'
