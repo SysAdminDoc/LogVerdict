@@ -1,11 +1,11 @@
 {
     "schemaVersion":  1,
     "artifact":  "LogVerdict-GUI.exe",
-    "artifactVersion":  "0.8.2",
+    "artifactVersion":  "0.8.3",
     "theme":  "Normal",
     "screenshot":  "screenshot-gui.png",
-    "screenshotSha256":  "11ab8f110cf7581eba97db413a998e3397553836bec2d159c5eca8dda4015ec5",
+    "screenshotSha256":  "4651712544fe0cbcf5c056efb3fbd02399bb7a840f69dcf3fe1679c646a502fb",
     "width":  1440,
     "height":  800,
-    "generatedAt":  "2026-08-04T08:47:19.7404970Z"
+    "generatedAt":  "2026-08-04T15:40:34.0324632Z"
 }

@@ -15,10 +15,10 @@ For offline tests, -AssetDirectory supplies already-downloaded release assets;
 GitHub release.
 
 .EXAMPLE
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\New-PackageManifests.ps1 -Version 0.8.2
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\New-PackageManifests.ps1 -Version 0.8.3
 
 .EXAMPLE
-.\Tools\New-PackageManifests.ps1 -Version 0.8.2 -AssetDirectory .\dist -ReleaseDate 2026-08-02
+.\Tools\New-PackageManifests.ps1 -Version 0.8.3 -AssetDirectory .\dist -ReleaseDate 2026-08-03
 #>
 
 [CmdletBinding()]

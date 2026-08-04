@@ -80,7 +80,7 @@ BeforeAll {
             }
         )
         return [pscustomobject][ordered]@{
-            Tool='LogVerdict'; Version='0.8.2'; MachineName=$MachineName; Offline=$false; Redacted=$false
+            Tool='LogVerdict'; Version='0.8.3'; MachineName=$MachineName; Offline=$false; Redacted=$false
             ScanTime=$eventTime; Duration=[timespan]::FromSeconds(1); DaysBack=2; Elevated=$false
             Channels=@(); ChannelStatus=@{}; DeniedChannels=@(); TruncatedChannels=@(); MetadataUnreadableCount=0
             ChannelEnumerationStatus='not-requested'; ChannelEnumerationFailed=$false; ChannelEnumerationFailures=@()

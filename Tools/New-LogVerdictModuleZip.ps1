@@ -11,7 +11,7 @@ only files out of the distribution while making the archive tree identical to
 the files PowerShell installs for the module. The archive is unsigned by design.
 
 .EXAMPLE
-.\Tools\New-LogVerdictModuleZip.ps1 -OutputPath .\dist\LogVerdict-Module-v0.8.2.zip
+.\Tools\New-LogVerdictModuleZip.ps1 -OutputPath .\dist\LogVerdict-Module-v0.8.3.zip
 #>
 [CmdletBinding()]
 param(

@@ -1,6 +1,6 @@
 # LogVerdict
 
-![Version](https://img.shields.io/badge/version-0.8.2-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207.6%2B-5391FE)
+![Version](https://img.shields.io/badge/version-0.8.3-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207.6%2B-5391FE)
 
 Scan a Windows PC's logs, collapse them into the handful of distinct things that actually happened, and rule on each one in plain English: **what it means, why it matters, and what to do about it.**
 
@@ -307,7 +307,7 @@ launch never contacts the network.
 ```powershell
 Import-Module .\LogVerdict.psd1
 Update-LogVerdictDatabase                 # latest stable release
-Update-LogVerdictDatabase -ReleaseTag v0.8.2
+Update-LogVerdictDatabase -ReleaseTag v0.8.3
 Update-LogVerdictDatabase -Rollback       # restore the previous local copy
 ```
 
@@ -317,7 +317,7 @@ Build them yourself:
 Install-Module ps2exe -RequiredVersion 1.0.18 -Scope CurrentUser
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Build-LogVerdictExe.ps1
 # -> dist\LogVerdict.exe  and  dist\LogVerdict-GUI.exe
-# -> dist\LogVerdict-Module-v0.8.2.zip
+# -> dist\LogVerdict-Module-v0.8.3.zip
 # -Target Console or -Target Gui builds just one
 ```
 
@@ -332,14 +332,14 @@ Generate package metadata
 from local assets without contacting GitHub with:
 
 ```powershell
-.\Tools\New-PackageManifests.ps1 -AssetDirectory .\dist -ReleaseDate 2026-08-02
+.\Tools\New-PackageManifests.ps1 -AssetDirectory .\dist -ReleaseDate 2026-08-03
 .\Tools\Test-LogVerdictRelease.ps1 -AssetDirectory .\dist
 ```
 
 Release maintainers generate Scoop and winget manifests only after the matching GitHub release exists:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\New-PackageManifests.ps1 -Version 0.8.2
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\New-PackageManifests.ps1 -Version 0.8.3
 ```
 
 The generator downloads the existing release assets, pins their SHA-256 hashes, and writes both manifests under `Packaging\`. It never creates or changes a release. Published assets must not be replaced in place: Scoop, winget, and SmartScreen all attach trust to the exact file hash.
@@ -351,7 +351,7 @@ PowerShell installs: extract it to a writable folder, set execution policy only 
 current process, and import the manifest.
 
 ```powershell
-Expand-Archive -LiteralPath .\LogVerdict-Module-v0.8.2.zip -DestinationPath .\LogVerdict-Module
+Expand-Archive -LiteralPath .\LogVerdict-Module-v0.8.3.zip -DestinationPath .\LogVerdict-Module
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 Import-Module .\LogVerdict-Module\LogVerdict.psd1
 Invoke-LogVerdictScan -DaysBack 30

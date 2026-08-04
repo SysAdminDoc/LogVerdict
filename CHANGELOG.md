@@ -4,9 +4,13 @@ All notable changes to LogVerdict are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-08-03
+
+- Fixed packaged GUI startup by retaining the dispatcher timer in the GUI session context; the release screenshot is regenerated from the working 0.8.3 artifact.
+- Replaced brittle GUI source-text and live-run assertions with headless helper coverage and committed fixture-backed scans; CI now checks each gate's actual script and exit code, and punctuation-only account names no longer create false privacy-audit matches.
+
 ## [0.8.2] - 2026-08-02
 
-- Replaced brittle GUI source-text and live-run assertions with headless helper coverage and committed fixture-backed scans; CI now checks each gate's actual script and exit code, and punctuation-only account names no longer create false privacy-audit matches.
 - Fixed concurrent hash access, invalid Sysmon XML diagnostics, privacy-audit line numbers, deterministic error-code selection, and authoritative result-code precedence; removed the unused template-mask helper.
 - Removed repeated channel/provider/rule preparation work, bounded structured-data accumulation, restored streaming JSONL writes, and tightened the 2,359-record reduction budget to 25 seconds from three measured post-optimization runs.
 - Added a sibling evidence manifest with rule-database provenance, scan window, redaction level, host pseudonym, and a pre-capture data inventory that is printed through both console and GUI logging.
@@ -383,6 +387,7 @@ Initial release. The deterministic core: collect, reduce, resolve, report. No la
 
 [0.7.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.7.0
 [0.8.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.8.0
+[0.8.3]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.8.3
 [0.8.2]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.8.2
 [0.8.1]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.8.1
 [0.6.0]: https://github.com/SysAdminDoc/LogVerdict/releases/tag/v0.6.0

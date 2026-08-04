@@ -1,6 +1,6 @@
 @{
     RootModule        = 'LogVerdict.psm1'
-    ModuleVersion     = '0.8.2'
+    ModuleVersion     = '0.8.3'
     GUID              = '54d8b998-b5ce-40ec-8981-5525e95d4216'
     Author            = 'SysAdminDoc'
     CompanyName       = 'SysAdminDoc'
@@ -129,7 +129,7 @@
             Tags       = @('Windows', 'EventLog', 'Troubleshooting', 'Diagnostics', 'SysAdmin', 'Forensics', 'PSEdition_Desktop', 'PSEdition_Core')
             LicenseUri = 'https://github.com/SysAdminDoc/LogVerdict/blob/main/LICENSE'
             ProjectUri = 'https://github.com/SysAdminDoc/LogVerdict'
-            ReleaseNotes = 'See CHANGELOG.md for the 0.8.2 release notes and the complete history.'
+            ReleaseNotes = 'See CHANGELOG.md for the 0.8.3 release notes and the complete history.'
         }
     }
 }
