@@ -1,39 +1,39 @@
 {
-    "$schema":  "https://raw.githubusercontent.com/ScoopInstaller/Scoop/master/schema.json",
-    "version":  "0.8.2",
-    "description":  "Local Windows log triage with curated plain-English verdicts",
-    "homepage":  "https://github.com/SysAdminDoc/LogVerdict",
-    "license":  "MIT, MS-LPL",
-    "architecture":  {
-                         "64bit":  {
-                                       "url":  [
-                                                   "https://github.com/SysAdminDoc/LogVerdict/releases/download/v0.8.2/LogVerdict.exe",
-                                                   "https://github.com/SysAdminDoc/LogVerdict/releases/download/v0.8.2/LogVerdict-GUI.exe"
-                                               ],
-                                       "hash":  [
-                                                    "eabe953dd1131d9156b8fe9f1aa4a170047c9d21b716a6ca12ce5dceb7a86dc8",
-                                                    "b2219f995caf329f076c9065b4b2e037ff6ae99adecae63104c4651a4d6fa562"
-                                                ]
-                                   }
-                     },
-    "bin":  "LogVerdict.exe",
-    "shortcuts":  [
-                      [
-                          "LogVerdict-GUI.exe",
-                          "LogVerdict"
-                      ]
-                  ],
-    "checkver":  {
-                     "github":  "https://github.com/SysAdminDoc/LogVerdict"
-                 },
-    "autoupdate":  {
-                       "architecture":  {
-                                            "64bit":  {
-                                                          "url":  [
-                                                                      "https://github.com/SysAdminDoc/LogVerdict/releases/download/v$version/LogVerdict.exe",
-                                                                      "https://github.com/SysAdminDoc/LogVerdict/releases/download/v$version/LogVerdict-GUI.exe"
-                                                                  ]
-                                                      }
-                                        }
-                   }
+  "$schema": "https://raw.githubusercontent.com/ScoopInstaller/Scoop/master/schema.json",
+  "version": "0.8.2",
+  "description": "Local Windows log triage with curated plain-English verdicts",
+  "homepage": "https://github.com/SysAdminDoc/LogVerdict",
+  "license": "MIT, MS-LPL",
+  "architecture": {
+    "64bit": {
+      "url": [
+        "https://github.com/SysAdminDoc/LogVerdict/releases/download/v0.8.2/LogVerdict.exe",
+        "https://github.com/SysAdminDoc/LogVerdict/releases/download/v0.8.2/LogVerdict-GUI.exe"
+      ],
+      "hash": [
+        "a95200da84500c41cbf28469592c04e7797cc44448f00d4b67895f9b34c1cd11",
+        "e2e01cb4f52e85e3ca50e5988cc3fb5d4e74788b43c55086c9b8449a12346b70"
+      ]
+    }
+  },
+  "bin": "LogVerdict.exe",
+  "shortcuts": [
+    [
+      "LogVerdict-GUI.exe",
+      "LogVerdict"
+    ]
+  ],
+  "checkver": {
+    "github": "https://github.com/SysAdminDoc/LogVerdict"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": [
+          "https://github.com/SysAdminDoc/LogVerdict/releases/download/v$version/LogVerdict.exe",
+          "https://github.com/SysAdminDoc/LogVerdict/releases/download/v$version/LogVerdict-GUI.exe"
+        ]
+      }
+    }
+  }
 }
