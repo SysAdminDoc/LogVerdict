@@ -156,19 +156,11 @@ function New-LVGuiActions {
     }.GetNewClosure()
 
     $renderActivity = {
-        $needle = $ui.TxtActivitySearch.Text.Trim()
-        $ui.TxtActivitySearchHint.Visibility = $(if ($needle) { 'Collapsed' } else { 'Visible' })
-        $visibleLines = @($state.ActivityLines | Where-Object {
-                -not $needle -or $_.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0
-            })
-        $prefix = if ($state.ActivityDropped -gt 0) {
-            '[!] Earlier activity omitted after the {0}-line / {1:N0}-character display limit.' -f $activityMaxLines, $activityMaxCharacters
-        } else { $null }
-        if ($prefix) {
-            $ui.TxtActivityLog.Text = $prefix + [Environment]::NewLine + ($visibleLines -join [Environment]::NewLine)
-        } else {
-            $ui.TxtActivityLog.Text = $visibleLines -join [Environment]::NewLine
-        }
+        $projection = Get-LVGuiActivityProjection -Lines ([string[]]$state.ActivityLines) `
+            -Search $ui.TxtActivitySearch.Text -Dropped $state.ActivityDropped `
+            -MaxLines $activityMaxLines -MaxCharacters $activityMaxCharacters
+        $ui.TxtActivitySearchHint.Visibility = $(if ($projection.Search) { 'Collapsed' } else { 'Visible' })
+        $ui.TxtActivityLog.Text = $projection.Text
         $ui.TxtActivityLog.ScrollToEnd()
     }.GetNewClosure()
 
@@ -189,19 +181,9 @@ function New-LVGuiActions {
         if ($Stamp.Length -ge 19) { $clock = $Stamp.Substring(11, 8) }
         $panelLine = '{0}  {1} {2}{3}' -f $clock, $mark, $Message, [Environment]::NewLine
 
-        $activityLine = $panelLine.TrimEnd()
-        if ($activityLine.Length -gt $activityMaxCharacters) {
-            $activityLine = $activityLine.Substring(0, $activityMaxCharacters)
-            $state.ActivityDropped++
-        }
-        $state.ActivityLines.Add($activityLine) | Out-Null
-        $state.ActivityCharacters += $activityLine.Length + 1
-        while ($state.ActivityLines.Count -gt $activityMaxLines -or $state.ActivityCharacters -gt $activityMaxCharacters) {
-            $removedLine = [string]$state.ActivityLines[0]
-            $state.ActivityLines.RemoveAt(0)
-            $state.ActivityCharacters = [Math]::Max(0, $state.ActivityCharacters - $removedLine.Length - 1)
-            $state.ActivityDropped++
-        }
+        $activityLine = Add-LVGuiActivityLine -Lines $state.ActivityLines -Line $panelLine `
+            -Characters ([ref]$state.ActivityCharacters) -Dropped ([ref]$state.ActivityDropped) `
+            -MaxLines $activityMaxLines -MaxCharacters $activityMaxCharacters
         & $renderActivity
         $ui.TxtActivityLastLine.Text = $Message
         $ui.TxtStatus.Text = $Message

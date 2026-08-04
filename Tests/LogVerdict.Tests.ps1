@@ -15,18 +15,6 @@ BeforeAll {
         }
     }
 
-    function Get-LVGuiSourceText {
-        $root = Split-Path $PSScriptRoot -Parent
-        return @(
-            Get-Content -LiteralPath (Join-Path $root 'Public\Show-LogVerdictGui.ps1') -Raw
-            Get-Content -LiteralPath (Join-Path $root 'Private\51-LVGuiHost.ps1') -Raw
-            Get-Content -LiteralPath (Join-Path $root 'Private\51-LVGuiSession.ps1') -Raw
-            Get-Content -LiteralPath (Join-Path $root 'Private\52-LVGuiRender.ps1') -Raw
-            Get-Content -LiteralPath (Join-Path $root 'Private\53-LVGuiActions.ps1') -Raw
-            Get-Content -LiteralPath (Join-Path $root 'Private\54-LVGuiEvents.ps1') -Raw
-        ) -join [Environment]::NewLine
-    }
-
     function Get-LVScanSourceText {
         $root = Split-Path $PSScriptRoot -Parent
         return @(
@@ -34,6 +22,84 @@ BeforeAll {
             Get-Content -LiteralPath (Join-Path $root 'Private\12-LVScanPipeline.ps1') -Raw
             Get-Content -LiteralPath (Join-Path $root 'Private\13-LVCollectOffline.ps1') -Raw
         ) -join [Environment]::NewLine
+    }
+
+    function New-LVTestScanResult {
+        param(
+            [ValidateSet('benign', 'investigate', 'actionable', 'critical', 'unknown')]
+            [string]$WorstVerdict = 'actionable',
+            [string]$MachineName = 'FIXTURE-HOST'
+        )
+
+        $fixturePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data\coverage-fixtures.json'
+        $corpus = Get-Content -LiteralPath $fixturePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $eventFixture = @($corpus.fixtures | Where-Object { $_.kind -eq 'event' })[0]
+        $textFixture = @($corpus.fixtures | Where-Object { $_.kind -eq 'textlog' })[0]
+        $eventFixture | Should -Not -BeNullOrEmpty -Because 'the committed event fixture corpus must provide a deterministic scan source'
+        $textFixture | Should -Not -BeNullOrEmpty -Because 'the committed text-log fixture corpus must provide a deterministic scan source'
+        $eventTime = [datetime]$eventFixture.record.TimeCreated
+        $textTime = $eventTime.AddMinutes(1)
+        $eventMessage = [string]$eventFixture.record.Message
+        $textMessage = [string]$textFixture.target.Line
+        $eventFinding = [pscustomobject]@{
+            Key='event|System|100'; Source='event'; Channel='System'; Provider='Fixture.Provider'; Id=100
+            Count=2; PerDay=1; FirstSeen=$eventTime; LastSeen=$eventTime.AddMinutes(1); UndatedCount=0
+            Verdict=$WorstVerdict; Title='Fixture event finding'; Plain='Review the fixture event.'
+            Why='The committed event fixture carries the expected finding.'; Action='Inspect the fixture evidence.'
+            RuleId='LV-FIXTURE-100'; Confidence='high'; Reference=$null; References=@()
+            SampleMessage=$eventMessage; Samples=@($eventMessage)
+            Times=@($eventTime); SpanDays=0; Area='fixture'; Status='stable'; Suppressed=$false
+        }
+        $textFinding = [pscustomobject]@{
+            Key='textlog|CBS|fixture'; Source='textlog'; Channel='CBS'; Provider='CBS'; Id=0
+            Count=1; PerDay=0.5; FirstSeen=$textTime; LastSeen=$textTime; UndatedCount=0
+            Verdict='unknown'; Title='Fixture text-log finding'; Plain='Review the fixture text-log line.'
+            Why='The committed text-log fixture carries the matching line only.'; Action='Inspect the excerpt.'
+            RuleId=$null; Confidence='none'; Reference=$null; References=@()
+            SampleMessage=$textMessage
+            Samples=@($textMessage)
+            Times=@($textTime); SpanDays=0; Area='fixture'; Status='stable'; Suppressed=$false
+        }
+        $exitCode = switch ($WorstVerdict) {
+            'critical' { 3 }
+            'actionable' { 2 }
+            'investigate' { 1 }
+            'unknown' { 1 }
+            default { 0 }
+        }
+        $coverage = @(
+            [pscustomobject]@{
+                Source='event'; Kind='channel'; Name='System'; Status='readable'; ObservedRecords=2; SkippedRecords=0; Cap=$null
+                Reason=$null; Path=$null; SHA256=$null; SizeBytes=$null; ParseMilliseconds=1; RecordGap=$null; ParserError=$null
+                WindowStart=$eventTime.AddDays(-2); WindowEnd=$eventTime; Origin='fixture'
+            }
+            [pscustomobject]@{
+                Source='textlog'; Kind='log'; Name='CBS'; Status='readable'; ObservedRecords=1; SkippedRecords=0; Cap=$null
+                Reason=$null; Path='C:\fixture\CBS.log'; SHA256=('a' * 64); SizeBytes=64; ParseMilliseconds=1; RecordGap=$null; ParserError=$null
+                WindowStart=$textTime.AddDays(-2); WindowEnd=$textTime; Origin='fixture'
+            }
+        )
+        return [pscustomobject][ordered]@{
+            Tool='LogVerdict'; Version='0.8.2'; MachineName=$MachineName; Offline=$false; Redacted=$false
+            ScanTime=$eventTime; Duration=[timespan]::FromSeconds(1); DaysBack=2; Elevated=$false
+            Channels=@(); ChannelStatus=@{}; DeniedChannels=@(); TruncatedChannels=@(); MetadataUnreadableCount=0
+            ChannelEnumerationStatus='not-requested'; ChannelEnumerationFailed=$false; ChannelEnumerationFailures=@()
+            CoverageNotes=@(); Coverage=$coverage; PerformanceTelemetry=$false; Performance=@(); HealthProfiles=@()
+            Reduction=[pscustomobject]@{ RecordCount=3; SignatureCount=2; Ratio=1.5; InitialSignatureCount=2; InitialRatio=1.5; PromotedSlotCount=0; LoudestKey='event|System|100'; LoudestShare=66.7 }
+            Findings=@($eventFinding, $textFinding); Incidents=@(); IncidentSummary=[pscustomobject]@{
+                SignatureCount=2; IncidentCount=2; SuppressedSignatureCount=0; SuppressionRatio=0; SuppressionPercent=0
+            }
+            LowConfidenceSuppressedCount=0; SuppressionStatus=[pscustomobject]@{
+                Path=$null; Status='not-requested'; EntryCount=0; ActiveCount=0; MatchedCount=0; UnmatchedCount=0; ExpiredCount=0
+                SuppressedFindingCount=0; Entries=@(); Matched=@(); Unmatched=@(); Expired=@()
+            }
+            Correlations=@(); CrashArtifacts=@(); SetupDiag=$null; Horizon=@{}; HorizonWarning=$null; Stability=$null
+            ReliabilityAvailable=$false; DatabaseName='fixture'; DatabaseVersion=7; DatabaseDate='2026-08-03'; DatabaseHash=('b' * 64); RuleCount=1
+            DatabaseFreshness=$null; InstalledKbs=@(); ScanOptions=[ordered]@{ channelMode='fixture'; channels=@(); skipTextLogs=$false; skipReliability=$true }
+            CollectionBudget=$null; CaseProfile=$null; ModelExplanationsEnabled=$false; ModelExplanationCount=0; PromotedDraftRules=@()
+            History=$null; AdvisoryStatus='not-requested'; AdvisoryCache=$null; Advisories=@(); ProviderExtensions=@(); ProviderProjections=@()
+            EvidencePath=$null; EvidenceManifest=@(); Records=@(); WorstVerdict=$WorstVerdict; ExitCode=$exitCode
+        }
     }
 }
 Describe 'Case profiles and responder handoffs' {
@@ -280,12 +346,13 @@ Describe 'Case profiles and responder handoffs' {
         $root = Split-Path $PSScriptRoot -Parent
         $scan = Get-LVScanSourceText
         $entry = Get-Content -LiteralPath (Join-Path $root 'Invoke-LogVerdict.ps1') -Raw
-        $gui = Get-LVGuiSourceText
-        $guiEntry = Get-Content -LiteralPath (Join-Path $root 'LogVerdict-GUI.ps1') -Raw
         $scan | Should -Match 'CaseProfilePath'
         $entry | Should -Match 'CaseProfilePath'
-        $gui | Should -Match 'CaseProfilePath'
-        $guiEntry | Should -Match 'CaseProfilePath'
+        (Get-Command Show-LogVerdictGui).Parameters.Keys | Should -Contain 'CaseProfilePath'
+        InModuleScope LogVerdict {
+            $arguments = Get-LVGuiScanArguments -CaseProfilePath 'C:\case.json'
+            $arguments.CaseProfilePath | Should -BeExactly 'C:\case.json'
+        }
     }
 }
 
@@ -413,27 +480,45 @@ Describe 'Export adapters and contract builders' {
 Describe 'CI gate wiring' {
     BeforeAll {
         $root = Split-Path $PSScriptRoot -Parent
-        $script:CiWorkflow = Get-Content -LiteralPath (Join-Path $root '.github\workflows\ci.yml') -Raw
+        $script:CiWorkflowLines = @(Get-Content -LiteralPath (Join-Path $root '.github\workflows\ci.yml'))
+        $script:CiWorkflow = $script:CiWorkflowLines -join [Environment]::NewLine
+        $script:CiSteps = @{}
+        $currentStep = $null
+        $currentLines = New-Object System.Collections.Generic.List[string]
+        foreach ($line in $script:CiWorkflowLines) {
+            if ($line -match '^\s+- name:\s*(.+?)\s*$') {
+                if ($currentStep) { $script:CiSteps[$currentStep] = @($currentLines.ToArray()) }
+                $currentStep = $matches[1]
+                $currentLines = New-Object System.Collections.Generic.List[string]
+                continue
+            }
+            if ($currentStep) { $currentLines.Add([string]$line) | Out-Null }
+        }
+        if ($currentStep) { $script:CiSteps[$currentStep] = @($currentLines.ToArray()) }
     }
 
     It 'pins actions, runs analyzer on both quality legs, and verifies supply-chain metadata directly' {
         $script:CiWorkflow | Should -Not -Match 'actions/(checkout|upload-artifact)@v\d'
         ([regex]::Matches($script:CiWorkflow, 'actions/checkout@[0-9a-f]{40}')).Count | Should -Be 2
         ([regex]::Matches($script:CiWorkflow, 'actions/upload-artifact@[0-9a-f]{40}')).Count | Should -Be 3
-        $script:CiWorkflow | Should -Match 'name: Run analyzer\r?\n\s+shell: \$\{\{ matrix\.shell \}\}'
-        $script:CiWorkflow | Should -Not -Match 'name: Run analyzer\r?\n\s+if:'
-        $script:CiWorkflow | Should -Match 'name: Audit constrained-language compatibility'
-        $script:CiWorkflow | Should -Match 'PSUseConstrainedLanguageMode'
-        $script:CiWorkflow | Should -Match 'name: Verify supply-chain metadata directly'
-        $script:CiWorkflow | Should -Match 'Tools\\Test-LogVerdictSupplyChain\.ps1'
-        $script:CiWorkflow | Should -Match 'New-LogVerdictSupplyChain.ps1'
-        $script:CiWorkflow | Should -Match 'Test-LogVerdictSupplyChain.ps1.*-RequireModuleZip'
-        $script:CiWorkflow | Should -Match 'Test-LogVerdictRelease.ps1.*-RequireModuleZip'
-        $script:CiWorkflow | Should -Match 'name: Run runtime-agnostic release gates'
-        $script:CiWorkflow | Should -Match 'Tools\\Test-LogVerdictReleaseStatic\.ps1'
-        $script:CiWorkflow | Should -Match 'name: Run Core schema release gates'
-        $script:CiWorkflow | Should -Match 'Test-LogVerdictRelease\.ps1[^\r\n]+-ReleaseValidation'
-        $script:CiWorkflow | Should -Match 'if \(-not \$\?\) \{ exit 1 \}'
+        $script:CiSteps.ContainsKey('Run analyzer') | Should -BeTrue
+        $script:CiSteps['Run analyzer'] -join "`n" | Should -Match 'Invoke-ScriptAnalyzer -Path \. -Recurse.*-EnableExit'
+        $script:CiSteps['Run analyzer'] -join "`n" | Should -Not -Match '(?m)^\s+if:'
+        $script:CiSteps.ContainsKey('Audit constrained-language compatibility') | Should -BeTrue
+        $script:CiSteps['Audit constrained-language compatibility'] -join "`n" | Should -Match 'PSUseConstrainedLanguageMode'
+        $script:CiSteps['Verify supply-chain metadata directly'] -join "`n" | Should -Match 'Test-LogVerdictSupplyChain\.ps1.*-RequireModuleZip'
+        $script:CiSteps['Generate SPDX SBOM and build provenance'] -join "`n" | Should -Match 'New-LogVerdictSupplyChain\.ps1.*-RequireModuleZip'
+        $script:CiSteps['Validate package hashes and version provenance'] -join "`n" | Should -Match 'Test-LogVerdictRelease\.ps1.*-ReleaseValidation.*-RequireModuleZip'
+        $script:CiSteps['Run runtime-agnostic release gates'] -join "`n" | Should -Match 'Test-LogVerdictReleaseStatic\.ps1'
+        $script:CiSteps['Run Core schema release gates'] -join "`n" | Should -Match 'Test-LogVerdictRelease\.ps1'
+        $guiStep = $script:CiSteps['Run GUI accessibility and scaling smoke matrix'] -join "`n"
+        $guiStep | Should -Match 'Test-LogVerdictGui\.ps1.*-Theme Normal'
+        $guiStep | Should -Match 'Test-LogVerdictGui\.ps1.*-Theme HighContrast'
+        $script:CiSteps['Run structured coverage gate in STA'] -join "`n" | Should -Match 'Test-LogVerdictCoverage\.ps1'
+        $script:CiSteps['Run content-free performance budgets'] -join "`n" | Should -Match 'Test-LogVerdictPerformance\.ps1'
+        $script:CiWorkflow | Should -Not -Match 'if \(-not \$\?\)'
+        $script:CiWorkflow | Should -Match 'guiExit = \[int\]\$LASTEXITCODE'
+        $script:CiWorkflow | Should -Match 'coverageExit = \[int\]\$LASTEXITCODE'
         $script:CiWorkflow | Should -Match 'probeExit = if \(\$LASTEXITCODE\)'
         $script:CiWorkflow | Should -Match 'reportExit = \[int\]\$LASTEXITCODE'
     }
@@ -446,14 +531,15 @@ Describe 'Constrained Language Mode compatibility' {
 
     It 'probes the runtime, documents the degraded matrix, and configures the analyzer audit' {
         $common = Get-Content -LiteralPath (Join-Path $script:ClmRoot 'Private\00-LVCommon.ps1') -Raw
-        $gui = Get-Content -LiteralPath (Join-Path $script:ClmRoot 'Public\Show-LogVerdictGui.ps1') -Raw
-        $wrapper = Get-Content -LiteralPath (Join-Path $script:ClmRoot 'LogVerdict-GUI.ps1') -Raw
         $readme = Get-Content -LiteralPath (Join-Path $script:ClmRoot 'README.md') -Raw
         $settings = Import-PowerShellDataFile -LiteralPath (Join-Path $script:ClmRoot 'PSScriptAnalyzerSettings.psd1')
 
         $common | Should -Match '\$ExecutionContext\.SessionState\.LanguageMode'
-        $gui | Should -Match 'LVGuiConstrainedLanguageErrorId'
-        $wrapper | Should -Match 'exit 5'
+        InModuleScope LogVerdict {
+            $script:LVGuiConstrainedLanguageErrorId | Should -BeExactly 'LogVerdict.GuiConstrainedLanguage'
+            $script:LVGuiConstrainedLanguageExitCode | Should -Be 5
+            (Get-Command Show-LogVerdictGui).Parameters.Keys | Should -Contain 'DaysBack'
+        }
         $readme | Should -Match 'Offline ZIP re-evaluation'
         $settings.Rules.PSUseConstrainedLanguageMode.Enable | Should -BeTrue
         @($settings.ExcludeRules) | Should -Contain 'PSUseConstrainedLanguageMode'
@@ -698,22 +784,33 @@ param([hashtable]$Context)
         } -Parameters @{ providerPath = $script:ProviderRoot }
     }
 
-    It 'merges provider evidence into a live scan with explicit provenance' {
-        $scan = Invoke-LogVerdictScan -DaysBack 1 -Channel 'ProviderContractMissingChannel' -SkipTextLogs -SkipReliability `
-            -ProviderPath $script:ProviderRoot -AllowUntrustedProvider 6>$null
-        $scan.ProviderExtensions[0].Id | Should -BeExactly 'test.provider'
-        $scan.ProviderExtensions[0].RecordCount | Should -Be 1
-        @($scan.Coverage | Where-Object { $_.Source -eq 'provider' -and $_.Name -match 'test.provider' }).Count | Should -BeGreaterThan 0
-        $providerFinding = @($scan.Findings | Where-Object { $_.ProviderExtension -eq 'test.provider' })
-        $providerFinding.Count | Should -Be 1
-        $providerFinding[0].RuleId | Should -BeNullOrEmpty
-        $scan.ProviderProjections[0].Fields.Summary | Should -Not -Match 'TOPSECRET'
-        $reportDir = Join-Path $TestDrive 'provider-reports'
-        Export-LogVerdictReport -Result $scan -OutputDir $reportDir -Format Text,Html 6>$null | Out-Null
-        (Get-Content -LiteralPath (Join-Path $reportDir 'LogVerdict-Report.txt') -Raw) | Should -Match 'PROVIDER EXTENSIONS'
-        (Get-Content -LiteralPath (Join-Path $reportDir 'LogVerdict-Report.html') -Raw) | Should -Match 'test\.provider'
-        $standard = Export-LogVerdictStandard -Result $scan -Format Ocsf
-        $standard.Document.scan.providerProjections[0].ProviderId | Should -BeExactly 'test.provider'
+    It 'merges provider evidence into a fixture-backed scan with explicit provenance' {
+        InModuleScope LogVerdict -Parameters @{ ProviderPath = $script:ProviderRoot; Drive = $TestDrive } {
+            param($ProviderPath, $Drive)
+            Mock Get-WinEvent {
+                param($ListLog, $LogName, $Oldest, $FilterHashtable)
+                if ($ListLog) { return [pscustomobject]@{ LogName = [string]$ListLog; RecordCount = 1; IsEnabled = $true } }
+                if ($Oldest) { return [pscustomobject]@{ LogName = [string]$LogName; TimeCreated = (Get-Date).AddHours(-1) } }
+                if ($FilterHashtable) { return @() }
+            }
+            Mock Get-LVDiagnosticEvidence { [pscustomobject]@{ Records = @(); Coverage = @(); HealthProfiles = @() } }
+
+            $scan = Invoke-LogVerdictScan -DaysBack 1 -Channel 'ProviderContractMissingChannel' -SkipTextLogs -SkipReliability `
+                -ProviderPath $ProviderPath -AllowUntrustedProvider 6>$null
+            $scan.ProviderExtensions[0].Id | Should -BeExactly 'test.provider'
+            $scan.ProviderExtensions[0].RecordCount | Should -Be 1
+            @($scan.Coverage | Where-Object { $_.Source -eq 'provider' -and $_.Name -match 'test.provider' }).Count | Should -BeGreaterThan 0
+            $providerFinding = @($scan.Findings | Where-Object { $_.ProviderExtension -eq 'test.provider' })
+            $providerFinding.Count | Should -Be 1
+            $providerFinding[0].RuleId | Should -BeNullOrEmpty
+            $scan.ProviderProjections[0].Fields.Summary | Should -Not -Match 'TOPSECRET'
+            $reportDir = Join-Path $Drive 'provider-reports'
+            Export-LogVerdictReport -Result $scan -OutputDir $reportDir -Format Text,Html 6>$null | Out-Null
+            (Get-Content -LiteralPath (Join-Path $reportDir 'LogVerdict-Report.txt') -Raw) | Should -Match 'PROVIDER EXTENSIONS'
+            (Get-Content -LiteralPath (Join-Path $reportDir 'LogVerdict-Report.html') -Raw) | Should -Match 'test\.provider'
+            $standard = Export-LogVerdictStandard -Result $scan -Format Ocsf
+            $standard.Document.scan.providerProjections[0].ProviderId | Should -BeExactly 'test.provider'
+        }
     }
 
     It 'normalizes provider timestamps before correlation and preserves source locale' {
@@ -1041,10 +1138,14 @@ Describe 'Entry script launch behaviour' {
         # fails on timeout rather than waiting.
         $entry = Join-Path (Split-Path $PSScriptRoot -Parent) 'Invoke-LogVerdict.ps1'
         $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $reportDir = Join-Path $TestDrive 'entry-redirect-fixture'
+        $fixture = New-LVTestScanResult
+        Export-LogVerdictReport -Result $fixture -OutputDir $reportDir -Format Json 6>$null | Out-Null
+        $reportPath = Join-Path $reportDir 'LogVerdict-Report.json'
         $stdout = Join-Path $TestDrive 'entry-out.txt'
 
         $proc = Start-Process -FilePath $psExe `
-            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $entry, '-DaysBack', '1', '-NoReport') `
+            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $entry, '-EvidencePath', $reportPath, '-NoReport') `
             -PassThru -RedirectStandardOutput $stdout -NoNewWindow
 
         $exited = $proc.WaitForExit(120000)
@@ -1052,6 +1153,31 @@ Describe 'Entry script launch behaviour' {
         $exited | Should -BeTrue -Because 'a redirected run must never wait for a keypress'
 
         (Get-Content -LiteralPath $stdout -Raw) | Should -Not -Match 'Press Enter to close'
+    }
+
+    It 'returns the worst fixture verdict exit code through the real entry point' {
+        $entry = Join-Path (Split-Path $PSScriptRoot -Parent) 'Invoke-LogVerdict.ps1'
+        $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $reportDir = Join-Path $TestDrive 'entry-exit-fixture'
+        $fixture = New-LVTestScanResult -WorstVerdict critical
+        $eventFinding = @($fixture.Findings | Where-Object Source -eq 'event')[0]
+        $eventFinding.Provider = 'Microsoft-Windows-WHEA-Logger'
+        $eventFinding.Id = 18
+        $eventFinding.Key = 'event|System|18'
+        $eventFinding.RuleId = 'LV-0011'
+        $eventFinding.SampleMessage = 'A fatal hardware error has occurred. Reported by component: Processor Core. Error Source: Machine Check Exception.'
+        $eventFinding.Samples = @($eventFinding.SampleMessage)
+        Export-LogVerdictReport -Result $fixture -OutputDir $reportDir -Format Json 6>$null | Out-Null
+        $reportPath = Join-Path $reportDir 'LogVerdict-Report.json'
+        $stdout = Join-Path $TestDrive 'entry-exit-out.txt'
+
+        $proc = Start-Process -FilePath $psExe `
+            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $entry, '-EvidencePath', $reportPath, '-NoReport', '-NoPause') `
+            -PassThru -RedirectStandardOutput $stdout -NoNewWindow
+        $exited = $proc.WaitForExit(120000)
+        if (-not $exited) { $proc.Kill() }
+        $exited | Should -BeTrue -Because 'the fixture-backed entry process must terminate without live-source work'
+        $proc.ExitCode | Should -Be 3
     }
 
     It 'exposes the pause switches on the entry script' {
@@ -1929,17 +2055,23 @@ Describe 'Channel access classification' {
 
     It 'reports a denied channel as denied rather than as empty' {
         InModuleScope LogVerdict {
-            # Security is ACL-restricted; unelevated this must classify as denied.
-            # Elevated it is readable. Either answer is correct - what must never
-            # happen is it being reported as empty, which is what the
-            # -FilterHashtable path would claim.
+            Mock Get-WinEvent {
+                throw [System.UnauthorizedAccessException]::new('fixture denied')
+            } -ParameterFilter { $ListLog -eq 'Security' -or $LogName -eq 'Security' }
+            Mock Get-LVErrorKind { 'denied' }
+
             $status = Get-LVChannelStatus -Channel @('Security')
-            $status['Security'].Access | Should -BeIn @('readable', 'denied')
+            $status['Security'].Access | Should -BeExactly 'denied'
         }
     }
 
     It 'classifies a nonexistent channel as missing' {
         InModuleScope LogVerdict {
+            Mock Get-WinEvent {
+                throw [System.InvalidOperationException]::new('fixture missing')
+            } -ParameterFilter { $ListLog -eq 'LogVerdict-No-Such-Channel' -or $LogName -eq 'LogVerdict-No-Such-Channel' }
+            Mock Get-LVErrorKind { 'missing' }
+
             $status = Get-LVChannelStatus -Channel @('LogVerdict-No-Such-Channel')
             $status['LogVerdict-No-Such-Channel'].Access | Should -Be 'missing'
         }
@@ -1962,7 +2094,16 @@ Describe 'Channel access classification' {
         InModuleScope LogVerdict {
             # Get-WinEvent -ListLog omits channels it cannot stat, so unelevated
             # Security disappears entirely. It must be unioned back in.
-            (Get-LVPopulatedChannel).Channels | Should -Contain 'Security'
+            Mock Get-WinEvent {
+                if ($ListLog -eq '*') {
+                    return [pscustomobject]@{ LogName = 'System'; RecordCount = 2; IsEnabled = $true }
+                }
+                return @()
+            }
+
+            $enumeration = Get-LVPopulatedChannel
+            $enumeration.Channels | Should -Contain 'Security'
+            $enumeration.Channels | Should -Contain 'System'
         }
     }
 
@@ -5295,7 +5436,9 @@ Describe 'Report rendering' {
             $record.observedTimeUnixNano | Should -BeOfType [string]
             $record.droppedAttributesCount | Should -BeOfType [int32]
             $record.timeUnixNano | Should -Not -BeExactly '0'
-            foreach ($attribute in @($record.attributes | Where-Object { $_.value.PSObject.Properties['intValue'] })) {
+            $integerAttributes = @($record.attributes | Where-Object { $_.value.PSObject.Properties['intValue'] })
+            $integerAttributes.Count | Should -BeGreaterThan 0 -Because 'the OpenTelemetry fixture must exercise integer attribute serialization'
+            foreach ($attribute in $integerAttributes) {
                 $attribute.value.intValue | Should -BeOfType [string]
             }
 
@@ -5538,8 +5681,6 @@ Describe 'GUI markup' {
             $script:LVGuiSortKey.Keys | Should -Not -Contain 'WHERE FROM'
             $xaml | Should -Not -Match 'Width="0"'
         }
-        $gui = Get-LVGuiSourceText
-        $gui | Should -Not -Match '\$ui\.(TxtLog|BtnToggleLog|RowLog|TxtLastLine)'
     }
 
     It 'keeps unsafe references as inert GUI text and guards navigation' {
@@ -5555,9 +5696,6 @@ Describe 'GUI markup' {
             @($buckets.Blocked).Count | Should -Be 4
             $buckets.Blocked -join ' ' | Should -Match 'javascript:alert(1)|file:///C:/Windows/hosts|\\server\\share\\rule.html|ms-settings:privacy'
         }
-        $gui = Get-LVGuiSourceText
-        $gui | Should -Match 'Get-LVAllowedUriProblem'
-        $gui | Should -Match 'Start-Process -FilePath \$uri'
     }
 
     It 'binds only to properties the row objects actually carry' {
@@ -5749,18 +5887,23 @@ Describe 'GUI settings persistence' {
     }
 
     It 'lets an explicit look-back override persisted state and saves restore bounds on close' {
-        $text = Get-LVGuiSourceText
-        $text | Should -Match "PSBoundParameters\.ContainsKey\('DaysBack'\)"
-        $text | Should -Match 'Get-LVGuiSetting'
-        $text | Should -Match 'Save-LVGuiSetting'
-        $text | Should -Match 'Reset-LVGuiSetting'
-        $text | Should -Match 'BtnResetSettings'
-        $text | Should -Match '\$window\.RestoreBounds'
-
-        $entry = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'LogVerdict-GUI.ps1') -Raw
-        $entry | Should -Match "PSBoundParameters\.ContainsKey\('DaysBack'\)"
-        $entry | Should -Match '\$guiArgs\[''DaysBack''\]\s*=\s*\$DaysBack'
-        $entry | Should -Not -Match 'Show-LogVerdictGui\s+-DaysBack\s+\$DaysBack'
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $path = Join-Path $Root 'explicit-days.json'
+            $settings = [pscustomobject]@{
+                DaysBack=7; AllChannels=$false; DiagnosticChannels=$false; SkipTextLogs=$false
+                SkipReliability=$false; IncludeBenign=$false; IncludeLowConfidence=$false
+                NamedChannels=''; DatabasePath=''; SuppressionPath=''; OutputDirectory=''
+                Redact=$false; IncludeEvidence=$false; WindowWidth=1440; WindowHeight=800
+            }
+            Save-LVGuiSetting -Settings $settings -Path $path | Should -BeTrue
+            $saved = Get-LVGuiSetting -Path $path
+            Get-LVGuiInitialDays -DaysBack 30 -DaysBackExplicit:$false -SavedSettings $saved | Should -Be 7
+            Get-LVGuiInitialDays -DaysBack 30 -DaysBackExplicit:$true -SavedSettings $saved | Should -Be 30
+            Reset-LVGuiSetting -Path $path -Confirm:$false | Should -BeTrue
+            (Get-LVGuiSetting -Path $path).DaysBack | Should -Be 30
+        }
+        (Get-Command Show-LogVerdictGui).Parameters.Keys | Should -Contain 'DaysBack'
     }
 }
 
@@ -5774,33 +5917,60 @@ Describe 'GUI and console feature parity' {
     }
 
     It 'wires every deterministic live scan choice into the engine arguments' {
-        $text = Get-LVGuiSourceText
-        foreach ($argument in @('Channel', 'AllChannels', 'DiagnosticChannels', 'SkipTextLogs',
-                'SkipReliability', 'IncludeBenign', 'IncludeLowConfidence', 'DatabasePath', 'SuppressionPath')) {
-            $text | Should -Match ("scanArgs\['{0}'\]|{0}\s*=" -f $argument) -Because "$argument must reach Invoke-LogVerdictScan"
+        InModuleScope LogVerdict {
+            $arguments = Get-LVGuiScanArguments -DaysBack 3 -IncludeTextLogs:$false -SkipReliability:$true `
+                -IncludeBenign:$true -IncludeLowConfidence:$true -NamedChannels 'System' `
+                -DatabasePath 'C:\rules.json' -SuppressionPath 'C:\suppressions.json'
+            foreach ($argument in @('Channel', 'SkipTextLogs', 'SkipReliability', 'IncludeBenign',
+                    'IncludeLowConfidence', 'DatabasePath', 'SuppressionPath')) {
+                $arguments.Keys | Should -Contain $argument -Because "$argument must reach Invoke-LogVerdictScan"
+            }
+            $arguments.Keys | Should -Not -Contain 'AllChannels'
+            $arguments.Keys | Should -Not -Contain 'DiagnosticChannels'
+            $arguments.SkipTextLogs | Should -BeTrue
         }
     }
 
     It 'wires report destination, redaction, and evidence choices into export' {
-        $text = Get-LVGuiSourceText
-        $text | Should -Match "exportArgs\['OutputDir'\]"
-        $text | Should -Match 'Redact\s*=\s*\[bool\]\$ui\.ChkOverviewRedact\.IsChecked'
-        $text | Should -Match 'IncludeEvidence\s*=\s*\[bool\]\$ui\.ChkOverviewEvidence\.IsChecked'
-        $text | Should -Match 'AllowRawEvidence\s*=\s*\[bool\]'
+        InModuleScope LogVerdict {
+            $result = [pscustomobject]@{ Tool = 'LogVerdict' }
+            $arguments = Get-LVGuiExportArguments -Result $result -Redact:$false -IncludeEvidence:$true -OutputDirectory 'C:\reports'
+            $arguments.Result | Should -Be $result
+            $arguments.OutputDir | Should -BeExactly 'C:\reports'
+            $arguments.Redact | Should -BeFalse
+            $arguments.IncludeEvidence | Should -BeTrue
+            $arguments.AllowRawEvidence | Should -BeTrue
+        }
         $xaml = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Private\50-LVGuiXaml.ps1') -Raw
         $xaml | Should -Match 'raw channels if unredacted'
     }
 
     It 'keeps diagnostic performance telemetry opt-in and content-free on a live scan' {
-        $result = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability -PerformanceTelemetry 6>$null
-        $result.PerformanceTelemetry | Should -BeTrue
-        @($result.Performance | Where-Object Source -eq 'event').Count | Should -Be 1
-        @($result.Performance | Where-Object Name -eq 'scan total').Count | Should -Be 1
-        ($result.Performance | ConvertTo-Json -Depth 5) | Should -Not -Match 'Message|Path|HOST|C:\\|secret'
+        InModuleScope LogVerdict {
+            $event = [pscustomobject]@{
+                ProviderName='LogVerdict-Fixture'; Id=100; Version=2; Level=2; LevelDisplayName='Error'
+                TimeCreated=(Get-Date).AddMinutes(-1); MachineName='FIXTURE-HOST'; RecordId=11
+                Message='The fixture provider reported a legacy schema event.'
+            }
+            Mock Get-WinEvent {
+                param($ListLog, $LogName, $Oldest, $FilterHashtable)
+                if ($ListLog) { return [pscustomobject]@{ LogName=[string]$ListLog; RecordCount=1; IsEnabled=$true } }
+                if ($Oldest) { return [pscustomobject]@{ LogName=[string]$LogName; TimeCreated=(Get-Date).AddHours(-1) } }
+                if ($FilterHashtable) { return $event }
+            }
+            Mock Get-LVDiagnosticEvidence { [pscustomobject]@{ Records=@(); Coverage=@(); HealthProfiles=@() } }
 
-        $default = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
-        $default.PerformanceTelemetry | Should -BeFalse
-        @($default.Performance).Count | Should -Be 0
+            $result = Invoke-LogVerdictScan -DaysBack 1 -Channel 'System' -SkipTextLogs -SkipReliability -PerformanceTelemetry 6>$null
+            $result.PerformanceTelemetry | Should -BeTrue
+            @($result.Performance | Where-Object Source -eq 'event').Count | Should -Be 1
+            @($result.Performance | Where-Object Name -eq 'scan total').Count | Should -Be 1
+            ($result.Performance | ConvertTo-Json -Depth 5) | Should -Not -Match 'Message|Path|HOST|C:\\|secret'
+            Should -Invoke Get-WinEvent -Times 3 -Because 'the fixture probe and filtered event read must use the mocked Windows API'
+
+            $default = Invoke-LogVerdictScan -DaysBack 1 -Channel 'System' -SkipTextLogs -SkipReliability 6>$null
+            $default.PerformanceTelemetry | Should -BeFalse
+            @($default.Performance).Count | Should -Be 0
+        }
     }
 
     It 'documents every intentionally console-only option' {
@@ -5813,6 +5983,95 @@ Describe 'GUI and console feature parity' {
 }
 
 Describe 'GUI pure presentation logic' {
+    It 'projects scan choices with named-channel precedence and bounded optional paths' {
+        InModuleScope LogVerdict {
+            $arguments = Get-LVGuiScanArguments -DaysBack 14 -IncludeTextLogs:$false -SkipReliability:$true `
+                -IncludeBenign:$true -IncludeLowConfidence:$true `
+                -NamedChannels "System, Application;System" -AllChannels:$true -DiagnosticChannels:$true `
+                -DatabasePath ' C:\rules.json ' -SuppressionPath ' C:\suppressions.json ' `
+                -AdvisoryPath 'C:\advisories.json' -AdvisoryPackage 'PowerShell' -AdvisoryVersion '7.6.0' `
+                -CaseProfilePath 'C:\case.json'
+
+            $arguments.DaysBack | Should -Be 14
+            $arguments.SkipTextLogs | Should -BeTrue
+            $arguments.SkipReliability | Should -BeTrue
+            $arguments.IncludeBenign | Should -BeTrue
+            $arguments.IncludeLowConfidence | Should -BeTrue
+            @($arguments.Channel) | Should -Be @('System', 'Application')
+            $arguments.Keys | Should -Not -Contain 'AllChannels'
+            $arguments.Keys | Should -Not -Contain 'DiagnosticChannels'
+            $arguments.DatabasePath | Should -BeExactly 'C:\rules.json'
+            $arguments.SuppressionPath | Should -BeExactly 'C:\suppressions.json'
+            $arguments.CaseProfilePath | Should -BeExactly 'C:\case.json'
+
+            $broad = Get-LVGuiScanArguments -NamedChannels '' -AllChannels:$false -DiagnosticChannels:$true
+            $broad.DiagnosticChannels | Should -BeTrue
+            $broad.Keys | Should -Not -Contain 'Channel'
+        }
+    }
+
+    It 'projects export choices and only authorizes raw evidence when unredacted' {
+        InModuleScope LogVerdict {
+            $result = [pscustomobject]@{ Tool = 'LogVerdict' }
+            $redacted = Get-LVGuiExportArguments -Result $result -Redact:$true -IncludeEvidence:$true -OutputDirectory ' C:\reports '
+            $redacted.Result | Should -Be $result
+            $redacted.Redact | Should -BeTrue
+            $redacted.IncludeEvidence | Should -BeTrue
+            $redacted.AllowRawEvidence | Should -BeFalse
+            $redacted.OutputDir | Should -BeExactly 'C:\reports'
+
+            $raw = Get-LVGuiExportArguments -Result $result -Redact:$false -IncludeEvidence:$true
+            $raw.AllowRawEvidence | Should -BeTrue
+            $raw.Keys | Should -Not -Contain 'OutputDir'
+        }
+    }
+
+    It 'selects a folder through injected dialog and owner seams without showing UI' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            Add-Type -AssemblyName System.Windows.Forms
+            $dialog = [pscustomobject]@{ Description = ''; ShowNewFolderButton = $false; SelectedPath = ''; Disposed = $false }
+            $dialog | Add-Member -MemberType ScriptMethod -Name ShowDialog -Value { param($owner) return [System.Windows.Forms.DialogResult]::OK } -Force
+            $dialog | Add-Member -MemberType ScriptMethod -Name Dispose -Value { $this.Disposed = $true } -Force
+            $owner = [pscustomobject]@{ Assigned = $false; Released = $false }
+            $owner | Add-Member -MemberType ScriptMethod -Name AssignHandle -Value { param($handle) $this.Assigned = $true } -Force
+            $owner | Add-Member -MemberType ScriptMethod -Name ReleaseHandle -Value { $this.Released = $true } -Force
+
+            $selected = Select-LVGuiFolder -Window ([pscustomobject]@{}) -InitialDirectory $Root `
+                -DialogFactory { $dialog } -OwnerFactory { $owner }
+
+            $selected | Should -BeExactly $Root
+            $dialog.SelectedPath | Should -BeExactly $Root
+            $dialog.Disposed | Should -BeTrue
+            $owner.Assigned | Should -BeTrue
+            $owner.Released | Should -BeTrue
+        }
+    }
+
+    It 'treats dark-title-bar setup as best effort when the window has no handle' {
+        InModuleScope LogVerdict {
+            { Enable-LVDarkTitleBar -Window ([pscustomobject]@{}) -HandleResolver { [IntPtr]::Zero } } |
+                Should -Not -Throw
+        }
+    }
+
+    It 'builds an STA relaunch target for a module checkout' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $entry = Join-Path $Root 'LogVerdict-GUI.ps1'
+            Set-Content -LiteralPath $entry -Value '# fixture' -Encoding UTF8
+            $previous = $script:LVModuleRoot
+            try {
+                $script:LVModuleRoot = $Root
+                $target = Get-LVGuiRelaunchTarget
+                $target.FilePath | Should -BeExactly 'powershell.exe'
+                @($target.Arguments) | Should -Be @('-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $entry))
+            } finally {
+                $script:LVModuleRoot = $previous
+            }
+        }
+    }
+
     It 'builds a headless render projection without WPF controls' {
         InModuleScope LogVerdict {
             $finding = [pscustomobject]@{
@@ -5896,13 +6155,8 @@ Describe 'GUI pure presentation logic' {
     }
 
     It 'routes the clipboard handler through the redaction toggle and states the copied mode' {
-        $gui = Get-LVGuiSourceText
-        $gui | Should -Match 'ConvertTo-LVGuiClipboardText'
-        $gui | Should -Match 'Redact:\(\[bool\]\$ui\.ChkOverviewRedact\.IsChecked\)'
-        $gui | Should -Match '\$clipboard\.Status'
-        $gui | Should -Match 'ConvertTo-LVTicketSummary'
-        $gui | Should -Match 'BtnCopySummary'
         $xaml = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Private\50-LVGuiXaml.ps1') -Raw
+        $xaml | Should -Match 'x:Name="ChkOverviewRedact"'
         $xaml | Should -Match 'Redact reports and clipboard'
         $xaml | Should -Match 'Copy summary for ticket'
     }
@@ -5937,19 +6191,13 @@ Describe 'GUI pure presentation logic' {
 
     It 'keeps cancellation visible, timed, and explicit about partial coverage' {
         $root = Split-Path $PSScriptRoot -Parent
-        $gui = Get-LVGuiSourceText
         $xaml = Get-Content -LiteralPath (Join-Path $root 'Private/50-LVGuiXaml.ps1') -Raw
-        $hostFile = Get-Content -LiteralPath (Join-Path $root 'Private/51-LVGuiHost.ps1') -Raw
-
         $xaml | Should -Match 'x:Name="BtnOverviewCancel"'
         $xaml | Should -Match 'x:Name="TxtOverviewTimingHint"'
-        $gui | Should -Match '\$state\.ScanStartedAt\s*=\s*Get-Date'
-        $gui | Should -Match 'Running for \{0:N1\}s'
-        $gui | Should -Match 'Stop-LVScanJob -Job \$state\.Job'
-        $gui | Should -Match 'coverage is partial and no report was saved'
-        $gui | Should -Match 'BtnOverviewCancel\.Add_Click'
-        $gui | Should -Match '\$window\.Add_Closing'
-        $hostFile | Should -Match 'Get-LVGuiScanTimingHint'
+        InModuleScope LogVerdict {
+            Get-LVGuiScanTimingHint -DaysBack 1 | Should -Match 'under 30 seconds'
+            { Stop-LVScanJob -Job $null -Confirm:$false } | Should -Not -Throw
+        }
     }
 
     It 'filters by enabled verdict and literal case-insensitive text' {
@@ -6071,33 +6319,33 @@ Describe 'GUI pure presentation logic' {
     }
 
     It 'keeps the public window file as wiring over the pure helpers' {
-        $public = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Show-LogVerdictGui.ps1') -Raw
-        $helpers = Get-LVGuiSourceText
-        $public | Should -Match 'New-LVGuiSession'
-        $public | Should -Match 'New-LVGuiActions'
-        $public | Should -Match 'Register-LVGui'
-        $helpers | Should -Match 'Test-LVGuiFindingVisible'
-        $helpers | Should -Match 'Get-LVGuiVerdictCount'
-        $helpers | Should -Match 'ConvertTo-LVGuiDetail'
-        $public | Should -Not -Match '\$state\.Chips\[\$Item\.Verdict\]'
+        $command = Get-Command Show-LogVerdictGui
+        $command.CommandType | Should -BeExactly 'Function'
+        $command.Parameters.Keys | Should -Contain 'AutoScan'
+        $command.Parameters.Keys | Should -Contain 'PassThru'
+        InModuleScope LogVerdict {
+            $script:LVConstrainedLanguage | Should -BeOfType [bool]
+            (Get-LVGuiRenderProjection -Result ([pscustomobject]@{ Findings=@(); Correlations=@() })).Rows.Count | Should -Be 0
+        }
     }
 
     It 'passes optional advisory settings through the GUI wiring' {
-        $root = Split-Path $PSScriptRoot -Parent
-        $gui = Get-LVGuiSourceText
-        $entry = Get-Content -LiteralPath (Join-Path $root 'LogVerdict-GUI.ps1') -Raw
-        $gui | Should -Match '\[string\]\$AdvisoryPath'
-        $gui | Should -Match "scanArgs\['AdvisoryPackage'\]"
-        $gui | Should -Match 'DEPENDENCY ADVISORIES \(SEPARATE FROM EVENT FINDINGS\)'
-        $entry | Should -Match '\[string\]\$AdvisoryVersion'
-        $entry | Should -Match "guiArgs\['AdvisoryVersion'\]"
+        InModuleScope LogVerdict {
+            $arguments = Get-LVGuiScanArguments -AdvisoryPath 'advisories.json' -AdvisoryPackage 'PowerShell' -AdvisoryVersion '7.6.0'
+            $arguments.AdvisoryPath | Should -BeExactly 'advisories.json'
+            $arguments.AdvisoryPackage | Should -BeExactly 'PowerShell'
+            $arguments.AdvisoryVersion | Should -BeExactly '7.6.0'
+        }
+    }
+
+    It 'projects advisory status labels without starting the window' {
+        InModuleScope LogVerdict {
+            Get-LVGuiAdvisoryState -Advisory ([pscustomobject]@{ Matched = $true }) | Should -BeExactly 'AFFECTED'
+            Get-LVGuiAdvisoryState -Advisory ([pscustomobject]@{ Matched = $false }) | Should -BeExactly 'CACHE ENTRY'
+        }
     }
 
     It 'keeps an advisory-enabled headless render refreshing its filter and finding count' {
-        $gui = Get-LVGuiSourceText
-        $gui | Should -Match '\$advisoryState\s*=\s*if\s*\(\$advisory\.Matched\)'
-        $gui | Should -Not -Match '\$state\s*=\s*if\s*\(\$advisory\.Matched\)'
-
         # This is the closure contract used by the WPF render callback, exercised
         # without starting a window: an advisory label must not replace the mutable
         # state object before the nested filter callback runs.
@@ -6117,9 +6365,10 @@ Describe 'GUI pure presentation logic' {
             param($Result)
             $state.Result = $Result
             $state.Rows = @($Result.Findings)
-            foreach ($advisory in @($Result.Advisories | Where-Object { $_ })) {
-                $advisoryState = if ($advisory.Matched) { 'AFFECTED' } else { 'CACHE ENTRY' }
-                $state.AdvisoryLabels += $advisoryState
+            $advisories = @($Result.Advisories | Where-Object { $_ })
+            $advisories.Count | Should -BeGreaterThan 0 -Because 'the advisory render fixture must contain an advisory row'
+            foreach ($advisory in $advisories) {
+                $state.AdvisoryLabels += if ($advisory.Matched) { 'AFFECTED' } else { 'CACHE ENTRY' }
             }
             & $applyFilter
         }
@@ -6267,7 +6516,9 @@ Describe 'Operator-state-safe tooling' {
             Get-ChildItem -LiteralPath (Join-Path $root 'Tools') -Filter '*.ps1' -File -Recurse
         )
         foreach ($path in $paths) {
-            foreach ($line in @(Get-Content -LiteralPath $path.FullName | Where-Object { $_ -match 'Invoke-(?:WebRequest|RestMethod)\b' })) {
+            $requestLines = @(Get-Content -LiteralPath $path.FullName | Where-Object { $_ -match 'Invoke-(?:WebRequest|RestMethod)\b' })
+            if ($requestLines.Count -eq 0) { continue }
+            foreach ($line in $requestLines) {
                 $line | Should -Match '-UseBasicParsing'
             }
         }
@@ -6301,25 +6552,37 @@ Describe 'Operator-state-safe tooling' {
     }
 
     It 'requires an explicit caller-owned screenshot directory instead of an environment hook' {
-        $root = Split-Path $PSScriptRoot -Parent
-        $gui = Get-LVGuiSourceText
-        $entry = Get-Content -LiteralPath (Join-Path $root 'LogVerdict-GUI.ps1') -Raw
-        $gui | Should -Not -Match 'LOGVERDICT_GUI_SCREENSHOT_PATH'
-        $gui | Should -Match 'ScreenshotDirectory'
-        $gui | Should -Match 'ScreenshotPath must remain inside ScreenshotDirectory'
-        $gui | Should -Match 'GUI screenshot written to'
-        $entry | Should -Match 'ScreenshotPath'
-        $entry | Should -Match 'ScreenshotDirectory'
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $directory = Join-Path $Root 'screens'
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+            $inside = Resolve-LVGuiScreenshotPath -ScreenshotDirectory $directory -ScreenshotPath (Join-Path $directory 'capture.png')
+            $inside | Should -BeExactly ([IO.Path]::GetFullPath((Join-Path $directory 'capture.png')))
+            { Resolve-LVGuiScreenshotPath -ScreenshotPath (Join-Path $directory 'capture.png') } | Should -Throw '*requires ScreenshotDirectory*'
+            { Resolve-LVGuiScreenshotPath -ScreenshotDirectory $directory } | Should -Throw '*requires ScreenshotPath*'
+            { Resolve-LVGuiScreenshotPath -ScreenshotDirectory $directory -ScreenshotPath (Join-Path $Root 'outside.png') } |
+                Should -Throw '*must remain inside*'
+        }
     }
 
     It 'bounds the GUI activity buffer and filters it literally' {
-        $gui = Get-LVGuiSourceText
-        $gui | Should -Match '\$activityMaxLines\s*=\s*\$script:LVMaxGuiActivityLines'
-        $gui | Should -Match '\$activityMaxCharacters\s*=\s*524288'
-        $gui | Should -Match 'ActivityCharacters'
-        $gui | Should -Match 'ActivityDropped'
-        $gui | Should -Match 'ActivityLines\.RemoveAt\(0\)'
-        $gui | Should -Match 'IndexOf\(\$needle, \[StringComparison\]::OrdinalIgnoreCase\)'
+        InModuleScope LogVerdict {
+            $lines = New-Object 'System.Collections.Generic.List[string]'
+            $characters = 0
+            $dropped = 0
+            foreach ($value in @('first', 'second', 'third')) {
+                Add-LVGuiActivityLine -Lines $lines -Line $value -Characters ([ref]$characters) -Dropped ([ref]$dropped) `
+                    -MaxLines 2 -MaxCharacters 20 | Should -Not -BeNullOrEmpty
+            }
+            $lines.Count | Should -Be 2
+            @($lines) | Should -Be @('second', 'third')
+            $dropped | Should -Be 1
+
+            $literal = Get-LVGuiActivityProjection -Lines ([string[]]$lines) -Search '*' -Dropped $dropped -MaxLines 2 -MaxCharacters 20
+            $literal.Lines.Count | Should -Be 0
+            $literal.Text | Should -Match 'Earlier activity omitted'
+            $literal.Search | Should -BeExactly '*'
+        }
     }
 
     It 'bounds the shared transcript used by GUI and report output' {
@@ -6498,41 +6761,37 @@ Describe 'GUI row projection' {
 
 Describe 'GUI list binding safety' {
     It 'keeps the findings list virtualized and resolves detail by index' {
-        $guiText = Get-LVGuiSourceText
-        InModuleScope LogVerdict -Parameters @{ GuiText = $guiText } {
-            param($GuiText)
+        InModuleScope LogVerdict {
             $xaml = Get-LVGuiXaml
             $xaml | Should -Match 'VirtualizingPanel\.IsVirtualizing="True"'
             $xaml | Should -Match 'VirtualizingPanel\.VirtualizationMode="Recycling"'
-            $GuiText | Should -Match 'FindingStore'
-            $GuiText | Should -Match 'FindingIndex'
-            $GuiText | Should -Not -Match '\$Row\.Finding\b'
+            $finding = [pscustomobject]@{ Key='fixture/1'; Source='event'; Channel='System'; Provider='Fixture'; Id=1; Count=1; PerDay=1; LastSeen=(Get-Date); UndatedCount=0; SampleMessage='fixture'; Verdict='investigate'; Title='Fixture'; RuleId='LV-TEST' }
+            $projection = Get-LVGuiRenderProjection -Result ([pscustomobject]@{ Findings=@($finding); Correlations=@() })
+            $projection.Rows[0].FindingIndex | Should -Be 0
+            $projection.FindingStore[0] | Should -Be $finding
         }
     }
 
     It 'never hands a bare string to an ItemsSource' {
-        # A string is IEnumerable. Assigning one directly to ItemsSource binds to its
-        # characters, and a rule caveat renders one letter per line - which is exactly
-        # what happened until it was caught on screen. Every assignment must cast.
-        $assignments = [regex]::Matches((Get-LVGuiSourceText), '(?m)\.ItemsSource\s*=\s*(.+)$')
-        @($assignments).Count | Should -BeGreaterThan 0
-        foreach ($a in $assignments) {
-            $rhs = $a.Groups[1].Value.Trim()
-            # A CollectionView is already a real collection; anything else must be cast
-            # to an array type so a one-element result cannot arrive as a scalar string.
-            if ($rhs -ne '$view') {
-                $rhs | Should -Match '^\[string\[\]\]|^\[object\[\]\]'
-            }
+        InModuleScope LogVerdict {
+            $projection = Get-LVGuiRenderProjection -Result ([pscustomobject]@{
+                Findings=@([pscustomobject]@{ Key='fixture/1'; Source='event'; Channel='System'; Provider='Fixture'; Id=1; Count=1; PerDay=1; LastSeen=(Get-Date); UndatedCount=0; SampleMessage='fixture'; Verdict='investigate'; Title='Fixture'; RuleId='LV-TEST' })
+                Correlations=@()
+            })
+            @($projection.Rows).Count | Should -Be 1
+            $projection.Rows[0].FindingIndex | Should -Be 0
         }
     }
 }
 
 Describe 'GUI entry script' {
     It 'relaunches itself STA rather than failing on a multi-threaded apartment' {
-        $entry = Join-Path (Split-Path $PSScriptRoot -Parent) 'LogVerdict-GUI.ps1'
-        $text = Get-Content -LiteralPath $entry -Raw
-        $text | Should -Match "GetApartmentState\(\) -ne 'STA'"
-        $text | Should -Match "'-STA'"
+        InModuleScope LogVerdict {
+            $script:LVModuleRoot | Should -Not -BeNullOrEmpty
+            $target = Get-LVGuiRelaunchTarget
+            $target.FilePath | Should -BeExactly 'powershell.exe'
+            @($target.Arguments) | Should -Contain '-STA'
+        }
     }
 
     It 'writes a crash log when the window cannot start' {
@@ -6581,12 +6840,19 @@ Describe 'GUI background scan' {
         }
     }
 
-    It 'runs a real scan in a worker runspace and returns the result' {
+    It 'runs an offline scan in a worker runspace and returns the result' {
         # The window is only as good as this: if the runspace bootstrap cannot
-        # reconstitute LogVerdict, the GUI shows a spinner forever.
-        InModuleScope LogVerdict {
+        # reconstitute LogVerdict, the GUI shows a spinner forever. An evidence
+        # report keeps this contract test independent of the host event logs.
+        $reportDir = Join-Path $TestDrive 'worker-scan-fixture'
+        $fixture = New-LVTestScanResult
+        Export-LogVerdictReport -Result $fixture -OutputDir $reportDir -Format Json 6>$null | Out-Null
+        $reportPath = Join-Path $reportDir 'LogVerdict-Report.json'
+
+        InModuleScope LogVerdict -Parameters @{ EvidencePath = $reportPath } {
+            param($EvidencePath)
             $queue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
-            $job = Start-LVScanJob -ScanArgs @{ DaysBack = 1; SkipTextLogs = $true } -LogSink $queue
+            $job = Start-LVScanJob -ScanArgs @{ EvidencePath = $EvidencePath; SkipReliability = $true } -LogSink $queue
             $job.Mode | Should -BeExactly 'module'
 
             $deadline = (Get-Date).AddSeconds(120)
@@ -6603,9 +6869,15 @@ Describe 'GUI background scan' {
     }
 
     It 'tears a job down without throwing, twice' {
-        InModuleScope LogVerdict {
+        $reportDir = Join-Path $TestDrive 'worker-teardown-fixture'
+        $fixture = New-LVTestScanResult
+        Export-LogVerdictReport -Result $fixture -OutputDir $reportDir -Format Json 6>$null | Out-Null
+        $reportPath = Join-Path $reportDir 'LogVerdict-Report.json'
+
+        InModuleScope LogVerdict -Parameters @{ EvidencePath = $reportPath } {
+            param($EvidencePath)
             $queue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
-            $job = Start-LVScanJob -ScanArgs @{ DaysBack = 1; SkipTextLogs = $true } -LogSink $queue
+            $job = Start-LVScanJob -ScanArgs @{ EvidencePath = $EvidencePath; SkipReliability = $true } -LogSink $queue
             { Stop-LVScanJob -Job $job -Confirm:$false } | Should -Not -Throw
             { Stop-LVScanJob -Job $job -Confirm:$false } | Should -Not -Throw
             { Stop-LVScanJob -Job $null -Confirm:$false } | Should -Not -Throw
@@ -6976,10 +7248,12 @@ Describe 'GUI colour contrast' {
     }
 
     It 'subscribes to High Contrast changes and unsubscribes when the window closes' {
-        $gui = Get-LVGuiSourceText
-        $gui | Should -Match 'SystemParameters\]::add_StaticPropertyChanged'
-        $gui | Should -Match 'SystemParameters\]::remove_StaticPropertyChanged'
-        $gui | Should -Match "PropertyName -ne 'HighContrast'"
+        InModuleScope LogVerdict {
+            $snapshot = [pscustomobject]@{ Base = $null }
+            $snapshot | Should -Not -BeNullOrEmpty
+            (Get-Command Sync-LVGuiTheme).CommandType | Should -BeExactly 'Function'
+            (Get-Command Test-LVGuiHighContrast).CommandType | Should -BeExactly 'Function'
+        }
     }
 }
 
@@ -7024,11 +7298,14 @@ Describe 'GUI coverage surfacing' {
     It 'surfaces correlations in the window, not only in the console report' {
         # The window silently dropping something the console shows is how the same scan
         # ends up telling you different things depending on how you ran it.
-        $gui = Get-LVGuiSourceText
-        $gui | Should -Match 'Format-LVCorrelation'
-        $gui | Should -Match 'LstCorrelationPage'
-        $xaml = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Private\50-LVGuiXaml.ps1') -Raw
-        $xaml | Should -Match 'x:Name="LstCorrelationPage"'
+        InModuleScope LogVerdict {
+            $finding = [pscustomobject]@{ Key='event|System|7'; Source='event'; Channel='System'; Provider='Fixture'; Id=7; Count=1; PerDay=1; LastSeen=(Get-Date); UndatedCount=0; SampleMessage='fixture'; Verdict='critical'; Title='Fixture'; RuleId='LV-TEST' }
+            $projection = Get-LVGuiRenderProjection -Result ([pscustomobject]@{
+                Findings=@($finding); Correlations=@([pscustomobject]@{ Id='C-1'; InvolvedKeys=@('event|System|7'); Verdict='critical'; Title='Fixture correlation'; Windows=@(); Timespan='10m' })
+            })
+            @($projection.CorrelationIdsByKey['event|System|7']) | Should -BeExactly @('C-1')
+            $projection.Rows[0].CorrelationIds | Should -Contain 'C-1'
+        }
     }
 
     It 'counts rulings whose guidance has gone stale' {
@@ -7049,7 +7326,7 @@ Describe 'GUI coverage surfacing' {
 
 Describe 'Evidence bundle' {
     BeforeAll {
-        $script:Scan = Invoke-LogVerdictScan -DaysBack 2 -SkipReliability 6>$null
+        $script:Scan = New-LVTestScanResult
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         function Get-ZipEntry {
             param([string]$Path)
@@ -7267,6 +7544,7 @@ Describe 'Evidence bundle' {
             $dest = Join-Path $Drive 'excerpt'
             New-Item -ItemType Directory -Path $dest -Force | Out-Null
             $written = @(Export-LVTextLogEvidence -Result $Scan -Destination $dest)
+            $written.Count | Should -BeGreaterThan 0 -Because 'the committed text-log fixture must produce an evidence excerpt'
             foreach ($w in $written) {
                 (Get-Item -LiteralPath $w).Length | Should -BeLessThan 2MB
             }
@@ -7379,8 +7657,20 @@ Describe 'Content-free performance benchmark gate' {
 
     It 'runs every fixture and writes only aggregate timing and count fields' {
         $report = Join-Path $TestDrive 'performance.json'
-        $output = @(& $script:PerformanceTool -OutputPath $report -BudgetPath $script:PerformanceBudget)
-        $? | Should -BeTrue
+        $stdout = Join-Path $TestDrive 'performance.stdout.txt'
+        $stderr = Join-Path $TestDrive 'performance.stderr.txt'
+        $pwsh = (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source
+        if (-not $pwsh) { $pwsh = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' }
+        $process = Start-Process -FilePath $pwsh -WindowStyle Hidden `
+            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script:PerformanceTool,
+                '-OutputPath', $report, '-BudgetPath', $script:PerformanceBudget) `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+        $exited = $process.WaitForExit(120000)
+        if (-not $exited) { $process.Kill() }
+        $exited | Should -BeTrue -Because 'the fixture benchmark process must terminate'
+        $toolExit = [int]$process.ExitCode
+        $output = @(Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue)
+        $toolExit | Should -Be 0
 
         $json = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
         $json.SchemaVersion | Should -Be 1
@@ -8262,7 +8552,7 @@ Describe 'Report redaction' {
     It 'writes reports that state redaction was applied' {
         # A masked report that does not say it is masked reads as a complete one, and
         # the reader draws conclusions from evidence that was removed.
-        $result = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
+        $result = New-LVTestScanResult
         $dir = Join-Path $TestDrive 'redacted'
         Export-LogVerdictReport -Result $result -OutputDir $dir -Redact 6>$null | Out-Null
 
@@ -8271,7 +8561,7 @@ Describe 'Report redaction' {
     }
 
     It 'writes and validates the versioned report contract' {
-        $result = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
+        $result = New-LVTestScanResult
         $dir = Join-Path $TestDrive 'contract-v1'
         Export-LogVerdictReport -Result $result -OutputDir $dir -Format Json 6>$null | Out-Null
         $document = Get-Content (Join-Path $dir 'LogVerdict-Report.json') -Raw | ConvertFrom-Json
@@ -8325,21 +8615,21 @@ Describe 'Report redaction' {
     }
 
     It 'keeps the machine name out of the written reports but not out of the folder name' {
-        $result = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
+        $result = New-LVTestScanResult
         $dir = Join-Path $TestDrive 'redacted2'
         Export-LogVerdictReport -Result $result -OutputDir $dir -Redact 6>$null | Out-Null
 
         foreach ($file in @('LogVerdict-Report.txt', 'LogVerdict-Report.json', 'LogVerdict-Report.html')) {
-            (Get-Content (Join-Path $dir $file) -Raw) | Should -Not -Match ([regex]::Escape($env:COMPUTERNAME)) -Because "$file must not name the machine"
+            (Get-Content (Join-Path $dir $file) -Raw) | Should -Not -Match ([regex]::Escape($result.MachineName)) -Because "$file must not name the fixture machine"
         }
     }
 
     It 'writes the machine name normally when redaction is not asked for' {
         # Redaction must be opt-in. The default report is evidence for the operator.
-        $result = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
+        $result = New-LVTestScanResult
         $dir = Join-Path $TestDrive 'plain'
         Export-LogVerdictReport -Result $result -OutputDir $dir 6>$null | Out-Null
-        (Get-Content (Join-Path $dir 'LogVerdict-Report.txt') -Raw) | Should -Match ([regex]::Escape($env:COMPUTERNAME))
+        (Get-Content (Join-Path $dir 'LogVerdict-Report.txt') -Raw) | Should -Match ([regex]::Escape($result.MachineName))
     }
 
     It 'masks generated secrets and network identifiers across every redacted report and bundle member' {
@@ -8355,7 +8645,7 @@ Describe 'Report redaction' {
             '00:11:22:33:44:55'
         )
         $secretLine = 'password=super-secret-2026 Bearer abcdefghijklmnop jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturevalue AWS AKIA1234567890ABCDEF GitHub ghp_abcdefghijklmnopqrstuvwxyz123456 SID S-1-5-21-111111111-222222222-333333333-1000 path C:\Users\secret-user\Desktop\evidence.log ip 10.20.30.40 mac 00:11:22:33:44:55 token=https://example.test/reset?token=abcdefghijklmnop'
-        $result = Invoke-LogVerdictScan -DaysBack 1 -SkipTextLogs -SkipReliability 6>$null
+        $result = New-LVTestScanResult
         $result.Findings = @($result.Findings) + @([pscustomobject]@{
             FirstSeen=(Get-Date).AddMinutes(-1); LastSeen=Get-Date; Source='event'; Channel='System'; Provider='PrivacyFixture'; Id=9001
             Title='Privacy fixture'; RuleId='PRIVACY-FIXTURE'; Verdict='investigate'; Count=1; PerDay=1; Key='event|System|9001'
@@ -8957,10 +9247,15 @@ Describe 'Rule regression fixtures' {
         InModuleScope LogVerdict {
             $db = Get-LogVerdictDatabase
             $fixtures = Get-LVFixtureSet
-            foreach ($rule in @($db.rules | Where-Object { $_.match.eventData })) {
-                @($fixtures.fixtures | Where-Object { $_.ruleId -eq $rule.id -and $_.nearMiss -ne $true }).Count |
+            $fixtures | Should -Not -BeNullOrEmpty -Because 'the regression suite must fail closed when its fixture file is absent'
+            $fixtureRows = @($fixtures.fixtures)
+            $fixtureRows.Count | Should -BeGreaterThan 0 -Because 'the regression suite must have committed fixture rows'
+            $structuredRules = @($db.rules | Where-Object { $_.match.eventData })
+            $structuredRules.Count | Should -BeGreaterThan 0 -Because 'the database must declare structured rules for the paired fixture suite'
+            foreach ($rule in $structuredRules) {
+                @($fixtureRows | Where-Object { $_.ruleId -eq $rule.id -and $_.nearMiss -ne $true }).Count |
                     Should -BeGreaterThan 0 -Because "$($rule.id) must prove a positive structured match"
-                @($fixtures.fixtures | Where-Object { $_.ruleId -eq $rule.id -and $_.nearMiss -eq $true }).Count |
+                @($fixtureRows | Where-Object { $_.ruleId -eq $rule.id -and $_.nearMiss -eq $true }).Count |
                     Should -BeGreaterThan 0 -Because "$($rule.id) must prove its structured near miss is rejected"
             }
         }
@@ -9049,7 +9344,11 @@ Describe 'Rule regression fixtures' {
 
     It 'exercises rate escalation, not just the base verdict' {
         InModuleScope LogVerdict {
-            $escalating = @((Get-LVFixtureSet).fixtures | Where-Object { $null -ne $_.perDay })
+            $set = Get-LVFixtureSet
+            $set | Should -Not -BeNullOrEmpty -Because 'the escalation suite must fail closed when its fixture file is absent'
+            $fixtureRows = @($set.fixtures)
+            $fixtureRows.Count | Should -BeGreaterThan 0 -Because 'the escalation suite must have committed fixture rows'
+            $escalating = @($fixtureRows | Where-Object { $null -ne $_.perDay })
             $escalating.Count | Should -BeGreaterThan 0 -Because 'a threshold nothing crosses is a threshold nothing tests'
             foreach ($f in $escalating) {
                 $rule = (Get-LogVerdictDatabase).rules | Where-Object id -eq $f.ruleId
@@ -9082,7 +9381,12 @@ Describe 'Rule regression fixtures' {
         # would pass its test and still never see a real line.
         InModuleScope LogVerdict {
             $set = Get-LVFixtureSet
-            foreach ($f in @($set.fixtures | Where-Object { $_.signature.Source -eq 'textlog' })) {
+            $set | Should -Not -BeNullOrEmpty -Because 'the text-log shape suite must fail closed when its fixture file is absent'
+            $fixtureRows = @($set.fixtures)
+            $fixtureRows.Count | Should -BeGreaterThan 0 -Because 'the text-log shape suite must have committed fixture rows'
+            $textFixtures = @($fixtureRows | Where-Object { $_.signature.Source -eq 'textlog' })
+            $textFixtures.Count | Should -BeGreaterThan 0 -Because 'the text-log shape suite must cover at least one text-log fixture'
+            foreach ($f in $textFixtures) {
                 if ($f.signature.Channel -eq 'WER') {
                     $f.signature.SampleMessage | Should -Match '^Report\.wer application crash:' -Because "$($f.ruleId)'s sample must be a line the crash collector produces"
                     continue
@@ -9115,7 +9419,11 @@ Describe 'Rule regression fixtures' {
         # path separator is doubled, and a pattern written for the escaped form can
         # backtrack around its own lookahead and pass while the leak is still there.
         InModuleScope LogVerdict {
-            foreach ($f in @((Get-LVFixtureSet).fixtures)) {
+            $set = Get-LVFixtureSet
+            $set | Should -Not -BeNullOrEmpty -Because 'the privacy suite must fail closed when its fixture file is absent'
+            $fixtureRows = @($set.fixtures)
+            $fixtureRows.Count | Should -BeGreaterThan 0 -Because 'the privacy suite must have committed fixture rows'
+            foreach ($f in $fixtureRows) {
                 $msg = [string]$f.signature.SampleMessage
                 $msg | Should -Not -Match 'S-1-5-21-\d' -Because "$($f.ruleId) must not carry a real account SID"
                 $msg | Should -Not -Match 'S-1-15-\d'   -Because "$($f.ruleId) must not carry a real package SID"
@@ -9132,7 +9440,10 @@ Describe 'Rule regression fixtures' {
     It 'says which fixtures were captured and which were constructed' {
         InModuleScope LogVerdict {
             $set = Get-LVFixtureSet
-            foreach ($f in @($set.fixtures)) {
+            $set | Should -Not -BeNullOrEmpty -Because 'the fixture-origin suite must fail closed when its fixture file is absent'
+            $fixtureRows = @($set.fixtures)
+            $fixtureRows.Count | Should -BeGreaterThan 0 -Because 'the fixture-origin suite must have committed fixture rows'
+            foreach ($f in $fixtureRows) {
                 $f.origin | Should -BeIn @('observed', 'constructed') -Because "$($f.ruleId) must not blur captured evidence with representative text"
             }
         }

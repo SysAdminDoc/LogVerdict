@@ -39,6 +39,31 @@ function Get-LVGuiScanTimingHint {
     return ('Typical {0}-day scan: {1}. All-channel sweeps can take longer.' -f $DaysBack, $range)
 }
 
+function Get-LVGuiInitialDays {
+    [CmdletBinding()]
+    param(
+        [ValidateRange(1, 3650)][int]$DaysBack = 30,
+        [bool]$DaysBackExplicit,
+        [AllowNull()]$SavedSettings
+    )
+
+    if (-not $DaysBackExplicit -and $SavedSettings -and $SavedSettings.PSObject.Properties['DaysBack']) {
+        $savedDays = 0
+        if ([int]::TryParse([string]$SavedSettings.DaysBack, [ref]$savedDays) -and $savedDays -ge 1 -and $savedDays -le 3650) {
+            return $savedDays
+        }
+    }
+    return $DaysBack
+}
+
+function Get-LVGuiAdvisoryState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Advisory)
+
+    if ($Advisory.Matched) { return 'AFFECTED' }
+    return 'CACHE ENTRY'
+}
+
 function Get-LVGuiSettingsPath {
     <#
         .SYNOPSIS
@@ -275,6 +300,154 @@ function Get-LVGuiNamedChannel {
     return ConvertTo-LVArrayOutput -Value $channel
 }
 
+function Get-LVGuiScanArguments {
+    <#
+        Build the scan contract from the values represented by the Overview controls.
+        Keeping this projection free of WPF objects makes option precedence and the
+        persisted-choice wiring testable without starting a window.
+    #>
+    [CmdletBinding()]
+    param(
+        [ValidateRange(1, 3650)][int]$DaysBack = 30,
+        [bool]$IncludeTextLogs = $true,
+        [bool]$SkipReliability,
+        [bool]$IncludeBenign,
+        [bool]$IncludeLowConfidence,
+        [AllowEmptyString()][string]$NamedChannels,
+        [bool]$AllChannels,
+        [bool]$DiagnosticChannels,
+        [AllowEmptyString()][string]$DatabasePath,
+        [AllowEmptyString()][string]$SuppressionPath,
+        [AllowEmptyString()][string]$AdvisoryPath,
+        [AllowEmptyString()][string]$AdvisoryPackage,
+        [AllowEmptyString()][string]$AdvisoryVersion,
+        [AllowEmptyString()][string]$CaseProfilePath
+    )
+
+    $arguments = [ordered]@{
+        DaysBack            = $DaysBack
+        SkipTextLogs       = -not $IncludeTextLogs
+        SkipReliability    = [bool]$SkipReliability
+        IncludeBenign      = [bool]$IncludeBenign
+        IncludeLowConfidence = [bool]$IncludeLowConfidence
+    }
+
+    $named = @(Get-LVGuiNamedChannel -Text $NamedChannels)
+    if ($named.Count -gt 0) {
+        $arguments['Channel'] = $named
+    } elseif ($AllChannels) {
+        $arguments['AllChannels'] = $true
+    } elseif ($DiagnosticChannels) {
+        $arguments['DiagnosticChannels'] = $true
+    }
+
+    foreach ($optional in @(
+        [pscustomobject]@{ Name = 'DatabasePath'; Value = $DatabasePath }
+        [pscustomobject]@{ Name = 'SuppressionPath'; Value = $SuppressionPath }
+        [pscustomobject]@{ Name = 'AdvisoryPath'; Value = $AdvisoryPath }
+        [pscustomobject]@{ Name = 'AdvisoryPackage'; Value = $AdvisoryPackage }
+        [pscustomobject]@{ Name = 'AdvisoryVersion'; Value = $AdvisoryVersion }
+        [pscustomobject]@{ Name = 'CaseProfilePath'; Value = $CaseProfilePath }
+    )) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$optional.Value)) {
+            $arguments[$optional.Name] = ([string]$optional.Value).Trim()
+        }
+    }
+
+    return $arguments
+}
+
+function Get-LVGuiExportArguments {
+    <#
+        Project the report controls into the public export command contract.
+        Raw evidence is allowed only when the operator explicitly selected evidence
+        and left redaction off; the public command remains the final policy gate.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Result,
+        [bool]$Redact,
+        [bool]$IncludeEvidence,
+        [AllowEmptyString()][string]$OutputDirectory
+    )
+
+    $arguments = [ordered]@{
+        Result          = $Result
+        Redact          = [bool]$Redact
+        IncludeEvidence = [bool]$IncludeEvidence
+        AllowRawEvidence = [bool]($IncludeEvidence -and -not $Redact)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($OutputDirectory)) {
+        $arguments['OutputDir'] = $OutputDirectory.Trim()
+    }
+    return $arguments
+}
+
+function Add-LVGuiActivityLine {
+    <#
+        Append one bounded activity line and update the two counters the renderer
+        exposes. The list and counters are supplied by reference so this remains a
+        pure-PowerShell seam rather than a WPF event-handler responsibility.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Lines,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Line,
+        [Parameter(Mandatory)][ref]$Characters,
+        [Parameter(Mandatory)][ref]$Dropped,
+        [ValidateRange(1, 20000)][int]$MaxLines = $script:LVMaxGuiActivityLines,
+        [ValidateRange(1, 10485760)][int]$MaxCharacters = 524288
+    )
+
+    $value = $Line.TrimEnd()
+    if ($value.Length -gt $MaxCharacters) {
+        $value = $value.Substring(0, $MaxCharacters)
+        $Dropped.Value++
+    }
+    $Lines.Add($value) | Out-Null
+    $Characters.Value += $value.Length + 1
+    while ($Lines.Count -gt $MaxLines -or $Characters.Value -gt $MaxCharacters) {
+        $removed = [string]$Lines[0]
+        $Lines.RemoveAt(0)
+        $Characters.Value = [Math]::Max(0, $Characters.Value - $removed.Length - 1)
+        $Dropped.Value++
+    }
+    return $value
+}
+
+function Get-LVGuiActivityProjection {
+    <#
+        Filter the already bounded activity buffer using literal ordinal matching.
+        Wildcards and regular expressions are intentionally not interpreted.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowEmptyCollection()][string[]]$Lines,
+        [AllowEmptyString()][string]$Search,
+        [int]$Dropped,
+        [ValidateRange(1, 20000)][int]$MaxLines = $script:LVMaxGuiActivityLines,
+        [ValidateRange(1, 10485760)][int]$MaxCharacters = 524288
+    )
+
+    $needle = ([string]$Search).Trim()
+    $visible = @($Lines | Where-Object {
+            -not $needle -or $_.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0
+        })
+    $prefix = if ($Dropped -gt 0) {
+        '[!] Earlier activity omitted after the {0}-line / {1:N0}-character display limit.' -f $MaxLines, $MaxCharacters
+    } else { $null }
+    $text = if ($prefix) {
+        $prefix + [Environment]::NewLine + ($visible -join [Environment]::NewLine)
+    } else {
+        $visible -join [Environment]::NewLine
+    }
+    return [pscustomobject]@{
+        Lines = [string[]]$visible
+        Text = $text
+        Search = $needle
+    }
+}
+
 function Select-LVGuiFolder {
     <#
         .SYNOPSIS
@@ -283,12 +456,14 @@ function Select-LVGuiFolder {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Window,
-        [AllowEmptyString()][string]$InitialDirectory
+        [AllowEmptyString()][string]$InitialDirectory,
+        [scriptblock]$DialogFactory,
+        [scriptblock]$OwnerFactory
     )
 
-    Add-Type -AssemblyName System.Windows.Forms
-    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $owner = New-Object System.Windows.Forms.NativeWindow
+    if (-not $DialogFactory) { Add-Type -AssemblyName System.Windows.Forms }
+    $dialog = if ($DialogFactory) { & $DialogFactory } else { New-Object System.Windows.Forms.FolderBrowserDialog }
+    $owner = if ($OwnerFactory) { & $OwnerFactory } else { New-Object System.Windows.Forms.NativeWindow }
     try {
         $dialog.Description = 'Choose where LogVerdict should save reports'
         $dialog.ShowNewFolderButton = $true
@@ -296,14 +471,14 @@ function Select-LVGuiFolder {
             $dialog.SelectedPath = $InitialDirectory
         }
 
-        $handle = (New-Object System.Windows.Interop.WindowInteropHelper($Window)).Handle
+        $handle = if ($OwnerFactory) { [IntPtr]::Zero } else { (New-Object System.Windows.Interop.WindowInteropHelper($Window)).Handle }
         $owner.AssignHandle($handle)
         if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
             return $dialog.SelectedPath
         }
     } finally {
-        $owner.ReleaseHandle()
-        $dialog.Dispose()
+        if ($owner -and $owner.PSObject.Methods['ReleaseHandle']) { $owner.ReleaseHandle() }
+        if ($dialog -and $dialog.PSObject.Methods['Dispose']) { $dialog.Dispose() }
     }
     return $null
 }
@@ -1199,7 +1374,10 @@ function Enable-LVDarkTitleBar {
         swallowed, because a light title bar is not a reason to fail to open a window.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)]$Window)
+    param(
+        [Parameter(Mandatory)]$Window,
+        [scriptblock]$HandleResolver
+    )
 
     try {
         if (-not ('LVNative.Dwm' -as [type])) {
@@ -1209,7 +1387,7 @@ public static extern int DwmSetWindowAttribute(System.IntPtr hwnd, int attr, ref
 '@
         }
 
-        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($Window)).Handle
+        $hwnd = if ($HandleResolver) { [IntPtr](& $HandleResolver $Window) } else { (New-Object System.Windows.Interop.WindowInteropHelper($Window)).Handle }
         if ($hwnd -eq [IntPtr]::Zero) { return }
 
         $highContrast = Test-LVGuiHighContrast

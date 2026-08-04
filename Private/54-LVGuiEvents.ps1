@@ -374,27 +374,6 @@ function Register-LVGuiScanHandlers {
         $state.Result = $null
         $state.ScanStartedAt = $null
 
-        $scanArgs = @{
-            DaysBack      = $days
-            SkipTextLogs  = -not [bool]$ui.ChkOverviewIncludeText.IsChecked
-            SkipReliability = [bool]$ui.ChkOverviewSkipReliability.IsChecked
-            IncludeBenign = [bool]$ui.ChkOverviewIncludeBenign.IsChecked
-            IncludeLowConfidence = [bool]$ui.ChkOverviewIncludeLowConfidence.IsChecked
-        }
-        if ($AdvisoryPath) { $scanArgs['AdvisoryPath'] = $AdvisoryPath }
-        if ($AdvisoryPackage) { $scanArgs['AdvisoryPackage'] = $AdvisoryPackage }
-        if ($AdvisoryVersion) { $scanArgs['AdvisoryVersion'] = $AdvisoryVersion }
-        if ($CaseProfilePath) { $scanArgs['CaseProfilePath'] = $CaseProfilePath }
-
-        $namedChannels = @(Get-LVGuiNamedChannel -Text $ui.TxtOverviewChannels.Text)
-        if ($namedChannels.Count -gt 0) {
-            $scanArgs['Channel'] = $namedChannels
-        } elseif ([bool]$ui.ChkOverviewAllChannels.IsChecked) {
-            $scanArgs['AllChannels'] = $true
-        } elseif ([bool]$ui.ChkOverviewDiagnosticChannels.IsChecked) {
-            $scanArgs['DiagnosticChannels'] = $true
-        }
-
         $databasePath = $ui.TxtOverviewDatabase.Text.Trim()
         if ($databasePath) {
             if (-not (Test-Path -LiteralPath $databasePath -PathType Leaf)) {
@@ -402,7 +381,6 @@ function Register-LVGuiScanHandlers {
                 & $showPage 'Overview'
                 return
             }
-            $scanArgs['DatabasePath'] = $databasePath
         }
 
         $suppressionPath = $ui.TxtOverviewSuppression.Text.Trim()
@@ -412,8 +390,19 @@ function Register-LVGuiScanHandlers {
                 & $showPage 'Overview'
                 return
             }
-            $scanArgs['SuppressionPath'] = $suppressionPath
         }
+
+        $scanArgs = Get-LVGuiScanArguments -DaysBack $days `
+            -IncludeTextLogs ([bool]$ui.ChkOverviewIncludeText.IsChecked) `
+            -SkipReliability ([bool]$ui.ChkOverviewSkipReliability.IsChecked) `
+            -IncludeBenign ([bool]$ui.ChkOverviewIncludeBenign.IsChecked) `
+            -IncludeLowConfidence ([bool]$ui.ChkOverviewIncludeLowConfidence.IsChecked) `
+            -NamedChannels $ui.TxtOverviewChannels.Text `
+            -AllChannels ([bool]$ui.ChkOverviewAllChannels.IsChecked) `
+            -DiagnosticChannels ([bool]$ui.ChkOverviewDiagnosticChannels.IsChecked) `
+            -DatabasePath $databasePath -SuppressionPath $suppressionPath `
+            -AdvisoryPath $AdvisoryPath -AdvisoryPackage $AdvisoryPackage `
+            -AdvisoryVersion $AdvisoryVersion -CaseProfilePath $CaseProfilePath
 
         try {
             $state.Job = Start-LVScanJob -ScanArgs $scanArgs -LogSink $state.Sink
@@ -460,16 +449,11 @@ function Register-LVGuiScanHandlers {
     $ui.BtnSaveReport.Add_Click({
         if ($null -eq $state.Result) { return }
         try {
-            $exportArgs = @{
-                Result          = $state.Result
-                Redact          = [bool]$ui.ChkOverviewRedact.IsChecked
-                IncludeEvidence = [bool]$ui.ChkOverviewEvidence.IsChecked
-                # Checking the evidence box is the GUI's explicit raw-evidence choice
-                # when redaction is off; the public command still requires its switch.
-                AllowRawEvidence = [bool]($ui.ChkOverviewEvidence.IsChecked -and -not $ui.ChkOverviewRedact.IsChecked)
-            }
             $outputDir = $ui.TxtOverviewOutputDir.Text.Trim()
-            if ($outputDir) { $exportArgs['OutputDir'] = $outputDir }
+            $exportArgs = Get-LVGuiExportArguments -Result $state.Result `
+                -Redact ([bool]$ui.ChkOverviewRedact.IsChecked) `
+                -IncludeEvidence ([bool]$ui.ChkOverviewEvidence.IsChecked) `
+                -OutputDirectory $outputDir
             $out = Export-LogVerdictReport @exportArgs
             $state.ReportDir = $out.OutputDir
             $state.HtmlPath = ($out.Files | Where-Object { $_ -like '*.html' } | Select-Object -First 1)

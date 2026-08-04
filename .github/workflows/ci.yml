@@ -69,9 +69,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           .\Tools\Test-LogVerdictGui.ps1 -Theme Normal -ScalePercent 125
-          if (-not $?) { exit 1 }
+          $guiExit = [int]$LASTEXITCODE
+          if ($guiExit -ne 0) { exit $guiExit }
           .\Tools\Test-LogVerdictGui.ps1 -Theme HighContrast -ScalePercent 125
-          if (-not $?) { exit 1 }
+          $guiExit = [int]$LASTEXITCODE
+          if ($guiExit -ne 0) { exit $guiExit }
 
       - name: Prove GUI filter rejects renamed suites
         shell: ${{ matrix.shell }}
@@ -105,7 +107,8 @@ jobs:
           $exe = if ($runtime -eq 'powershell') { 'powershell.exe' } else { 'pwsh.exe' }
           $report = Join-Path $env:GITHUB_WORKSPACE ("coverage-{0}.json" -f $runtime)
           & $exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Tools\Test-LogVerdictCoverage.ps1 -OutputPath $report
-          if (-not $?) { exit 1 }
+          $coverageExit = [int]$LASTEXITCODE
+          if ($coverageExit -ne 0) { exit $coverageExit }
 
       - name: Upload structured coverage report
         if: always()
@@ -122,7 +125,8 @@ jobs:
           $runtime = '${{ matrix.shell }}'
           $report = Join-Path $env:GITHUB_WORKSPACE ("performance-{0}.json" -f $runtime)
           .\Tools\Test-LogVerdictPerformance.ps1 -OutputPath $report -BudgetPath .\Data\performance-budgets.json
-          if (-not $?) { exit 1 }
+          $performanceExit = [int]$LASTEXITCODE
+          if ($performanceExit -ne 0) { exit $performanceExit }
 
       - name: Upload content-free performance report
         if: always()
@@ -157,7 +161,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           .\Tools\Test-LogVerdictReleaseStatic.ps1
-          if (-not $?) { exit 1 }
+          $staticExit = [int]$LASTEXITCODE
+          if ($staticExit -ne 0) { exit $staticExit }
 
       - name: Run Core schema release gates
         if: matrix.shell == 'pwsh'
@@ -165,7 +170,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           .\Tools\Test-LogVerdictRelease.ps1
-          if (-not $?) { exit 1 }
+          $releaseExit = [int]$LASTEXITCODE
+          if ($releaseExit -ne 0) { exit $releaseExit }
 
   package:
     name: Build and verify release assets
@@ -188,7 +194,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           .\Tools\Build-LogVerdictExe.ps1
-          if (-not $?) { exit 1 }
+          $buildExit = [int]$LASTEXITCODE
+          if ($buildExit -ne 0) { exit $buildExit }
 
       - name: Smoke packaged console executable
         shell: pwsh
@@ -245,7 +252,8 @@ jobs:
           $version = (& .\Tools\Get-LogVerdictVersion.ps1).Trim()
           $date = (Get-Date).ToString('yyyy-MM-dd')
           .\Tools\New-PackageManifests.ps1 -Version $version -AssetDirectory (Join-Path $root 'dist') -ReleaseDate $date -OutputDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging')
-          if (-not $?) { exit 1 }
+          $manifestExit = [int]$LASTEXITCODE
+          if ($manifestExit -ne 0) { exit $manifestExit }
 
       - name: Generate SPDX SBOM and build provenance
         shell: pwsh
@@ -253,7 +261,8 @@ jobs:
           $root = (Get-Location).Path
           $version = (& .\Tools\Get-LogVerdictVersion.ps1).Trim()
           .\Tools\New-LogVerdictSupplyChain.ps1 -Version $version -AssetDirectory (Join-Path $root 'dist') -OutputDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain') -SourceDirectory $root -RequireModuleZip
-          if (-not $?) { exit 1 }
+          $supplyChainExit = [int]$LASTEXITCODE
+          if ($supplyChainExit -ne 0) { exit $supplyChainExit }
 
       - name: Verify supply-chain metadata directly
         shell: pwsh
@@ -262,14 +271,16 @@ jobs:
           $root = (Get-Location).Path
           $version = (& .\Tools\Get-LogVerdictVersion.ps1).Trim()
           .\Tools\Test-LogVerdictSupplyChain.ps1 -Version $version -MetadataDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain') -AssetDirectory (Join-Path $root 'dist') -SourceDirectory $root -RequireModuleZip
-          if (-not $?) { exit 1 }
+          $supplyChainVerifyExit = [int]$LASTEXITCODE
+          if ($supplyChainVerifyExit -ne 0) { exit $supplyChainVerifyExit }
 
       - name: Validate package hashes and version provenance
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           .\Tools\Test-LogVerdictRelease.ps1 -ManifestDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging') -AssetDirectory (Join-Path (Get-Location).Path 'dist') -SupplyChainDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain') -ReleaseValidation -RequireModuleZip
-          if (-not $?) { exit 1 }
+          $releaseValidationExit = [int]$LASTEXITCODE
+          if ($releaseValidationExit -ne 0) { exit $releaseValidationExit }
 
       - name: Launch packaged GUI smoke matrix
         shell: pwsh
@@ -280,9 +291,11 @@ jobs:
           $screenshot = Join-Path $env:RUNNER_TEMP 'logverdict-gui-normal.png'
           $screenshotMetadata = Join-Path $env:RUNNER_TEMP 'logverdict-gui-normal-screenshot.json'
           .\Tools\Test-LogVerdictGuiArtifact.ps1 -GuiPath .\dist\LogVerdict-GUI.exe -EvidencePath $normal -Theme Normal -ScreenshotPath $screenshot -ScreenshotMetadataPath $screenshotMetadata
-          if (-not $?) { exit 1 }
+          $normalGuiExit = [int]$LASTEXITCODE
+          if ($normalGuiExit -ne 0) { exit $normalGuiExit }
           .\Tools\Test-LogVerdictGuiArtifact.ps1 -GuiPath .\dist\LogVerdict-GUI.exe -EvidencePath $highContrast -Theme HighContrast
-          if (-not $?) { exit 1 }
+          $highContrastGuiExit = [int]$LASTEXITCODE
+          if ($highContrastGuiExit -ne 0) { exit $highContrastGuiExit }
 
       - name: Verify packaged GUI placement in coverage gate
         shell: pwsh
@@ -291,7 +304,8 @@ jobs:
           $report = Join-Path $env:RUNNER_TEMP 'logverdict-gui-coverage.json'
           $evidence = Join-Path $env:RUNNER_TEMP 'logverdict-gui-normal.json'
           & pwsh -NoProfile -STA -ExecutionPolicy Bypass -File .\Tools\Test-LogVerdictCoverage.ps1 -OutputPath $report -DisplayEvidencePath $evidence
-          if (-not $?) { exit 1 }
+          $guiCoverageExit = [int]$LASTEXITCODE
+          if ($guiCoverageExit -ne 0) { exit $guiCoverageExit }
 
       - name: Upload packaged GUI smoke evidence
         if: always()

@@ -105,7 +105,12 @@ function New-LVPrivacyAudit {
             Regex = '(?i)(?<![\p{L}\p{N}])' + [regex]::Escape($MachineName) + '(?![\p{L}\p{N}])'
         }) | Out-Null
     }
-    if ($UserName -and $UserName -notmatch '^<[^>]+>$') {
+    # Punctuation-only account names (for example a lab account named `--`) are
+    # too broad to use as a literal privacy token: they match separators and
+    # timestamps in otherwise sanitized reports. The profile-path pattern still
+    # covers the account's on-disk identity, while alphanumeric names remain
+    # explicitly audited here.
+    if ($UserName -and $UserName -match '[\p{L}\p{N}]' -and $UserName -notmatch '^<[^>]+>$') {
         $patterns.Add([pscustomobject]@{
             Id = 'known-user'; Category = 'account-name'; Substitution = '<USER>'
             Regex = '(?i)(?<![\p{L}\p{N}])' + [regex]::Escape($UserName) + '(?![\p{L}\p{N}])'
