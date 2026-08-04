@@ -79,6 +79,9 @@ function Export-LogVerdictHandoff {
             timesketch = 'LogVerdict-Timesketch.csv'
             hayabusa = 'LogVerdict-Hayabusa.csv'
             timeline = 'LogVerdict-Timeline.jsonl'
+            ticketMarkdown = 'LogVerdict-Ticket-Summary.md'
+            ticketText = 'LogVerdict-Ticket-Summary.txt'
+            ticketHtml = 'LogVerdict-Ticket-Summary.html'
             manifest = 'LogVerdict-Handoff.json'
         }
         $profilePathOut = Join-Path $OutputDir $files.profile
@@ -93,6 +96,13 @@ function Export-LogVerdictHandoff {
         $timeline = Write-LVJsonlTimeline -Result $timelineResult -Path (Join-Path $OutputDir $files.timeline) `
             -Redact:([bool]($Redact -or $Profile.redaction.requested))
 
+        $ticketModel = Get-LVTicketSummaryModel -Result $timelineResult
+        Write-LVTextFile -Path (Join-Path $OutputDir $files.ticketMarkdown) -Content (ConvertTo-LVTicketSummary -Result $timelineResult)
+        Write-LVTextFile -Path (Join-Path $OutputDir $files.ticketText) -Content (Limit-LVTicketText `
+            -Text (ConvertTo-LVTicketSummaryText -Model $ticketModel) -Suffix 'Summary truncated; attach the full report for the complete list.')
+        Write-LVTextFile -Path (Join-Path $OutputDir $files.ticketHtml) -Content (Limit-LVTicketText `
+            -Text (ConvertTo-LVTicketSummaryHtml -Model $ticketModel) -Suffix 'Summary truncated; attach the full report for the complete list.')
+
         $manifest = [pscustomobject][ordered]@{
             schemaVersion = $script:LVCaseHandoffSchemaVersion
             profileId = $Profile.profileId
@@ -104,6 +114,7 @@ function Export-LogVerdictHandoff {
                 timesketch = 'CSV with message, datetime, and timestamp_desc mandatory fields'
                 hayabusa = 'CSV timeline projection with RuleTitle, Level, Computer, Channel, EventID, and Details'
                 timeline = 'UTF-8 JSONL with one versioned metadata, event, finding, correlation, coverage, or provider record per line'
+                ticket = 'Bounded Markdown, plain-text, and inline-style email-safe HTML bodies; full report remains the attachment of record'
                 recipes = @('KAPE .tkape target', 'Velociraptor CLIENT artifact YAML')
             }
             timelineLineCount = $timeline.LineCount

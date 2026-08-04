@@ -11,9 +11,10 @@ function Export-LogVerdictReport {
         even when the script is right-click-elevated and starts in System32.
 
         .PARAMETER Format
-        Any of Text, Json, Csv, Html, Markdown, or All. Markdown writes a bounded,
-        prose-first ticket summary with the findings needing attention and coverage
-        caveats. Default All. Csv writes one scalar row per finding with a stable
+        Any of Text, Json, Csv, Html, Markdown, TicketText, TicketHtml, or All.
+        Markdown writes a bounded, prose-first ticket summary plus matching plain-text
+        and email-safe HTML bodies. TicketText and TicketHtml select those bodies
+        individually. Default All. Csv writes one scalar row per finding with a stable
         pipeline-friendly column contract.
 
         .PARAMETER Redact
@@ -46,7 +47,7 @@ function Export-LogVerdictReport {
     param(
         [Parameter(Mandatory, ValueFromPipeline)]$Result,
         [string]$OutputDir,
-        [ValidateSet('Text', 'Json', 'Csv', 'Html', 'Markdown', 'All')][string[]]$Format = @('All'),
+        [ValidateSet('Text', 'Json', 'Csv', 'Html', 'Markdown', 'TicketText', 'TicketHtml', 'All')][string[]]$Format = @('All'),
         [switch]$Redact,
         [switch]$IncludeEvidence,
         [switch]$AllowRawEvidence
@@ -112,9 +113,26 @@ function Export-LogVerdictReport {
             $written.Add($p) | Out-Null
         }
 
-        if ($wantAll -or $Format -contains 'Markdown') {
+        $ticketFamily = $wantAll -or $Format -contains 'Markdown'
+        if ($ticketFamily -or $Format -contains 'Markdown') {
             $p = Join-Path $OutputDir 'LogVerdict-Ticket-Summary.md'
             Write-LVTextFile -Path $p -Content (ConvertTo-LVTicketSummary -Result $Result)
+            $written.Add($p) | Out-Null
+        }
+        if ($ticketFamily -or $Format -contains 'TicketText') {
+            $p = Join-Path $OutputDir 'LogVerdict-Ticket-Summary.txt'
+            $ticketModel = Get-LVTicketSummaryModel -Result $Result
+            $ticketText = Limit-LVTicketText -Text (ConvertTo-LVTicketSummaryText -Model $ticketModel) `
+                -Suffix 'Summary truncated; attach the full report for the complete list.'
+            Write-LVTextFile -Path $p -Content $ticketText
+            $written.Add($p) | Out-Null
+        }
+        if ($ticketFamily -or $Format -contains 'TicketHtml') {
+            $p = Join-Path $OutputDir 'LogVerdict-Ticket-Summary.html'
+            $ticketModel = if ($ticketModel) { $ticketModel } else { Get-LVTicketSummaryModel -Result $Result }
+            $ticketHtml = Limit-LVTicketText -Text (ConvertTo-LVTicketSummaryHtml -Model $ticketModel) `
+                -Suffix 'Summary truncated; attach the full report for the complete list.'
+            Write-LVTextFile -Path $p -Content $ticketHtml
             $written.Add($p) | Out-Null
         }
 

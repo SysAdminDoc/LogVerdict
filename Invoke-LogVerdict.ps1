@@ -92,6 +92,10 @@
     .PARAMETER NoReport
     Console only; write nothing to disk.
 
+    .PARAMETER Intune
+    Emit a UTF-8, no-BOM remediation digest under 2,048 characters and exit 1 for
+    any non-benign verdict, or 0 when the result is benign. Reports are not written.
+
     .PARAMETER Redact
     Mask captured identifiers in written reports and, when model explanations are
     enabled, in the prompt-specific finding copy sent to the local Ollama endpoint.
@@ -131,10 +135,11 @@ param(
     [switch]$SuppressedOnly,
     [string]$OutputDir,
     [switch]$NoReport,
+    [switch]$Intune,
     [switch]$Redact,
     [switch]$IncludeEvidence,
     [switch]$AllowRawEvidence,
-    [ValidateSet('Text', 'Json', 'Csv', 'Html', 'All')][string[]]$Format = @('All'),
+    [ValidateSet('Text', 'Json', 'Csv', 'Html', 'Markdown', 'TicketText', 'TicketHtml', 'All')][string[]]$Format = @('All'),
     [string]$EvidencePath,
     [switch]$ExplainUnknown,
     [string]$OllamaModel = 'llama3.2',
@@ -238,6 +243,16 @@ try {
         # powershell.exe -File hands "-Channel System,Application" over as ONE string
         # rather than binding it to the [string[]] parameter, so split it back out.
         $scanArgs['Channel'] = @($Channel | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' } | ForEach-Object { $_.Trim() })
+    }
+
+    if ($Intune) {
+        # Intune consumes stdout as the remediation signal. Suppress the normal
+        # informational host stream and emit only the bounded digest below.
+        $result = Invoke-LogVerdictScan @scanArgs 6>$null
+        $digest = Get-LogVerdictIntuneDigest -Result $result
+        try { [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false) } catch { }
+        [Console]::Out.WriteLine($digest.Text)
+        exit $digest.ExitCode
     }
 
     $result = Invoke-LogVerdictScan @scanArgs

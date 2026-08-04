@@ -145,116 +145,87 @@ function Format-LVWhen {
     return ('{0:yyyy-MM-dd HH:mm}' -f $When)
 }
 
-function ConvertTo-LVTicketSummary {
-    <#
-        .SYNOPSIS
-        Render the bounded, prose-first Markdown handoff an MSP can paste into a ticket.
+function ConvertTo-LVTicketTimestamp {
+    <# A ticket must not depend on the reader's local culture or time zone. #>
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
 
-        .DESCRIPTION
-        This deliberately projects the scan rather than copying the full report. It
-        leads with the worst curated verdict, keeps only findings that need attention,
-        explains how many repeated records were suppressed, and carries the coverage
-        caveats that keep a partial scan from sounding clean. The GUI uses this same
-        function for its clipboard action, so the pasted text cannot drift from the
-        file written by Export-LogVerdictReport.
-    #>
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return 'undated' }
+    try {
+        $parsed = if ($Value -is [datetimeoffset]) {
+            [datetimeoffset]$Value
+        } elseif ($Value -is [datetime]) {
+            [datetimeoffset]$Value
+        } else {
+            [datetimeoffset]::Parse([string]$Value, [Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::AllowWhiteSpaces -bor [Globalization.DateTimeStyles]::RoundtripKind)
+        }
+        return $parsed.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [Globalization.CultureInfo]::InvariantCulture)
+    } catch {
+        return 'undated'
+    }
+}
+
+function Limit-LVTicketText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Text,
+        [ValidateRange(2048, 65536)][int]$MaxBytes = 16000,
+        [Parameter(Mandatory)][string]$Suffix
+    )
+
+    $encoding = [Text.Encoding]::UTF8
+    if ($encoding.GetByteCount($Text) -le $MaxBytes) { return $Text }
+    $suffixText = [Environment]::NewLine + [Environment]::NewLine + $Suffix
+    $target = [Math]::Max(0, $MaxBytes - $encoding.GetByteCount($suffixText))
+    $chars = [Math]::Min($Text.Length, $target)
+    while ($chars -gt 0 -and $encoding.GetByteCount($Text.Substring(0, $chars)) -gt $target) { $chars-- }
+    return $Text.Substring(0, $chars).TrimEnd() + $suffixText
+}
+
+function Get-LVTicketSummaryModel {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Result,
-        [switch]$Redact,
-        [AllowNull()][string]$MachineName,
-        [AllowNull()][string]$UserName
+        [ValidateRange(1, 50)][int]$TopCount = 10
     )
 
-    $resolved = Resolve-LVScanInput -InputObject $Result -Role 'result'
-    $resolved = ConvertFrom-LVReportContract -InputObject $resolved
-    $builder = New-Object System.Text.StringBuilder
-
+    $resolved = ConvertFrom-LVReportContract -InputObject (Resolve-LVScanInput -InputObject $Result -Role 'result')
     $clean = {
-        param([AllowNull()]$Value, [int]$Limit = 2000)
+        param([AllowNull()]$Value, [int]$Limit = 600)
         if ($null -eq $Value) { return '' }
         $text = ([string]$Value) -replace '[\r\n]+', ' '
         $text = $text.Trim()
-        if ($text.Length -gt $Limit) { return $text.Substring(0, $Limit - 3) + '...' }
+        if ($text.Length -gt $Limit) { return $text.Substring(0, [Math]::Max(0, $Limit - 3)) + '...' }
         return $text
     }
-    $add = {
-        param([AllowEmptyString()][string]$Line = '')
-        [void]$builder.AppendLine($Line)
-    }
 
-    $version = if ($resolved.Version) { [string]$resolved.Version } else { [string]$script:LVVersion }
-    $databaseName = if ($resolved.DatabaseName) { [string]$resolved.DatabaseName } else { 'bundled database' }
-    $databaseDate = if ($resolved.DatabaseDate) { [string]$resolved.DatabaseDate } else { 'unknown' }
-    $worst = if ($resolved.WorstVerdict) { [string]$resolved.WorstVerdict } else { 'unknown' }
-    $findings = @(Get-LVReportIncident -Result $resolved | Where-Object {
+    $allAttention = @(Get-LVReportIncident -Result $resolved | Where-Object {
         $_ -and (Get-LVVerdictRank -Verdict ([string]$_.Verdict)) -ge (Get-LVVerdictRank -Verdict 'unknown')
     } | Sort-Object @{ Expression = { Get-LVVerdictRank -Verdict ([string]$_.Verdict) }; Descending = $true },
         @{ Expression = { [int64]$_.Count }; Descending = $true }, Title)
-    $reduction = $resolved.Reduction
+    $top = @($allAttention | Select-Object -First $TopCount | ForEach-Object {
+        $keys = @($_.SignatureKeys | Where-Object { $_ })
+        [pscustomobject][ordered]@{
+            Verdict = & $clean $_.Verdict 40
+            Title = & $clean $_.Title
+            Action = if ($_.Action) { & $clean $_.Action } else { 'Review the full finding details.' }
+            Count = [int64]$_.Count
+            PerDay = & $clean $_.PerDay 40
+            LastSeenUtc = ConvertTo-LVTicketTimestamp -Value $_.LastSeen
+            Key = & $clean $(if ($keys.Count -gt 0) { $keys -join ', ' } else { $_.Key }) 400
+            SignatureCount = if ($_.SignatureCount) { [int]$_.SignatureCount } elseif ($keys.Count) { $keys.Count } else { 1 }
+            DistinctCodes = @($_.DistinctCodes | Where-Object { $_ } | ForEach-Object { & $clean $_ 120 })
+        }
+    })
+
+    $reduction = if ($resolved.PSObject.Properties['Reduction']) { $resolved.Reduction } else { $null }
     $incidentSummary = Get-LVReportIncidentSummary -Result $resolved
     $suppressionStatus = Get-LVReportSuppressionStatus -Result $resolved
     $recordCount = if ($reduction) { [int64]$reduction.RecordCount } else { 0 }
     $signatureCount = if ($reduction) { [int64]$reduction.SignatureCount } else { 0 }
-    $suppressed = [Math]::Max(0, $recordCount - $signatureCount)
+    $repeatedRecordCount = [Math]::Max(0, $recordCount - $signatureCount)
     $ratio = if ($reduction -and $null -ne $reduction.Ratio) { [string]$reduction.Ratio } else { 'n/a' }
-
-    & $add '# LogVerdict ticket summary'
-    & $add ''
-    & $add ('- **Worst verdict:** **{0}**' -f (& $clean $worst).ToUpperInvariant())
-    & $add ('- **Machine:** {0}' -f (& $clean $resolved.MachineName))
-    & $add ('- **Scanned:** {0} (last {1} day(s))' -f (& $clean $resolved.ScanTime), (& $clean $resolved.DaysBack))
-    & $add ('- **Tool:** LogVerdict {0}' -f (& $clean $version))
-    & $add ('- **Rule database:** {0}, updated {1}' -f (& $clean $databaseName), (& $clean $databaseDate))
-    & $add ('- **Suppressed repeats:** {0:N0} record(s) reduced to {1:N0} signature(s) ({2}:1)' -f $suppressed, $signatureCount, (& $clean $ratio))
-    & $add ('- **Incident suppression:** {0:P0} ({1:N0} of {2:N0} signatures grouped)' -f $incidentSummary.SuppressionRatio, $incidentSummary.SuppressedSignatureCount, $incidentSummary.SignatureCount)
-    & $add ('- **Suppression expectations:** {0:N0} signature(s) suppressed; {1:N0} matched nothing; {2:N0} expired or due for review' -f $suppressionStatus.SuppressedFindingCount, $suppressionStatus.UnmatchedCount, $suppressionStatus.ExpiredCount)
-    & $add ('- **Incidents needing attention:** {0}' -f $findings.Count)
-    & $add ''
-
-    & $add '## Suppression expectations'
-    if ($suppressionStatus.Status -eq 'not-requested' -or $suppressionStatus.EntryCount -eq 0) {
-        & $add '- No operator suppression expectation file was loaded.'
-    } else {
-        & $add ('- File: `{0}`; {1} active entry/entries, {2} matched this run.' -f (& $clean $suppressionStatus.Path), $suppressionStatus.ActiveCount, $suppressionStatus.MatchedCount)
-        if ($suppressionStatus.UnmatchedCount -eq 0) {
-            & $add '- No active suppression matched nothing in this run.'
-        } else {
-            & $add '- **Matched nothing this run:**'
-            foreach ($entry in @($suppressionStatus.Unmatched | Select-Object -First 20)) {
-                & $add ('  - `{0}` ({1}) - {2}' -f (& $clean $entry.id), (& $clean $entry.action), (& $clean $entry.statement))
-            }
-        }
-        foreach ($entry in @($suppressionStatus.Expired | Select-Object -First 20)) {
-            & $add ('- **Expired/review due:** `{0}` since {1}' -f (& $clean $entry.id), (& $clean $entry.reviewDueOn))
-        }
-    }
-    & $add ''
-
-    & $add '## Incidents needing attention'
-    if ($findings.Count -eq 0) {
-        & $add '- None. The scan produced no unknown, investigate, actionable, or critical findings.'
-    } else {
-        $index = 0
-        foreach ($finding in $findings) {
-            $index++
-            $verdict = (& $clean $finding.Verdict).ToUpperInvariant()
-            $action = if ($finding.Action) { & $clean $finding.Action } else { 'Review the full finding details.' }
-            & $add ('{0}. **{1} - {2}**' -f $index, $verdict, (& $clean $finding.Title))
-            & $add ('   - **Action:** {0}' -f $action)
-            & $add ('   - **Occurrences:** {0:N0} ({1}/day); last seen {2}' -f [int64]$finding.Count, (& $clean $finding.PerDay), (& $clean (Format-LVWhen $finding.LastSeen)))
-            $signatureKeys = @($finding.SignatureKeys | Where-Object { $_ })
-            if ($signatureKeys.Count -gt 0) {
-                & $add ('   - **Signatures:** {0:N0} - `{1}`' -f $(if ($finding.SignatureCount) { $finding.SignatureCount } else { $signatureKeys.Count }), (& $clean ($signatureKeys -join '`, `')))
-            } else {
-                & $add ('   - **Signatures:** 1 - `{0}`' -f (& $clean ($finding.Key)))
-            }
-            if (@($finding.DistinctCodes | Where-Object { $_ }).Count -gt 0) {
-                & $add ('   - **Distinct codes:** `{0}`' -f (& $clean ((@($finding.DistinctCodes) -join ', '))))
-            }
-        }
-    }
-    & $add ''
 
     $caveats = New-Object 'System.Collections.Generic.List[string]'
     $seenCaveats = New-Object 'System.Collections.Generic.HashSet[string]'
@@ -267,46 +238,178 @@ function ConvertTo-LVTicketSummary {
         if ($text -and $seenCaveats.Add($text)) { $caveats.Add($text) | Out-Null }
     }
     foreach ($source in @($resolved.Coverage | Where-Object { $_ -and $_.Status -notin @('readable', 'empty') })) {
-        $text = '{0}/{1} is {2}{3}' -f (& $clean $source.Source), (& $clean $source.Name), (& $clean $source.Status),
+        $text = '{0}/{1} is {2}{3}' -f (& $clean $source.Source 80), (& $clean $source.Name 120), (& $clean $source.Status 40),
             $(if ($source.Reason) { ': ' + (& $clean $source.Reason) } else { '' })
         if ($seenCaveats.Add($text)) { $caveats.Add($text) | Out-Null }
     }
     foreach ($health in @($resolved.HealthProfiles | Where-Object { $_ -and $_.Status -notin @('available', 'healthy', 'readable') })) {
-        $text = 'Health profile {0} is {1}{2}' -f (& $clean $health.Name), (& $clean $health.Status),
+        $text = 'Health profile {0} is {1}{2}' -f (& $clean $health.Name 120), (& $clean $health.Status 40),
             $(if ($health.Advice) { ': ' + (& $clean $health.Advice) } elseif ($health.Reason) { ': ' + (& $clean $health.Reason) } else { '' })
         if ($seenCaveats.Add($text)) { $caveats.Add($text) | Out-Null }
     }
 
-    & $add '## Coverage caveats'
-    if ($caveats.Count -eq 0) {
-        & $add '- No coverage caveats were reported.'
-    } else {
-        foreach ($caveat in $caveats) { & $add ('- {0}' -f $caveat) }
+    return [pscustomobject][ordered]@{
+        Version = & $clean $(if ($resolved.Version) { $resolved.Version } else { $script:LVVersion }) 40
+        MachineName = & $clean $resolved.MachineName 160
+        ScanTimeUtc = ConvertTo-LVTicketTimestamp -Value $resolved.ScanTime
+        DaysBack = [int]$resolved.DaysBack
+        WorstVerdict = & $clean $(if ($resolved.WorstVerdict) { $resolved.WorstVerdict } else { 'unknown' }) 40
+        DatabaseName = & $clean $(if ($resolved.DatabaseName) { $resolved.DatabaseName } else { 'bundled database' }) 160
+        DatabaseDate = & $clean $(if ($resolved.DatabaseDate) { $resolved.DatabaseDate } else { 'unknown' }) 40
+        RecordCount = $recordCount
+        SignatureCount = $signatureCount
+        RepeatedRecordCount = $repeatedRecordCount
+        ReductionRatio = $ratio
+        IncidentCount = $incidentSummary.IncidentCount
+        IncidentSuppressionRatio = $incidentSummary.SuppressionRatio
+        IncidentSuppressedSignatureCount = $incidentSummary.SuppressedSignatureCount
+        IncidentSignatureCount = $incidentSummary.SignatureCount
+        SuppressionStatus = $suppressionStatus
+        TotalAttentionCount = $allAttention.Count
+        TopCount = $TopCount
+        TopFindings = @($top)
+        OmittedAttentionCount = [Math]::Max(0, $allAttention.Count - $top.Count)
+        CoverageCaveats = @($caveats | Select-Object -First 20)
+        FullReportStatement = 'Attach the full LogVerdict report for raw evidence and complete source detail.'
     }
-    & $add ''
-    & $add '> This is a ticket summary. Attach the full LogVerdict report when raw evidence or complete source detail is needed.'
+}
 
-    $text = $builder.ToString().TrimEnd()
+function ConvertTo-LVTicketSummaryMarkdown {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Model)
+
+    $clean = { param([AllowNull()]$Value) if ($null -eq $Value) { return '' }; return (([string]$Value) -replace '[\r\n]+', ' ').Trim() }
+    $b = New-Object System.Text.StringBuilder
+    $add = { param([AllowEmptyString()][string]$Line = '') [void]$b.AppendLine($Line) }
+    & $add '# LogVerdict ticket summary'; & $add ''
+    & $add ('- **Worst verdict:** **{0}**' -f (& $clean $Model.WorstVerdict).ToUpperInvariant())
+    & $add ('- **Machine:** {0}' -f (& $clean $Model.MachineName))
+    & $add ('- **Scanned (UTC):** {0} (last {1} day(s))' -f (& $clean $Model.ScanTimeUtc), $Model.DaysBack)
+    & $add ('- **Tool:** LogVerdict {0}' -f (& $clean $Model.Version))
+    & $add ('- **Rule database:** {0}, updated {1} (UTC date)' -f (& $clean $Model.DatabaseName), (& $clean $Model.DatabaseDate))
+    & $add ('- **Suppressed repeats:** {0:N0} record(s) reduced to {1:N0} signature(s) ({2}:1)' -f $Model.RepeatedRecordCount, $Model.SignatureCount, (& $clean $Model.ReductionRatio))
+    & $add ('- **Incident suppression:** {0:P0} ({1:N0} of {2:N0} signatures grouped)' -f $Model.IncidentSuppressionRatio, $Model.IncidentSuppressedSignatureCount, $Model.IncidentSignatureCount)
+    & $add ('- **Suppression expectations:** {0:N0} signature(s) suppressed; {1:N0} matched nothing; {2:N0} expired or due for review' -f $Model.SuppressionStatus.SuppressedFindingCount, $Model.SuppressionStatus.UnmatchedCount, $Model.SuppressionStatus.ExpiredCount)
+    & $add ('- **Incidents needing attention:** {0} (top {1} included)' -f $Model.TotalAttentionCount, $Model.TopCount); & $add ''
+    & $add '## Incidents needing attention'
+    if ($Model.TopFindings.Count -eq 0) {
+        & $add '- None. The scan produced no unknown, investigate, actionable, or critical findings.'
+    } else {
+        $index = 0
+        foreach ($finding in $Model.TopFindings) {
+            $index++
+            & $add ('{0}. **{1} - {2}**' -f $index, (& $clean $finding.Verdict).ToUpperInvariant(), (& $clean $finding.Title))
+            & $add ('   - **Action:** {0}' -f (& $clean $finding.Action))
+            & $add ('   - **Occurrences:** {0:N0} ({1}/day); last seen {2} (UTC)' -f $finding.Count, (& $clean $finding.PerDay), (& $clean $finding.LastSeenUtc))
+            & $add ('   - **Signatures:** {0:N0} - `{1}`' -f $finding.SignatureCount, (& $clean $finding.Key))
+            if ($finding.DistinctCodes.Count -gt 0) { & $add ('   - **Distinct codes:** `{0}`' -f (& $clean ($finding.DistinctCodes -join ', '))) }
+        }
+    }
+    if ($Model.OmittedAttentionCount -gt 0) { & $add ('- {0} additional incident(s) omitted; attach the full report for the complete list.' -f $Model.OmittedAttentionCount) }
+    & $add ''; & $add '## Coverage caveats'
+    if ($Model.CoverageCaveats.Count -eq 0) { & $add '- No coverage caveats were reported.' } else { foreach ($caveat in $Model.CoverageCaveats) { & $add ('- ' + (& $clean $caveat)) } }
+    & $add ''; & $add ('> {0}' -f $Model.FullReportStatement)
+    return $b.ToString().TrimEnd()
+}
+
+function ConvertTo-LVTicketSummaryText {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Model)
+
+    $clean = { param([AllowNull()]$Value) if ($null -eq $Value) { return '' }; return (([string]$Value) -replace '[\r\n]+', ' ').Trim() }
+    $b = New-Object System.Text.StringBuilder
+    $add = { param([AllowEmptyString()][string]$Line = '') [void]$b.AppendLine($Line) }
+    & $add 'LogVerdict ticket summary'; & $add ('=' * 26); & $add ''
+    & $add ('Worst verdict: {0}' -f (& $clean $Model.WorstVerdict).ToUpperInvariant())
+    & $add ('Machine: {0}' -f (& $clean $Model.MachineName))
+    & $add ('Scanned (UTC): {0}; window: {1} day(s)' -f (& $clean $Model.ScanTimeUtc), $Model.DaysBack)
+    & $add ('Tool: LogVerdict {0}' -f (& $clean $Model.Version))
+    & $add ('Rule database: {0}; updated {1} (UTC date)' -f (& $clean $Model.DatabaseName), (& $clean $Model.DatabaseDate))
+    & $add ('Suppressed repeats: {0:N0} record(s) reduced to {1:N0} signature(s) ({2}:1)' -f $Model.RepeatedRecordCount, $Model.SignatureCount, (& $clean $Model.ReductionRatio))
+    & $add ('Incident suppression: {0:P0} ({1:N0} of {2:N0} signatures grouped)' -f $Model.IncidentSuppressionRatio, $Model.IncidentSuppressedSignatureCount, $Model.IncidentSignatureCount)
+    & $add ('Suppression expectations: {0:N0} suppressed; {1:N0} unmatched; {2:N0} expired/review due' -f $Model.SuppressionStatus.SuppressedFindingCount, $Model.SuppressionStatus.UnmatchedCount, $Model.SuppressionStatus.ExpiredCount)
+    & $add ('Incidents needing attention: {0}; top {1} included' -f $Model.TotalAttentionCount, $Model.TopCount); & $add ''
+    & $add 'INCIDENTS NEEDING ATTENTION'
+    if ($Model.TopFindings.Count -eq 0) { & $add 'None. No unknown, investigate, actionable, or critical findings were reported.' }
+    else {
+        $index = 0
+        foreach ($finding in $Model.TopFindings) {
+            $index++; & $add ('{0}. {1} - {2}' -f $index, (& $clean $finding.Verdict).ToUpperInvariant(), (& $clean $finding.Title))
+            & $add ('   Action: {0}' -f (& $clean $finding.Action))
+            & $add ('   Occurrences: {0:N0} ({1}/day); last seen {2} (UTC)' -f $finding.Count, (& $clean $finding.PerDay), (& $clean $finding.LastSeenUtc))
+            & $add ('   Signatures: {0:N0} - {1}' -f $finding.SignatureCount, (& $clean $finding.Key))
+        }
+    }
+    if ($Model.OmittedAttentionCount -gt 0) { & $add ('{0} additional incident(s) omitted; see the full report.' -f $Model.OmittedAttentionCount) }
+    & $add ''; & $add 'COVERAGE CAVEATS'
+    if ($Model.CoverageCaveats.Count -eq 0) { & $add 'None reported.' } else { foreach ($caveat in $Model.CoverageCaveats) { & $add ('- ' + (& $clean $caveat)) } }
+    & $add ''; & $add ('FULL REPORT: {0}' -f $Model.FullReportStatement)
+    return $b.ToString().TrimEnd()
+}
+
+function ConvertTo-LVTicketSummaryHtml {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Model)
+
+    $enc = { param([AllowNull()]$Value) ConvertTo-LVHtmlEncoded ([string]$Value) }
+    $b = New-Object System.Text.StringBuilder
+    [void]$b.AppendLine('<!doctype html><html><body style="margin:0;padding:20px;background:#f6f8fb;color:#1f2937;font-family:Segoe UI,Arial,sans-serif;font-size:14px;line-height:1.45;">')
+    [void]$b.AppendLine(('<h1 style="margin:0 0 16px;color:#111827;font-size:22px;">LogVerdict ticket summary</h1>'))
+    [void]$b.AppendLine(('<table role="presentation" style="border-collapse:collapse;width:100%;max-width:760px;background:#ffffff;border:1px solid #d1d5db;">'))
+    $rows = @(
+        @('Worst verdict', (& $enc $Model.WorstVerdict).ToUpperInvariant()),
+        @('Machine', (& $enc $Model.MachineName)),
+        @('Scanned (UTC)', (& $enc $Model.ScanTimeUtc)),
+        @('Window', ('{0} day(s)' -f $Model.DaysBack)),
+        @('Tool', ('LogVerdict ' + (& $enc $Model.Version))),
+        @('Rule database', ('{0}; updated {1} (UTC date)' -f (& $enc $Model.DatabaseName), (& $enc $Model.DatabaseDate))),
+        @('Suppressed repeats', ('{0:N0} record(s) to {1:N0} signature(s) ({2}:1)' -f $Model.RepeatedRecordCount, $Model.SignatureCount, (& $enc $Model.ReductionRatio))),
+        @('Incident suppression', ('{0:P0} ({1:N0} of {2:N0} signatures grouped)' -f $Model.IncidentSuppressionRatio, $Model.IncidentSuppressedSignatureCount, $Model.IncidentSignatureCount)),
+        @('Incidents needing attention', ('{0} (top {1} included)' -f $Model.TotalAttentionCount, $Model.TopCount))
+    )
+    foreach ($row in $rows) { [void]$b.AppendLine(('<tr><th scope="row" style="padding:8px 12px;text-align:left;vertical-align:top;border-bottom:1px solid #e5e7eb;color:#4b5563;width:190px;">{0}</th><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;">{1}</td></tr>' -f (& $enc $row[0]), $row[1])) }
+    [void]$b.AppendLine('</table><h2 style="margin:22px 0 8px;color:#111827;font-size:17px;">Incidents needing attention</h2>')
+    if ($Model.TopFindings.Count -eq 0) {
+        [void]$b.AppendLine('<p style="margin:0 0 8px;">None. No unknown, investigate, actionable, or critical findings were reported.</p>')
+    } else {
+        [void]$b.AppendLine('<ol style="margin:0;padding-left:24px;">')
+        foreach ($finding in $Model.TopFindings) {
+            [void]$b.AppendLine(('<li style="margin:0 0 12px;"><strong>{0} - {1}</strong><br><span style="color:#374151;">Action: {2}<br>Occurrences: {3:N0} ({4}/day); last seen {5} (UTC)<br>Signatures: {6:N0} - {7}</span></li>' -f
+                (& $enc $finding.Verdict).ToUpperInvariant(), (& $enc $finding.Title), (& $enc $finding.Action), $finding.Count, (& $enc $finding.PerDay), (& $enc $finding.LastSeenUtc), $finding.SignatureCount, (& $enc $finding.Key)))
+        }
+        [void]$b.AppendLine('</ol>')
+    }
+    if ($Model.OmittedAttentionCount -gt 0) { [void]$b.AppendLine(('<p style="margin:8px 0;color:#4b5563;">{0} additional incident(s) omitted; attach the full report for the complete list.</p>' -f $Model.OmittedAttentionCount)) }
+    [void]$b.AppendLine('<h2 style="margin:22px 0 8px;color:#111827;font-size:17px;">Coverage caveats</h2>')
+    if ($Model.CoverageCaveats.Count -eq 0) { [void]$b.AppendLine('<p style="margin:0;">None reported.</p>') } else {
+        [void]$b.AppendLine('<ul style="margin:0;padding-left:24px;">')
+        foreach ($caveat in $Model.CoverageCaveats) { [void]$b.AppendLine(('<li style="margin:0 0 5px;">{0}</li>' -f (& $enc $caveat))) }
+        [void]$b.AppendLine('</ul>')
+    }
+    [void]$b.AppendLine(('<p style="margin:22px 0 0;padding:12px;background:#eef2ff;border-left:4px solid #6366f1;">{0}</p>' -f (& $enc $Model.FullReportStatement)))
+    [void]$b.AppendLine('</body></html>')
+    return $b.ToString().TrimEnd()
+}
+
+function ConvertTo-LVTicketSummary {
+    <# Markdown remains the GUI clipboard contract; the same model feeds all ticket bodies. #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Result,
+        [switch]$Redact,
+        [AllowNull()][string]$MachineName,
+        [AllowNull()][string]$UserName,
+        [ValidateRange(1, 50)][int]$TopCount = 10
+    )
+
+    $model = Get-LVTicketSummaryModel -Result $Result -TopCount $TopCount
+    $text = ConvertTo-LVTicketSummaryMarkdown -Model $model
     if ($Redact) {
-        $machine = if ($MachineName) { $MachineName } else { [string]$resolved.MachineName }
+        $machine = if ($MachineName) { $MachineName } else { [string]$model.MachineName }
         $user = if ($UserName) { $UserName } else { [string]$env:USERNAME }
         $text = ConvertTo-LVRedactedText -Text $text -MachineName $machine -UserName $user
     }
-
-    # Keep clipboard and attachment payloads comfortably below service-desk limits,
-    # even if a corrupted result contains thousands of unusually long findings.
-    $maxBytes = 24MB
-    $textBytes = [System.Text.Encoding]::UTF8.GetByteCount($text)
-    if ($textBytes -gt $maxBytes) {
-        $suffix = [Environment]::NewLine + [Environment]::NewLine + '> Summary truncated to remain below 24 MiB.'
-        $targetBytes = $maxBytes - [System.Text.Encoding]::UTF8.GetByteCount($suffix)
-        $targetChars = [Math]::Min($text.Length, [Math]::Max(0, [int]($text.Length * ($targetBytes / [double]$textBytes))))
-        while ($targetChars -gt 0 -and [System.Text.Encoding]::UTF8.GetByteCount($text.Substring(0, $targetChars)) -gt $targetBytes) {
-            $targetChars = [Math]::Max(0, $targetChars - 4096)
-        }
-        $text = $text.Substring(0, $targetChars).TrimEnd() + $suffix
-    }
-    return $text
+    return Limit-LVTicketText -Text $text -Suffix '> Summary truncated; attach the full report for the complete list.'
 }
 
 function Write-LVConsoleReport {

@@ -73,7 +73,7 @@ Describe 'Case profiles and responder handoffs' {
         $first = Export-LogVerdictHandoff -Result $script:CaseResult -Profile $profile -OutputDir $firstDir
         $second = Export-LogVerdictHandoff -Result $script:CaseResult -Profile $profile -OutputDir $secondDir
 
-        @($first.Files).Count | Should -Be 7
+        @($first.Files).Count | Should -Be 10
         $timelinePath = Join-Path $firstDir 'LogVerdict-Timeline.jsonl'
         $timeline = @(Get-Content -LiteralPath $timelinePath | ForEach-Object { $_ | ConvertFrom-Json })
         $timeline.Count | Should -BeGreaterThan 0
@@ -93,6 +93,8 @@ Describe 'Case profiles and responder handoffs' {
         $hayabusa[0].Level | Should -BeExactly 'INVESTIGATE'
         (Get-Content -LiteralPath (Join-Path $firstDir 'LogVerdict-Collection.yaml') -Raw) | Should -Match 'type: CLIENT'
         (Get-Content -LiteralPath (Join-Path $firstDir 'LogVerdict-Collection.tkape') -Raw) | Should -Match 'Profile'
+        (Get-Content -LiteralPath (Join-Path $firstDir 'LogVerdict-Ticket-Summary.txt') -Raw) | Should -Match 'Scanned \(UTC\): 2026-08-02T'
+        (Get-Content -LiteralPath (Join-Path $firstDir 'LogVerdict-Ticket-Summary.html') -Raw) | Should -Not -Match '@media|<style'
         (Get-Content -LiteralPath (Join-Path $firstDir 'LogVerdict-Timesketch.csv') -Raw) | Should -BeExactly (Get-Content -LiteralPath (Join-Path $secondDir 'LogVerdict-Timesketch.csv') -Raw)
     }
 
@@ -192,6 +194,12 @@ Describe 'Case profiles and responder handoffs' {
         $summary | Should -Match '\*\*Worst verdict:\*\* \*\*INVESTIGATE\*\*'
         $summary | Should -Match 'Suppressed repeats.*0 record\(s\) reduced to 1 signature'
         $summary | Should -Match '\*\*Action:\*\*\s+Review the full finding details\.'
+        $export.Files | Should -Contain (Join-Path $dir 'LogVerdict-Ticket-Summary.txt')
+        $export.Files | Should -Contain (Join-Path $dir 'LogVerdict-Ticket-Summary.html')
+        (Get-Content -LiteralPath (Join-Path $dir 'LogVerdict-Ticket-Summary.txt') -Raw) | Should -Match 'Scanned \(UTC\): 2026-08-02T'
+        $ticketHtml = Get-Content -LiteralPath (Join-Path $dir 'LogVerdict-Ticket-Summary.html') -Raw
+        $ticketHtml | Should -Not -Match '@media|<style|<link'
+        ([Text.Encoding]::UTF8.GetByteCount($summary)) | Should -BeLessThan 16000
 
         InModuleScope LogVerdict -Parameters @{ InputResult = $script:CaseResult } {
             param($InputResult)
@@ -199,6 +207,30 @@ Describe 'Case profiles and responder handoffs' {
             $fileText = Get-Content -LiteralPath (Join-Path $TestDrive 'ticket-summary\LogVerdict-Ticket-Summary.md') -Raw
             $guiText | Should -BeExactly $fileText.TrimEnd()
         }
+    }
+
+    It 'emits an under-2048-character Intune digest with a binary exit contract' {
+        $findingDigest = Get-LogVerdictIntuneDigest -Result $script:CaseResult
+        $findingDigest.Text | Should -Not -BeNullOrEmpty
+        $findingDigest.CharacterCount | Should -BeLessThan 2048
+        $findingDigest.ExitCode | Should -Be 1
+        $findingDigest.Encoding | Should -BeExactly 'UTF-8 without BOM'
+
+        $benign = $script:CaseResult | Select-Object *
+        $benignFindings = foreach ($finding in @($script:CaseResult.Findings)) {
+            $copy = $finding | Select-Object *
+            $copy.Verdict = 'benign'
+            $copy
+        }
+        $benign.Findings = @($benignFindings)
+        $benign | Add-Member -NotePropertyName Incidents -NotePropertyValue @() -Force
+        $benign | Add-Member -NotePropertyName Correlations -NotePropertyValue @() -Force
+        $benign.WorstVerdict = 'benign'
+        $benign.ExitCode = 0
+        $cleanDigest = Get-LogVerdictIntuneDigest -Result $benign
+        $cleanDigest.Text | Should -Not -BeNullOrEmpty
+        $cleanDigest.CharacterCount | Should -BeLessThan 2048
+        $cleanDigest.ExitCode | Should -Be 0
     }
 
     It 'round-trips a written JSON report through every result consumer and standard format' {
@@ -210,7 +242,7 @@ Describe 'Case profiles and responder handoffs' {
         $roundtripProfile.bounds.windowStart | Should -Match '^2026-07-26T'
         $handoffDir = Join-Path $TestDrive 'roundtrip-handoff'
         $handoff = Export-LogVerdictHandoff -Result $reloaded -Profile $roundtripProfile -OutputDir $handoffDir
-        @($handoff.Files).Count | Should -Be 7
+        @($handoff.Files).Count | Should -Be 10
 
         $reportDir = Join-Path $TestDrive 'roundtrip-report'
         Export-LogVerdictReport -Result $reloaded -OutputDir $reportDir -Format Text 6>$null | Out-Null
@@ -390,6 +422,7 @@ Describe 'Module surface' {
             'Get-LogVerdictAdvisoryStatus',
             'Get-LogVerdictDatabase',
             'Get-LogVerdictErrorCatalog',
+            'Get-LogVerdictIntuneDigest',
             'Get-LogVerdictProvider',
             'Get-LogVerdictSuppression',
             'Invoke-LogVerdictProvider',
@@ -6074,6 +6107,41 @@ Describe 'Evidence bundle' {
         $names | Should -Contain 'MANIFEST.txt'
         $names | Should -Contain 'LogVerdict-Report.json'
         $names | Should -Contain 'PRIVACY-AUDIT.json'
+    }
+
+    It 'drops oversized redacted raw excerpts before the hard attachment ceiling' {
+        InModuleScope LogVerdict -Parameters @{ Drive = $TestDrive } {
+            param($Drive)
+            $dir = Join-Path $Drive 'bundle-budget'
+            $report = Join-Path $dir 'LogVerdict-Report.json'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            '{"retained":"signature evidence"}' | Set-Content -LiteralPath $report -Encoding UTF8
+            $random = New-Object byte[] 5200000
+            $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+            try { $rng.GetBytes($random) } finally { $rng.Dispose() }
+            $largeSample = [Convert]::ToBase64String($random)
+            $result = [pscustomobject]@{
+                Version='0.8.2'; MachineName='BUDGET-PC'; ScanTime=(Get-Date); DaysBack=1; Elevated=$false
+                Reduction=[pscustomobject]@{ RecordCount=1; SignatureCount=1; Ratio=1 }
+                DatabaseName='fixture'; RuleCount=1; DatabaseDate='2026-08-03'; WorstVerdict='investigate'
+                Findings=@([pscustomobject]@{ Source='textlog'; Channel='CBS'; Key='text|CBS|1'; Count=1; FirstSeen=(Get-Date); LastSeen=(Get-Date); Samples=@($largeSample) })
+                Correlations=@(); Coverage=@(); HealthProfiles=@(); CoverageNotes=@()
+            }
+            $audit = $null
+            $zip = New-LVEvidenceBundle -Result $result -OutputDir $dir -ReportFile @($report) -Redact `
+                -OriginalMachineName 'BUDGET-PC' -OriginalUserName 'budget-user' -Audit ([ref]$audit)
+            $zip | Should -Not -BeNullOrEmpty
+            (Get-Item -LiteralPath $zip).Length | Should -BeLessThan 4500000
+            $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+            try {
+                @($archive.Entries | Where-Object Name -eq 'CBS-excerpt.txt').Count | Should -Be 0
+                $manifestEntry = $archive.Entries | Where-Object Name -eq 'MANIFEST.txt' | Select-Object -First 1
+                $reader = New-Object IO.StreamReader($manifestEntry.Open())
+                try { $manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                $manifest | Should -Match 'raw-evidence-dropped|raw text evidence.*dropped'
+                $manifest | Should -Match 'Attachment budget: 4,500,000 bytes pre-base64'
+            } finally { $archive.Dispose() }
+        }
     }
 
     It 'requires an explicit override before packaging raw evidence' {

@@ -17,6 +17,11 @@
 # not, which is worse than one that never claimed it. Channel exports are therefore
 # refused under -Redact, and the manifest says so.
 
+# Autotask's attachment API base64-encodes files. Keep the redacted zip below a
+# conservative 4.5 MB pre-base64 ceiling (about 6 MB after encoding), leaving room
+# for the JSON request envelope and avoiding a service-specific near-limit failure.
+$script:LVRedactedEvidenceMaxBytes = 4500000
+
 function Export-LVChannelEvidence {
     <#
         .SYNOPSIS
@@ -142,7 +147,9 @@ function Format-LVEvidenceManifest {
         [AllowEmptyCollection()][string[]]$Omission = @(),
         [switch]$Redact,
         [AllowNull()]$PrivacyAudit,
-        [switch]$AllowRawEvidence
+        [switch]$AllowRawEvidence,
+        [long]$SizeBudgetBytes = 0,
+        [string]$BudgetStatus = 'not-applicable'
     )
 
     $sb = New-Object System.Text.StringBuilder
@@ -154,6 +161,9 @@ function Format-LVEvidenceManifest {
     Add-LVLine $sb ('Elevated  : {0}' -f $Result.Elevated)
     Add-LVLine $sb ('Redacted  : {0}' -f $(if ($Redact) { 'yes' } else { 'no' }))
     Add-LVLine $sb ('Sanitized : {0}' -f $(if ($PrivacyAudit -and $PrivacyAudit.Sanitized) { 'yes' } else { 'no' }))
+    if ($SizeBudgetBytes -gt 0) {
+        Add-LVLine $sb ('Attachment budget: {0:N0} bytes pre-base64; {1}' -f $SizeBudgetBytes, $BudgetStatus)
+    }
     if ($PrivacyAudit) {
         Add-LVLine $sb ('Privacy audit: {0}; {1} finding(s); {2} substitution(s)' -f `
             $PrivacyAudit.Status, $PrivacyAudit.FindingCount, $PrivacyAudit.SubstitutionCount)
@@ -278,8 +288,9 @@ function New-LVEvidenceBundle {
 
     foreach ($r in @($ReportFile | Where-Object { $_ })) {
         if (-not (Test-Path -LiteralPath $r)) { continue }
-        Copy-Item -LiteralPath $r -Destination $staging -Force
-        $content.Add($r) | Out-Null
+        $target = Join-Path $staging (Split-Path -Leaf $r)
+        Copy-Item -LiteralPath $r -Destination $target -Force
+        $content.Add($target) | Out-Null
     }
 
     if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {
@@ -322,7 +333,8 @@ function New-LVEvidenceBundle {
     $manifestPath = Join-Path $staging 'MANIFEST.txt'
     Write-LVTextFile -Path $manifestPath `
         -Content (Format-LVEvidenceManifest -Result $Result -Content @($content.ToArray()) `
-            -Omission @($omission.ToArray()) -Redact:$Redact -PrivacyAudit $privacyAudit -AllowRawEvidence:$AllowRawEvidence)
+            -Omission @($omission.ToArray()) -Redact:$Redact -PrivacyAudit $privacyAudit -AllowRawEvidence:$AllowRawEvidence `
+            -SizeBudgetBytes $(if ($Redact) { $script:LVRedactedEvidenceMaxBytes } else { 0 }) -BudgetStatus $(if ($Redact) { 'checking' } else { 'not-applicable' }))
     $content.Add($manifestPath) | Out-Null
 
     if ($Redact -and -not $privacyAudit.Sanitized) {
@@ -341,6 +353,75 @@ function New-LVEvidenceBundle {
     } catch {
         Write-LVLog -Level error -Message ('Could not write the evidence bundle: {0}' -f $_.Exception.Message)
         return $null
+    }
+
+    if ($Redact) {
+        $budget = [int64]$script:LVRedactedEvidenceMaxBytes
+        $budgetStatus = 'within-budget'
+        $zipBytes = [int64](Get-Item -LiteralPath $zip).Length
+        if ($zipBytes -gt $budget) {
+            # Raw text excerpts are useful when small, but the report JSON already
+            # retains the signatures. Drop only those excerpts first; never drop the
+            # report/contract/manifest that explain the verdict. If the retained
+            # projection still cannot fit, fail closed and leave staging for review.
+            $rawCandidates = @($content.ToArray() | Where-Object {
+                (Split-Path -Leaf $_) -like '*-excerpt.txt'
+            })
+            if ($rawCandidates.Count -gt 0) {
+                foreach ($candidate in $rawCandidates) {
+                    if (Test-Path -LiteralPath $candidate -PathType Leaf) { Remove-Item -LiteralPath $candidate -Force }
+                    [void]$content.Remove($candidate)
+                }
+                $omission.Add(('Redacted attachment exceeded the {0:N0}-byte pre-base64 budget; {1} raw text evidence excerpt(s) were dropped while report signatures were retained.' -f $budget, $rawCandidates.Count)) | Out-Null
+                $budgetStatus = 'raw-evidence-dropped'
+
+                [void]$content.Remove($contractPath)
+                [void]$content.Remove($manifestPath)
+                Remove-Item -LiteralPath $contractPath, $manifestPath -Force -ErrorAction SilentlyContinue
+                $evidenceContract = New-LVEvidenceContract -Result $Result -Content @($content.ToArray()) `
+                    -Omission @($omission.ToArray()) -Redacted:$Redact -AllowRawEvidence:$AllowRawEvidence -PrivacyAudit $privacyAudit
+                Write-LVTextFile -Path $contractPath -Content ($evidenceContract | ConvertTo-Json -Depth 12)
+                $content.Add($contractPath) | Out-Null
+                Write-LVTextFile -Path $manifestPath `
+                    -Content (Format-LVEvidenceManifest -Result $Result -Content @($content.ToArray()) `
+                        -Omission @($omission.ToArray()) -Redact:$Redact -PrivacyAudit $privacyAudit -AllowRawEvidence:$AllowRawEvidence `
+                        -SizeBudgetBytes $budget -BudgetStatus $budgetStatus)
+                $content.Add($manifestPath) | Out-Null
+                Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+                try { [System.IO.Compression.ZipFile]::CreateFromDirectory($staging, $zip) } catch {
+                    Write-LVLog -Level error -Message ('Could not write the size-bounded evidence bundle: {0}' -f $_.Exception.Message)
+                    return $null
+                }
+            }
+
+            $zipBytes = [int64](Get-Item -LiteralPath $zip).Length
+            if ($zipBytes -gt $budget) {
+                Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+                Write-LVLog -Level error -Message ('Redacted evidence bundle remains {0:N0} bytes after raw-evidence reduction; the {1:N0}-byte pre-base64 budget is a hard limit. Staging was retained at {2}.' -f $zipBytes, $budget, $staging)
+                return $null
+            }
+        }
+
+        # The manifest is written again after the preflight so its budget status is
+        # true for the zip the recipient actually receives.
+        [void]$content.Remove($manifestPath)
+        Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
+        Write-LVTextFile -Path $manifestPath `
+            -Content (Format-LVEvidenceManifest -Result $Result -Content @($content.ToArray()) `
+                -Omission @($omission.ToArray()) -Redact:$Redact -PrivacyAudit $privacyAudit -AllowRawEvidence:$AllowRawEvidence `
+                -SizeBudgetBytes $budget -BudgetStatus $budgetStatus)
+        $content.Add($manifestPath) | Out-Null
+        Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+        try { [System.IO.Compression.ZipFile]::CreateFromDirectory($staging, $zip) } catch {
+            Write-LVLog -Level error -Message ('Could not finalize the size-bounded evidence bundle: {0}' -f $_.Exception.Message)
+            return $null
+        }
+        $zipBytes = [int64](Get-Item -LiteralPath $zip).Length
+        if ($zipBytes -gt $budget) {
+            Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+            Write-LVLog -Level error -Message ('Final redacted evidence bundle is {0:N0} bytes, over the {1:N0}-byte pre-base64 budget; staging was retained at {2}.' -f $zipBytes, $budget, $staging)
+            return $null
+        }
     }
 
     # The staging directory is removed only after the zip exists, so a failure leaves

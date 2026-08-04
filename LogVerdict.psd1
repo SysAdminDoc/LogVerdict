@@ -54,6 +54,7 @@
         'Public\Get-LogVerdictSuppression.ps1'
         'Public\Get-LogVerdictErrorCatalog.ps1'
         'Public\Get-LogVerdictProvider.ps1'
+        'Public\Get-LogVerdictIntuneDigest.ps1'
         'Public\Invoke-LogVerdictProvider.ps1'
         'Public\Invoke-LogVerdictScan.ps1'
         'Public\New-LogVerdictCaseProfile.ps1'
@@ -92,6 +93,7 @@
         'Get-LogVerdictAdvisoryStatus',
         'Get-LogVerdictErrorCatalog',
         'Get-LogVerdictProvider',
+        'Get-LogVerdictIntuneDigest',
         'Test-LogVerdictProvider',
         'Invoke-LogVerdictProvider',
         'New-LogVerdictCaseProfile',
