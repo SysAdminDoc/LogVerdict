@@ -39,7 +39,7 @@ function Get-LVGuiScanTimingHint {
     return ('Typical {0}-day scan: {1}. All-channel sweeps can take longer.' -f $DaysBack, $range)
 }
 
-function Get-LVGuiInitialDays {
+function Get-LVGuiInitialDay {
     [CmdletBinding()]
     param(
         [ValidateRange(1, 3650)][int]$DaysBack = 30,
@@ -300,7 +300,7 @@ function Get-LVGuiNamedChannel {
     return ConvertTo-LVArrayOutput -Value $channel
 }
 
-function Get-LVGuiScanArguments {
+function Get-LVGuiScanArgument {
     <#
         Build the scan contract from the values represented by the Overview controls.
         Keeping this projection free of WPF objects makes option precedence and the
@@ -357,7 +357,7 @@ function Get-LVGuiScanArguments {
     return $arguments
 }
 
-function Get-LVGuiExportArguments {
+function Get-LVGuiExportArgument {
     <#
         Project the report controls into the public export command contract.
         Raw evidence is allowed only when the operator explicitly selected evidence

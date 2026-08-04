@@ -33,7 +33,7 @@ function New-LVGuiSession {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
     $settingsStatus = $null
     $savedSettings = Get-LVGuiSetting -Status ([ref]$settingsStatus)
-    $initialDays = Get-LVGuiInitialDays -DaysBack $DaysBack -DaysBackExplicit $DaysBackExplicit -SavedSettings $savedSettings
+    $initialDays = Get-LVGuiInitialDay -DaysBack $DaysBack -DaysBackExplicit $DaysBackExplicit -SavedSettings $savedSettings
     $initialAllChannels = $(if ($savedSettings) { $savedSettings.AllChannels } else { $false })
     $initialDiagnosticChannels = $(if ($savedSettings) { $savedSettings.DiagnosticChannels } else { $false })
     $initialSkipText = $(if ($savedSettings) { $savedSettings.SkipTextLogs } else { $false })
@@ -150,6 +150,7 @@ function New-LVGuiSession {
         DocumentationScreenshotPath = $DocumentationScreenshotPath
         SettingsStatus = $settingsStatus
         SystemThemeChanged = $null
+        Timer = $null
         Actions = [ordered]@{}
         InitialDays = $initialDays
         InitialAllChannels = $initialAllChannels

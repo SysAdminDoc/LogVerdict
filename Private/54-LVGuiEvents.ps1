@@ -392,7 +392,7 @@ function Register-LVGuiScanHandlers {
             }
         }
 
-        $scanArgs = Get-LVGuiScanArguments -DaysBack $days `
+        $scanArgs = Get-LVGuiScanArgument -DaysBack $days `
             -IncludeTextLogs ([bool]$ui.ChkOverviewIncludeText.IsChecked) `
             -SkipReliability ([bool]$ui.ChkOverviewSkipReliability.IsChecked) `
             -IncludeBenign ([bool]$ui.ChkOverviewIncludeBenign.IsChecked) `
@@ -450,7 +450,7 @@ function Register-LVGuiScanHandlers {
         if ($null -eq $state.Result) { return }
         try {
             $outputDir = $ui.TxtOverviewOutputDir.Text.Trim()
-            $exportArgs = Get-LVGuiExportArguments -Result $state.Result `
+            $exportArgs = Get-LVGuiExportArgument -Result $state.Result `
                 -Redact ([bool]$ui.ChkOverviewRedact.IsChecked) `
                 -IncludeEvidence ([bool]$ui.ChkOverviewEvidence.IsChecked) `
                 -OutputDirectory $outputDir

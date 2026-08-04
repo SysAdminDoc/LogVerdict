@@ -181,9 +181,9 @@ function New-LVGuiActions {
         if ($Stamp.Length -ge 19) { $clock = $Stamp.Substring(11, 8) }
         $panelLine = '{0}  {1} {2}{3}' -f $clock, $mark, $Message, [Environment]::NewLine
 
-        $activityLine = Add-LVGuiActivityLine -Lines $state.ActivityLines -Line $panelLine `
+        Add-LVGuiActivityLine -Lines $state.ActivityLines -Line $panelLine `
             -Characters ([ref]$state.ActivityCharacters) -Dropped ([ref]$state.ActivityDropped) `
-            -MaxLines $activityMaxLines -MaxCharacters $activityMaxCharacters
+            -MaxLines $activityMaxLines -MaxCharacters $activityMaxCharacters | Out-Null
         & $renderActivity
         $ui.TxtActivityLastLine.Text = $Message
         $ui.TxtStatus.Text = $Message

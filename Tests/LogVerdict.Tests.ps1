@@ -350,7 +350,7 @@ Describe 'Case profiles and responder handoffs' {
         $entry | Should -Match 'CaseProfilePath'
         (Get-Command Show-LogVerdictGui).Parameters.Keys | Should -Contain 'CaseProfilePath'
         InModuleScope LogVerdict {
-            $arguments = Get-LVGuiScanArguments -CaseProfilePath 'C:\case.json'
+            $arguments = Get-LVGuiScanArgument -CaseProfilePath 'C:\case.json'
             $arguments.CaseProfilePath | Should -BeExactly 'C:\case.json'
         }
     }
@@ -5898,8 +5898,8 @@ Describe 'GUI settings persistence' {
             }
             Save-LVGuiSetting -Settings $settings -Path $path | Should -BeTrue
             $saved = Get-LVGuiSetting -Path $path
-            Get-LVGuiInitialDays -DaysBack 30 -DaysBackExplicit:$false -SavedSettings $saved | Should -Be 7
-            Get-LVGuiInitialDays -DaysBack 30 -DaysBackExplicit:$true -SavedSettings $saved | Should -Be 30
+            Get-LVGuiInitialDay -DaysBack 30 -DaysBackExplicit:$false -SavedSettings $saved | Should -Be 7
+            Get-LVGuiInitialDay -DaysBack 30 -DaysBackExplicit:$true -SavedSettings $saved | Should -Be 30
             Reset-LVGuiSetting -Path $path -Confirm:$false | Should -BeTrue
             (Get-LVGuiSetting -Path $path).DaysBack | Should -Be 30
         }
@@ -5918,7 +5918,7 @@ Describe 'GUI and console feature parity' {
 
     It 'wires every deterministic live scan choice into the engine arguments' {
         InModuleScope LogVerdict {
-            $arguments = Get-LVGuiScanArguments -DaysBack 3 -IncludeTextLogs:$false -SkipReliability:$true `
+            $arguments = Get-LVGuiScanArgument -DaysBack 3 -IncludeTextLogs:$false -SkipReliability:$true `
                 -IncludeBenign:$true -IncludeLowConfidence:$true -NamedChannels 'System' `
                 -DatabasePath 'C:\rules.json' -SuppressionPath 'C:\suppressions.json'
             foreach ($argument in @('Channel', 'SkipTextLogs', 'SkipReliability', 'IncludeBenign',
@@ -5934,7 +5934,7 @@ Describe 'GUI and console feature parity' {
     It 'wires report destination, redaction, and evidence choices into export' {
         InModuleScope LogVerdict {
             $result = [pscustomobject]@{ Tool = 'LogVerdict' }
-            $arguments = Get-LVGuiExportArguments -Result $result -Redact:$false -IncludeEvidence:$true -OutputDirectory 'C:\reports'
+            $arguments = Get-LVGuiExportArgument -Result $result -Redact:$false -IncludeEvidence:$true -OutputDirectory 'C:\reports'
             $arguments.Result | Should -Be $result
             $arguments.OutputDir | Should -BeExactly 'C:\reports'
             $arguments.Redact | Should -BeFalse
@@ -5985,7 +5985,7 @@ Describe 'GUI and console feature parity' {
 Describe 'GUI pure presentation logic' {
     It 'projects scan choices with named-channel precedence and bounded optional paths' {
         InModuleScope LogVerdict {
-            $arguments = Get-LVGuiScanArguments -DaysBack 14 -IncludeTextLogs:$false -SkipReliability:$true `
+            $arguments = Get-LVGuiScanArgument -DaysBack 14 -IncludeTextLogs:$false -SkipReliability:$true `
                 -IncludeBenign:$true -IncludeLowConfidence:$true `
                 -NamedChannels "System, Application;System" -AllChannels:$true -DiagnosticChannels:$true `
                 -DatabasePath ' C:\rules.json ' -SuppressionPath ' C:\suppressions.json ' `
@@ -6004,7 +6004,7 @@ Describe 'GUI pure presentation logic' {
             $arguments.SuppressionPath | Should -BeExactly 'C:\suppressions.json'
             $arguments.CaseProfilePath | Should -BeExactly 'C:\case.json'
 
-            $broad = Get-LVGuiScanArguments -NamedChannels '' -AllChannels:$false -DiagnosticChannels:$true
+            $broad = Get-LVGuiScanArgument -NamedChannels '' -AllChannels:$false -DiagnosticChannels:$true
             $broad.DiagnosticChannels | Should -BeTrue
             $broad.Keys | Should -Not -Contain 'Channel'
         }
@@ -6013,14 +6013,14 @@ Describe 'GUI pure presentation logic' {
     It 'projects export choices and only authorizes raw evidence when unredacted' {
         InModuleScope LogVerdict {
             $result = [pscustomobject]@{ Tool = 'LogVerdict' }
-            $redacted = Get-LVGuiExportArguments -Result $result -Redact:$true -IncludeEvidence:$true -OutputDirectory ' C:\reports '
+            $redacted = Get-LVGuiExportArgument -Result $result -Redact:$true -IncludeEvidence:$true -OutputDirectory ' C:\reports '
             $redacted.Result | Should -Be $result
             $redacted.Redact | Should -BeTrue
             $redacted.IncludeEvidence | Should -BeTrue
             $redacted.AllowRawEvidence | Should -BeFalse
             $redacted.OutputDir | Should -BeExactly 'C:\reports'
 
-            $raw = Get-LVGuiExportArguments -Result $result -Redact:$false -IncludeEvidence:$true
+            $raw = Get-LVGuiExportArgument -Result $result -Redact:$false -IncludeEvidence:$true
             $raw.AllowRawEvidence | Should -BeTrue
             $raw.Keys | Should -Not -Contain 'OutputDir'
         }
@@ -6331,7 +6331,7 @@ Describe 'GUI pure presentation logic' {
 
     It 'passes optional advisory settings through the GUI wiring' {
         InModuleScope LogVerdict {
-            $arguments = Get-LVGuiScanArguments -AdvisoryPath 'advisories.json' -AdvisoryPackage 'PowerShell' -AdvisoryVersion '7.6.0'
+            $arguments = Get-LVGuiScanArgument -AdvisoryPath 'advisories.json' -AdvisoryPackage 'PowerShell' -AdvisoryVersion '7.6.0'
             $arguments.AdvisoryPath | Should -BeExactly 'advisories.json'
             $arguments.AdvisoryPackage | Should -BeExactly 'PowerShell'
             $arguments.AdvisoryVersion | Should -BeExactly '7.6.0'
