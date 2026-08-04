@@ -357,7 +357,8 @@ Describe 'CI gate wiring' {
         $script:CiWorkflow | Should -Match 'name: Verify supply-chain metadata directly'
         $script:CiWorkflow | Should -Match 'Tools\\Test-LogVerdictSupplyChain\.ps1'
         $script:CiWorkflow | Should -Match 'if \(-not \$\?\) \{ exit 1 \}'
-        $script:CiWorkflow | Should -Not -Match '\$LASTEXITCODE'
+        $script:CiWorkflow | Should -Match 'probeExit = if \(\$LASTEXITCODE\)'
+        $script:CiWorkflow | Should -Match 'reportExit = \[int\]\$LASTEXITCODE'
     }
 }
 
@@ -3430,6 +3431,99 @@ Describe 'Verdict resolution' {
     }
 }
 
+Describe 'Incident grouping and confidence gates' {
+    It 'groups rule-matched signatures into one incident with combined evidence' {
+        InModuleScope LogVerdict {
+            $first = [pscustomobject]@{
+                Key='DISM/0x800f081f'; Source='textlog'; Channel='DISM'; Provider='DISM'; Id=0
+                RuleId='LV-0093'; Verdict='investigate'; Title='Image servicing error'; Plain='plain'; Why='why'; Action='action'
+                Confidence='medium'; Count=2; PerDay=0.2; FirstSeen=(Get-Date '2026-08-01'); LastSeen=(Get-Date '2026-08-01 01:00')
+                ResultCode='0x800f081f'; ExtendCode=$null; ErrorCode=$null; SampleMessage='first'; References=@(); Sources=@(); FalsePositives=@()
+            }
+            $second = [pscustomobject]@{
+                Key='DISM/0x800f0900'; Source='textlog'; Channel='DISM'; Provider='DISM'; Id=0
+                RuleId='LV-0093'; Verdict='investigate'; Title='Image servicing error'; Plain='plain'; Why='why'; Action='action'
+                Confidence='medium'; Count=3; PerDay=0.3; FirstSeen=(Get-Date '2026-08-02'); LastSeen=(Get-Date '2026-08-02 01:00')
+                ResultCode='0x800f0900'; ExtendCode=$null; ErrorCode=$null; SampleMessage='second'; References=@(); Sources=@(); FalsePositives=@()
+            }
+
+            $reduction = Get-LVIncidentReduction -Finding @($first, $second)
+            @($reduction.Incidents).Count | Should -Be 1
+            $incident = @($reduction.Incidents)[0]
+            $incident.IncidentId | Should -BeExactly 'Incident/LV-0093'
+            $incident.SignatureCount | Should -Be 2
+            $incident.Count | Should -Be 5
+            @($incident.SignatureKeys) | Should -Contain 'DISM/0x800f081f'
+            @($incident.SignatureKeys) | Should -Contain 'DISM/0x800f0900'
+            @($incident.DistinctCodes) | Should -Be @('0x800f081f', '0x800f0900')
+            $reduction.Summary.SuppressedSignatureCount | Should -Be 1
+            $reduction.Summary.SuppressionRatio | Should -Be 0.5
+        }
+    }
+
+    It 'hides low-confidence rulings by default while retaining unknown evidence' {
+        InModuleScope LogVerdict {
+            $low = [pscustomobject]@{ Confidence='low'; Verdict='informational' }
+            $unknown = [pscustomobject]@{ Confidence='none'; Verdict='unknown' }
+            @($low, $unknown | Where-Object { Test-LVConfidenceIncluded -Finding $_ }).Count | Should -Be 1
+            (Test-LVConfidenceIncluded -Finding $low -IncludeLowConfidence) | Should -BeTrue
+            (Test-LVConfidenceIncluded -Finding $unknown) | Should -BeTrue
+        }
+    }
+
+    It 'does not keep the no-op LV-0072 escalation' {
+        InModuleScope LogVerdict {
+            $rule = @((Get-LogVerdictDatabase).rules | Where-Object id -eq 'LV-0072')[0]
+            $rule.escalate | Should -BeNullOrEmpty
+            $signature = [pscustomobject]@{
+                Key='Microsoft-Windows-WindowsUpdateClient/20'; Source='event'; Channel='System'
+                Provider='Microsoft-Windows-WindowsUpdateClient'; Id=20; Count=10; PerDay=4
+                SampleMessage='Update failed'; FirstSeen=(Get-Date); LastSeen=(Get-Date)
+            }
+            $finding = @(Resolve-LVVerdict -Signature @($signature) -Database (Get-LogVerdictDatabase))[0]
+            $finding.RuleId | Should -BeExactly 'LV-0072'
+            $finding.Verdict | Should -BeExactly 'actionable'
+            $finding.Why | Should -Not -Match 'Escalated'
+        }
+    }
+
+    It 'uses incidents as the reader-facing report unit' {
+        InModuleScope LogVerdict {
+            $members = @(
+                [pscustomobject]@{
+                    Key='DISM/0x1'; Source='textlog'; Channel='DISM'; Provider='DISM'; Id=0; RuleId='LV-0093'
+                    Verdict='investigate'; Title='Image servicing error'; Plain='plain'; Why='why'; Action='action'; Confidence='medium'
+                    Count=2; PerDay=0.2; FirstSeen=(Get-Date '2026-08-01'); LastSeen=(Get-Date '2026-08-01 01:00')
+                    ResultCode='0x1'; ExtendCode=$null; ErrorCode=$null; SampleMessage='first'; References=@(); Sources=@(); FalsePositives=@()
+                },
+                [pscustomobject]@{
+                    Key='DISM/0x2'; Source='textlog'; Channel='DISM'; Provider='DISM'; Id=0; RuleId='LV-0093'
+                    Verdict='investigate'; Title='Image servicing error'; Plain='plain'; Why='why'; Action='action'; Confidence='medium'
+                    Count=3; PerDay=0.3; FirstSeen=(Get-Date '2026-08-02'); LastSeen=(Get-Date '2026-08-02 01:00')
+                    ResultCode='0x2'; ExtendCode=$null; ErrorCode=$null; SampleMessage='second'; References=@(); Sources=@(); FalsePositives=@()
+                })
+            $incidentReduction = Get-LVIncidentReduction -Finding $members
+            $result = [pscustomobject]@{
+                Version='0.8.2'; MachineName='TESTPC'; ScanTime=(Get-Date '2026-08-03'); DaysBack=30; Elevated=$false; Channels=@('DISM')
+                Reduction=[pscustomobject]@{ RecordCount=5; SignatureCount=2; Ratio=2.5 }
+                Findings=$members; Incidents=@($incidentReduction.Incidents); IncidentSummary=$incidentReduction.Summary
+                Correlations=@(); CoverageNotes=@(); Coverage=@(); HealthProfiles=@(); Performance=@(); CrashArtifacts=@(); Horizon=@{}; HorizonWarning=$null
+                Stability=$null; DatabaseName='test'; DatabaseDate='2026-08-03'; RuleCount=1; WorstVerdict='investigate'; Redacted=$false
+            }
+            $text = ConvertTo-LVTextReport -Result $result
+            $html = ConvertTo-LVHtmlReport -Result $result
+            $ticket = ConvertTo-LVTicketSummary -Result $result
+            $text | Should -Match 'Incident suppression: 50%'
+            $text | Should -Match 'Occurrences : 5'
+            $text | Should -Match 'Distinct codes: 0x1, 0x2'
+            $html | Should -Match 'Incident suppression</div><div class="v">50%'
+            $html | Should -Match '2 constituent signature\(s\)'
+            $ticket | Should -Match 'Incidents needing attention:\*\* 1'
+            $ticket | Should -Match 'Distinct codes.*0x1, 0x2'
+        }
+    }
+}
+
 Describe 'Local model explanations' {
     It 'requests structured output from loopback and keeps the candidate separate' {
         InModuleScope LogVerdict {
@@ -4566,7 +4660,7 @@ Describe 'GUI settings persistence' {
             $path = Join-Path $Root 'prefs/settings.json'
             $value = [pscustomobject]@{
                 DaysBack=14; AllChannels=$true; DiagnosticChannels=$true; SkipTextLogs=$true
-                SkipReliability=$true; IncludeBenign=$true; NamedChannels='System, Application'
+                SkipReliability=$true; IncludeBenign=$true; IncludeLowConfidence=$true; NamedChannels='System, Application'
                 DatabasePath='C:\rules\verdicts.json'; OutputDirectory='C:\reports'
                 Redact=$true; IncludeEvidence=$true
                 WindowWidth=1500.4; WindowHeight=820.4
@@ -4580,6 +4674,7 @@ Describe 'GUI settings persistence' {
             $read.SkipTextLogs | Should -BeTrue
             $read.SkipReliability | Should -BeTrue
             $read.IncludeBenign | Should -BeTrue
+            $read.IncludeLowConfidence | Should -BeTrue
             $read.NamedChannels | Should -BeExactly 'System, Application'
             $read.DatabasePath | Should -BeExactly 'C:\rules\verdicts.json'
             $read.OutputDirectory | Should -BeExactly 'C:\reports'
@@ -4600,7 +4695,7 @@ Describe 'GUI settings persistence' {
             $path = Join-Path $Root 'prefs/settings.json'
             Save-LVGuiSetting -Settings ([pscustomobject]@{
                 DaysBack=365; AllChannels=$true; DiagnosticChannels=$true; SkipTextLogs=$true
-                SkipReliability=$true; IncludeBenign=$true; NamedChannels='System'
+                SkipReliability=$true; IncludeBenign=$true; IncludeLowConfidence=$true; NamedChannels='System'
                 DatabasePath='C:\rules.json'; OutputDirectory='C:\reports'; Redact=$true; IncludeEvidence=$true
                 WindowWidth=2200; WindowHeight=1200
             }) -Path $path | Should -BeTrue
@@ -4613,6 +4708,7 @@ Describe 'GUI settings persistence' {
             $read.SkipTextLogs | Should -BeFalse
             $read.SkipReliability | Should -BeFalse
             $read.IncludeBenign | Should -BeFalse
+            $read.IncludeLowConfidence | Should -BeFalse
             $read.NamedChannels | Should -BeExactly ''
             $read.DatabasePath | Should -BeExactly ''
             $read.OutputDirectory | Should -BeExactly ''
@@ -4640,6 +4736,7 @@ Describe 'GUI settings persistence' {
             $read.OutputDirectory | Should -BeExactly ''
             $read.Redact | Should -BeFalse
             $read.IncludeEvidence | Should -BeFalse
+            $read.IncludeLowConfidence | Should -BeFalse
         }
     }
 
@@ -4701,7 +4798,7 @@ Describe 'GUI and console feature parity' {
         $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Public/Show-LogVerdictGui.ps1'
         $text = Get-Content -LiteralPath $path -Raw
         foreach ($argument in @('Channel', 'AllChannels', 'DiagnosticChannels', 'SkipTextLogs',
-                'SkipReliability', 'IncludeBenign', 'DatabasePath')) {
+                'SkipReliability', 'IncludeBenign', 'IncludeLowConfidence', 'DatabasePath')) {
             $text | Should -Match ("scanArgs\['{0}'\]|{0}\s*=" -f $argument) -Because "$argument must reach Invoke-LogVerdictScan"
         }
     }

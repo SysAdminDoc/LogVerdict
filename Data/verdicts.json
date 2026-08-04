@@ -677,11 +677,6 @@
       "plain": "Windows Update downloaded an update and the installation failed. The event carries the update name and the error code.",
       "why": "Repeated failures on the same update usually mean component store damage rather than a problem with the update.",
       "action": "Note the error code. If the same update fails repeatedly, check the CBS findings in this report and run DISM RestoreHealth followed by SFC.",
-      "escalate": {
-        "perDay": 2,
-        "verdict": "actionable",
-        "why": "Repeat failures indicate servicing damage rather than a transient error."
-      },
       "confidence": "high",
       "references": [],
       "falsepositives": [

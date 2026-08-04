@@ -70,6 +70,38 @@ function Add-LVHtml {
     Add-LVLine -Builder $Builder -Text $formatted
 }
 
+function Get-LVReportIncident {
+    <#
+        Return the reader-facing incident projection, with a safe fallback for
+        reports written before incident grouping existed.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Result)
+
+    $property = $Result.PSObject.Properties['Incidents']
+    if ($property) { return ConvertTo-LVArrayOutput -Value @($property.Value | Where-Object { $_ }) }
+    return ConvertTo-LVArrayOutput -Value @($Result.Findings | Where-Object { $_ })
+}
+
+function Get-LVReportIncidentSummary {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Result)
+
+    $property = $Result.PSObject.Properties['IncidentSummary']
+    if ($property -and $property.Value) { return $property.Value }
+    $signatureCount = @($Result.Findings | Where-Object { $_ }).Count
+    $incidentCount = @(Get-LVReportIncident -Result $Result).Count
+    $suppressed = [Math]::Max(0, $signatureCount - $incidentCount)
+    $ratio = if ($signatureCount -gt 0) { $suppressed / [double]$signatureCount } else { 0 }
+    return [pscustomobject]@{
+        SignatureCount = $signatureCount
+        IncidentCount = $incidentCount
+        SuppressedSignatureCount = $suppressed
+        SuppressionRatio = [Math]::Round($ratio, 4)
+        SuppressionPercent = [Math]::Round($ratio * 100, 1)
+    }
+}
+
 function Format-LVWhen {
     <#
         .SYNOPSIS
@@ -127,11 +159,12 @@ function ConvertTo-LVTicketSummary {
     $databaseName = if ($resolved.DatabaseName) { [string]$resolved.DatabaseName } else { 'bundled database' }
     $databaseDate = if ($resolved.DatabaseDate) { [string]$resolved.DatabaseDate } else { 'unknown' }
     $worst = if ($resolved.WorstVerdict) { [string]$resolved.WorstVerdict } else { 'unknown' }
-    $findings = @($resolved.Findings | Where-Object {
+    $findings = @(Get-LVReportIncident -Result $resolved | Where-Object {
         $_ -and (Get-LVVerdictRank -Verdict ([string]$_.Verdict)) -ge (Get-LVVerdictRank -Verdict 'unknown')
     } | Sort-Object @{ Expression = { Get-LVVerdictRank -Verdict ([string]$_.Verdict) }; Descending = $true },
         @{ Expression = { [int64]$_.Count }; Descending = $true }, Title)
     $reduction = $resolved.Reduction
+    $incidentSummary = Get-LVReportIncidentSummary -Result $resolved
     $recordCount = if ($reduction) { [int64]$reduction.RecordCount } else { 0 }
     $signatureCount = if ($reduction) { [int64]$reduction.SignatureCount } else { 0 }
     $suppressed = [Math]::Max(0, $recordCount - $signatureCount)
@@ -145,10 +178,11 @@ function ConvertTo-LVTicketSummary {
     & $add ('- **Tool:** LogVerdict {0}' -f (& $clean $version))
     & $add ('- **Rule database:** {0}, updated {1}' -f (& $clean $databaseName), (& $clean $databaseDate))
     & $add ('- **Suppressed repeats:** {0:N0} record(s) reduced to {1:N0} signature(s) ({2}:1)' -f $suppressed, $signatureCount, (& $clean $ratio))
-    & $add ('- **Findings needing attention:** {0}' -f $findings.Count)
+    & $add ('- **Incident suppression:** {0:P0} ({1:N0} of {2:N0} signatures grouped)' -f $incidentSummary.SuppressionRatio, $incidentSummary.SuppressedSignatureCount, $incidentSummary.SignatureCount)
+    & $add ('- **Incidents needing attention:** {0}' -f $findings.Count)
     & $add ''
 
-    & $add '## Findings needing attention'
+    & $add '## Incidents needing attention'
     if ($findings.Count -eq 0) {
         & $add '- None. The scan produced no unknown, investigate, actionable, or critical findings.'
     } else {
@@ -160,7 +194,15 @@ function ConvertTo-LVTicketSummary {
             & $add ('{0}. **{1} - {2}**' -f $index, $verdict, (& $clean $finding.Title))
             & $add ('   - **Action:** {0}' -f $action)
             & $add ('   - **Occurrences:** {0:N0} ({1}/day); last seen {2}' -f [int64]$finding.Count, (& $clean $finding.PerDay), (& $clean (Format-LVWhen $finding.LastSeen)))
-            & $add ('   - **Signature:** `{0}`' -f (& $clean $finding.Key))
+            $signatureKeys = @($finding.SignatureKeys | Where-Object { $_ })
+            if ($signatureKeys.Count -gt 0) {
+                & $add ('   - **Signatures:** {0:N0} - `{1}`' -f $(if ($finding.SignatureCount) { $finding.SignatureCount } else { $signatureKeys.Count }), (& $clean ($signatureKeys -join '`, `')))
+            } else {
+                & $add ('   - **Signatures:** 1 - `{0}`' -f (& $clean ($finding.Key)))
+            }
+            if (@($finding.DistinctCodes | Where-Object { $_ }).Count -gt 0) {
+                & $add ('   - **Distinct codes:** `{0}`' -f (& $clean ((@($finding.DistinctCodes) -join ', '))))
+            }
         }
     }
     & $add ''
@@ -223,12 +265,19 @@ function Write-LVConsoleReport {
     param([Parameter(Mandatory)]$Result)
 
     $stat = $Result.Reduction
+    $displayFindings = @(Get-LVReportIncident -Result $Result)
+    $incidentSummary = Get-LVReportIncidentSummary -Result $Result
     Write-Host ''
     Write-LVLog -Level step -Message ('LogVerdict {0} - {1}' -f $script:LVVersion, $Result.MachineName)
     Write-Host ''
     Write-Host ('  Window          : last {0} day(s), through {1:yyyy-MM-dd HH:mm}' -f $Result.DaysBack, $Result.ScanTime)
     Write-Host ('  Records read    : {0}' -f $stat.RecordCount)
     Write-Host ('  Signatures      : {0}  (reduction {1}:1)' -f $stat.SignatureCount, $stat.Ratio)
+    Write-Host ('  Incident suppression: {0:P0}  ({1} incident(s) from {2} signature(s))' -f `
+        $incidentSummary.SuppressionRatio, $incidentSummary.IncidentCount, $incidentSummary.SignatureCount)
+    Write-Host ('  Needs attention : {0} incident(s)' -f @($displayFindings | Where-Object {
+            (Get-LVVerdictRank -Verdict $_.Verdict) -ge (Get-LVVerdictRank -Verdict 'unknown')
+        }).Count)
     if ($stat.PSObject.Properties['InitialSignatureCount']) {
         Write-Host ('  Template passes : {0} masked ({1}:1) -> {2} after slot promotion ({3}:1)' -f `
             $stat.InitialSignatureCount, $stat.InitialRatio, $stat.SignatureCount, $stat.Ratio)
@@ -266,7 +315,7 @@ function Write-LVConsoleReport {
     if ($Result.PSObject.Properties['DatabaseFreshness'] -and $Result.DatabaseFreshness) {
         $staleRules = @($Result.DatabaseFreshness.StaleRules | Where-Object { $_ })
     } else {
-        $staleRules = @($Result.Findings | Where-Object { $_.PSObject.Properties['RuleStale'] -and $_.RuleStale } |
+        $staleRules = @($displayFindings | Where-Object { $_.PSObject.Properties['RuleStale'] -and $_.RuleStale } |
             ForEach-Object { [pscustomobject]@{ RuleId = $_.RuleId; Verified = $_.Verified; StaleAfterDays = $_.RuleFreshness.StaleAfterDays } })
     }
     if ($staleRules.Count -gt 0) {
@@ -346,7 +395,7 @@ function Write-LVConsoleReport {
         Write-Host ''
     }
 
-    $tally = $Result.Findings | Group-Object -Property Verdict
+    $tally = $displayFindings | Group-Object -Property Verdict
     foreach ($name in @('critical', 'actionable', 'investigate', 'unknown', 'informational', 'benign')) {
         $g = $tally | Where-Object { $_.Name -eq $name }
         $n = 0
@@ -377,7 +426,7 @@ function Write-LVConsoleReport {
         Write-Host ('    Do this       : {0}' -f $c.Action) -ForegroundColor White
     }
 
-    $notable = @($Result.Findings | Where-Object { (Get-LVVerdictRank -Verdict $_.Verdict) -ge (Get-LVVerdictRank -Verdict 'unknown') })
+    $notable = @($displayFindings | Where-Object { (Get-LVVerdictRank -Verdict $_.Verdict) -ge (Get-LVVerdictRank -Verdict 'unknown') })
     if ($notable.Count -eq 0 -and $correlated.Count -eq 0) {
         Write-LVLog -Level ok -Message 'Nothing above the informational line in this window.'
     }
@@ -386,7 +435,15 @@ function Write-LVConsoleReport {
         $color = $script:LVVerdictColor[$f.Verdict]
         Write-Host ''
         Write-Host ('  [{0}] {1}' -f $f.Verdict.ToUpper(), $f.Title) -ForegroundColor $color
-        Write-Host ('    {0}  x{1}  ({2}/day, last seen {3})' -f $f.Key, $f.Count, $f.PerDay, (Format-LVWhen $f.LastSeen)) -ForegroundColor DarkGray
+        Write-Host ('    incident {0}  x{1}  ({2}/day, last seen {3}; {4} signature(s))' -f `
+            $f.IncidentId, $f.Count, $f.PerDay, (Format-LVWhen $f.LastSeen), $(if ($f.SignatureCount) { $f.SignatureCount } else { 1 })) -ForegroundColor DarkGray
+        if (@($f.DistinctCodes | Where-Object { $_ }).Count -gt 0) {
+            Write-Host ('    codes         : {0}' -f (@($f.DistinctCodes) -join ', ')) -ForegroundColor DarkGray
+        }
+        if (@($f.SignatureKeys | Where-Object { $_ }).Count -gt 0) {
+            Write-Host ('    signatures    : {0}' -f ((@($f.SignatureKeys) -join ', '))) -ForegroundColor DarkGray
+        }
+        if ($f.IncidentNote) { Write-Host ('    grouped       : {0}' -f $f.IncidentNote) -ForegroundColor DarkGray }
         if ($f.PSObject.Properties['Burst'] -and $f.Burst) {
             Write-Host ('    Burst         : began {0}; {1} occurrence(s) in {2} minute(s)' -f (Format-LVWhen $f.BurstOnset), $f.BurstCount, $f.BurstWindowMinutes) -ForegroundColor Yellow
         }
@@ -675,6 +732,8 @@ function ConvertTo-LVTextReport {
     param([Parameter(Mandatory)]$Result)
 
     $sb = New-Object System.Text.StringBuilder
+    $displayFindings = @(Get-LVReportIncident -Result $Result)
+    $incidentSummary = Get-LVReportIncidentSummary -Result $Result
 
     Add-LVLine $sb ('LogVerdict {0} report' -f $Result.Version)
     Add-LVLine $sb ('=' * 78)
@@ -685,6 +744,11 @@ function ConvertTo-LVTextReport {
     Add-LVLine $sb ('Channels      : {0}' -f ($Result.Channels -join ', '))
     Add-LVLine $sb ('Records read  : {0}' -f $Result.Reduction.RecordCount)
     Add-LVLine $sb ('Signatures    : {0} (reduction {1}:1)' -f $Result.Reduction.SignatureCount, $Result.Reduction.Ratio)
+    Add-LVLine $sb ('Incident suppression: {0:P0} ({1} incident(s) from {2} signature(s))' -f `
+        $incidentSummary.SuppressionRatio, $incidentSummary.IncidentCount, $incidentSummary.SignatureCount)
+    Add-LVLine $sb ('Needs attention: {0} incident(s)' -f @($displayFindings | Where-Object {
+            (Get-LVVerdictRank -Verdict $_.Verdict) -ge (Get-LVVerdictRank -Verdict 'unknown')
+        }).Count)
     if ($Result.Reduction.PSObject.Properties['InitialSignatureCount']) {
         Add-LVLine $sb ('Template pass : {0} masked ({1}:1) -> {2} after low-cardinality promotion ({3}:1; {4} slot(s) promoted)' -f `
             $Result.Reduction.InitialSignatureCount, $Result.Reduction.InitialRatio, $Result.Reduction.SignatureCount,
@@ -711,7 +775,7 @@ function ConvertTo-LVTextReport {
     if ($Result.PSObject.Properties['DatabaseFreshness'] -and $Result.DatabaseFreshness) {
         $staleRules = @($Result.DatabaseFreshness.StaleRules | Where-Object { $_ })
     } else {
-        $staleRules = @($Result.Findings | Where-Object { $_.PSObject.Properties['RuleStale'] -and $_.RuleStale } |
+        $staleRules = @($displayFindings | Where-Object { $_.PSObject.Properties['RuleStale'] -and $_.RuleStale } |
             ForEach-Object { [pscustomobject]@{ RuleId = $_.RuleId; Verified = $_.Verified; StaleAfterDays = $_.RuleFreshness.StaleAfterDays } })
     }
     if ($staleRules.Count -gt 0) {
@@ -880,10 +944,16 @@ function ConvertTo-LVTextReport {
         Add-LVLine $sb
     }
 
-    foreach ($f in $Result.Findings) {
+    foreach ($f in $displayFindings) {
         Add-LVLine $sb ('[{0}] {1}' -f $f.Verdict.ToUpper(), $f.Title)
-        Add-LVLine $sb ('  Signature   : {0}' -f $f.Key)
+        Add-LVLine $sb ('  Incident    : {0} ({1} signature(s))' -f $(if ($f.IncidentId) { $f.IncidentId } else { $f.Key }), $(if ($f.SignatureCount) { $f.SignatureCount } else { 1 }))
+        if (@($f.SignatureKeys | Where-Object { $_ }).Count -gt 0) {
+            Add-LVLine $sb ('  Signatures  : {0}' -f (@($f.SignatureKeys) -join ', '))
+        } else {
+            Add-LVLine $sb ('  Signature   : {0}' -f $f.Key)
+        }
         Add-LVLine $sb ('  Occurrences : {0} ({1}/day) between {2} and {3}' -f $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen))
+        if ($f.IncidentNote) { Add-LVLine $sb ('  Grouping    : {0}' -f $f.IncidentNote) }
         if ($f.PSObject.Properties['Burst'] -and $f.Burst) {
             Add-LVLine $sb ('  Burst       : began {0}; {1} occurrence(s) in {2} minute(s)' -f (Format-LVWhen $f.BurstOnset), $f.BurstCount, $f.BurstWindowMinutes)
         }
@@ -896,6 +966,9 @@ function ConvertTo-LVTextReport {
         if ($f.ErrorPhase -and $f.ErrorPhase -ne $f.Phase) { $context += 'catalog phase ' + [string]$f.ErrorPhase }
         if ($f.ErrorOperation -and $f.ErrorOperation -ne $f.Operation) { $context += 'catalog operation ' + [string]$f.ErrorOperation }
         if ($context.Count -gt 0) { Add-LVLine $sb ('  Structured   : {0}' -f ($context -join '; ')) }
+        if (@($f.DistinctCodes | Where-Object { $_ }).Count -gt 0) {
+            Add-LVLine $sb ('  Distinct codes: {0}' -f (@($f.DistinctCodes) -join ', '))
+        }
         if ($f.FallbackMessage) { Add-LVLine $sb ('  Fallback text: {0}' -f $f.FallbackMessage) }
         Add-LVLine $sb ('  Rule        : {0} (confidence: {1}{2})' -f $f.RuleId, $f.Confidence, $(if ($f.Verified) { ', verified ' + $f.Verified } else { '' }))
         foreach ($fp in @($f.FalsePositives)) {
@@ -954,6 +1027,8 @@ function ConvertTo-LVHtmlReport {
     param([Parameter(Mandatory)]$Result)
 
     $sb = New-Object System.Text.StringBuilder
+    $displayFindings = @(Get-LVReportIncident -Result $Result)
+    $incidentSummary = Get-LVReportIncidentSummary -Result $Result
 
     $reportLocale = Get-LVLocalizationLocale
     Add-LVLine $sb ('<!DOCTYPE html><html lang="{0}"><head><meta charset="utf-8">' -f (ConvertTo-LVHtmlEncoded $reportLocale))
@@ -1088,12 +1163,12 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         -Arguments @($Result.MachineName, (Format-LVWhen $Result.ScanTime), $Result.DaysBack, $Result.Elevated, $Result.Version)
     Add-LVLine $sb '<nav aria-label="Report navigation"><a class="skip-link" href="#finding-list">Skip to findings</a></nav><main id="main-content" tabindex="-1">'
 
-    $needsAttention = @($Result.Findings | Where-Object { (Get-LVVerdictRank -Verdict $_.Verdict) -ge (Get-LVVerdictRank -Verdict 'unknown') }).Count
+    $needsAttention = @($displayFindings | Where-Object { (Get-LVVerdictRank -Verdict $_.Verdict) -ge (Get-LVVerdictRank -Verdict 'unknown') }).Count
     $staleRules = @()
     if ($Result.PSObject.Properties['DatabaseFreshness'] -and $Result.DatabaseFreshness) {
         $staleRules = @($Result.DatabaseFreshness.StaleRules | Where-Object { $_ })
     } else {
-        $staleRules = @($Result.Findings | Where-Object { $_.PSObject.Properties['RuleStale'] -and $_.RuleStale } |
+        $staleRules = @($displayFindings | Where-Object { $_.PSObject.Properties['RuleStale'] -and $_.RuleStale } |
             ForEach-Object { [pscustomobject]@{ RuleId = $_.RuleId; Verified = $_.Verified; StaleAfterDays = $_.RuleFreshness.StaleAfterDays } })
     }
 
@@ -1101,6 +1176,8 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
     Add-LVLine $sb ('<div class="stat"><div class="k">Records read</div><div class="v">{0}</div></div>' -f $Result.Reduction.RecordCount)
     Add-LVLine $sb ('<div class="stat"><div class="k">Signatures</div><div class="v">{0}</div></div>' -f $Result.Reduction.SignatureCount)
     Add-LVLine $sb ('<div class="stat"><div class="k">Noise removed</div><div class="v">{0}:1</div></div>' -f $Result.Reduction.Ratio)
+    Add-LVLine $sb ('<div class="stat"><div class="k">Incident suppression</div><div class="v">{0:P0}</div></div>' -f $incidentSummary.SuppressionRatio)
+    Add-LVLine $sb ('<div class="stat"><div class="k">Incidents</div><div class="v">{0}</div></div>' -f $incidentSummary.IncidentCount)
     Add-LVLine $sb ('<div class="stat"><div class="k">Needs attention</div><div class="v">{0}</div></div>' -f $needsAttention)
     if ($Result.Stability) {
         Add-LVLine $sb ('<div class="stat"><div class="k">Stability ({0})</div><div class="v">{1}/10</div></div>' -f (ConvertTo-LVHtmlEncoded $Result.Stability.Direction), $Result.Stability.Current)
@@ -1293,7 +1370,7 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
 
     Add-LVLine $sb '<section aria-labelledby="findings-heading"><h2 id="findings-heading">'
     if ($correlated.Count -gt 0) {
-        Add-LVLine $sb 'Every signature</h2>'
+        Add-LVLine $sb 'Every incident</h2>'
     } else {
         Add-LVLine $sb 'Findings</h2>'
     }
@@ -1301,7 +1378,7 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
     Add-LVLine $sb '<div class="filterbar" id="finding-filters" role="region" aria-labelledby="filter-title">'
     Add-LVLine $sb '<div class="filter-title" id="filter-title">Filter findings</div><div class="filter-controls">'
     foreach ($verdict in @('critical', 'actionable', 'investigate', 'unknown', 'informational', 'benign')) {
-        $count = @($Result.Findings | Where-Object { $_.Verdict -eq $verdict }).Count
+        $count = @($displayFindings | Where-Object { $_.Verdict -eq $verdict }).Count
         if ($count -eq 0) { continue }
         Add-LVLine $sb ('<label class="toggle"><input type="checkbox" data-filter-verdict="{0}" checked><span>{1}</span><b>{2}</b></label>' -f `
             (ConvertTo-LVHtmlEncoded $verdict), (ConvertTo-LVHtmlEncoded $verdict), $count)
@@ -1312,7 +1389,7 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
     Add-LVLine $sb '<noscript><div class="sub no-script">Filtering is unavailable because scripting is disabled; all findings are shown.</div></noscript>'
     Add-LVLine $sb '<div id="finding-list" role="region" aria-labelledby="findings-heading">'
     $findingIndex = 0
-    foreach ($f in $Result.Findings) {
+    foreach ($f in $displayFindings) {
         $findingIndex++
         $hex = $script:LVVerdictHex[$f.Verdict]
         if (-not $hex) { $hex = '#6c7086' }
@@ -1330,9 +1407,15 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
             $findingVerdictHtml, $findingRuleIdHtml, $findingConfidenceHtml, $findingVerifiedHtml, $hex, $findingIndex)
         Add-LVLine $sb ('<h3 id="finding-heading-{0}"><span class="badge" data-verdict="{1}" style="--verdict-color:{2}">Verdict: {3}</span> {4}</h3>' -f `
             $findingIndex, $findingVerdictHtml, $hex, $findingVerdictHtml.ToUpperInvariant(), (ConvertTo-LVHtmlEncoded $f.Title))
-        Add-LVLine $sb ('<div class="meta">{0} &middot; {1} occurrence(s) &middot; {2}/day &middot; {3} to {4} &middot; rule {5} &middot; confidence {6} &middot; verified {7}{8}</div>' -f `
+        Add-LVLine $sb ('<div class="meta">{0} &middot; {1} occurrence(s) &middot; {2}/day &middot; {3} to {4} &middot; {5} constituent signature(s) &middot; rule {6} &middot; confidence {7} &middot; verified {8}{9}</div>' -f `
             (ConvertTo-LVHtmlEncoded $f.Key), $f.Count, $f.PerDay, (Format-LVWhen $f.FirstSeen), (Format-LVWhen $f.LastSeen),
-            $findingRuleIdHtml, $findingConfidenceHtml, $findingVerifiedHtml, $findingStale)
+            $(if ($f.SignatureCount) { $f.SignatureCount } else { 1 }), $findingRuleIdHtml, $findingConfidenceHtml, $findingVerifiedHtml, $findingStale)
+        if ($f.IncidentNote) {
+            Add-LVLine $sb ('<div class="row"><div class="lbl">Incident</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.IncidentNote))
+        }
+        if (@($f.SignatureKeys | Where-Object { $_ }).Count -gt 0) {
+            Add-LVLine $sb ('<div class="row"><div class="lbl">Signatures</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded ((@($f.SignatureKeys) -join ', '))))
+        }
         if ($f.PSObject.Properties['Burst'] -and $f.Burst) {
             Add-LVLine $sb ('<div class="row"><div class="lbl">Burst</div><div>{0} &middot; {1} occurrence(s) in {2} minute(s)</div></div>' -f (Format-LVWhen $f.BurstOnset), $f.BurstCount, $f.BurstWindowMinutes)
         }
@@ -1346,6 +1429,9 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         if ($f.ErrorOperation -and $f.ErrorOperation -ne $f.Operation) { $context += 'catalog operation ' + [string]$f.ErrorOperation }
         if ($context.Count -gt 0) {
             Add-LVLine $sb ('<div class="row"><div class="lbl">Structured context</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded ($context -join '; ')))
+        }
+        if (@($f.DistinctCodes | Where-Object { $_ }).Count -gt 0) {
+            Add-LVLine $sb ('<div class="row"><div class="lbl">Distinct codes</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded ((@($f.DistinctCodes) -join ', '))))
         }
         if ($f.FallbackMessage) {
             Add-LVLine $sb ('<div class="row"><div class="lbl">Fallback text</div><div>{0}</div></div>' -f (ConvertTo-LVHtmlEncoded $f.FallbackMessage))
@@ -1409,7 +1495,7 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
     }
 
     Add-LVLine $sb '</main>'
-    if (@($Result.Findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation }).Count -gt 0) {
+    if (@($displayFindings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation }).Count -gt 0) {
         Add-LVLine $sb '<footer>Generated by LogVerdict. Verdicts, actions and unlabelled explanations come only from the curated rule database. Any optional local-model text is isolated inside a MODEL-GENERATED CANDIDATE block, contains no remediation, and is not a ruling.</footer>'
     } else {
         Add-LVLine $sb '<footer>Generated by LogVerdict. Every explanation above comes from a curated rule in the verdict database, not from a language model. Signatures with no matching rule are reported as unknown, with their raw evidence and no guess at a cause.</footer>'

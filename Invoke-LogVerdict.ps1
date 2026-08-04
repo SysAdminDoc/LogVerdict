@@ -25,6 +25,9 @@
     .PARAMETER IncludeBenign
     Show signatures the database rules as harmless. Off by default.
 
+    .PARAMETER IncludeLowConfidence
+    Show curated low-confidence rulings. Off by default; unknown signatures remain visible.
+
     .PARAMETER OutputDir
     Report destination. Defaults to a timestamped folder on the Desktop.
 
@@ -116,6 +119,7 @@ param(
     [switch]$SkipReliability,
     [switch]$PerformanceTelemetry,
     [switch]$IncludeBenign,
+    [switch]$IncludeLowConfidence,
     [string]$OutputDir,
     [switch]$NoReport,
     [switch]$Redact,
@@ -188,6 +192,7 @@ try {
         PerformanceTelemetry = $PerformanceTelemetry
         AllChannels     = $AllChannels
         DiagnosticChannels = $DiagnosticChannels
+        IncludeLowConfidence = $IncludeLowConfidence
         Redact          = $Redact
         ExplainUnknown  = $ExplainUnknown
         OllamaModel     = $OllamaModel

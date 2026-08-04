@@ -109,6 +109,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Look-back | Look back (1-3650 days) | `-DaysBack` |
 | Default, focused, all, or named event channels | Focused/all switches or Named event channels | `-DiagnosticChannels`, `-AllChannels`, `-Channel` |
 | Setup logs, Reliability Monitor, harmless findings | Source switches | `-SkipTextLogs`, `-SkipReliability`, `-IncludeBenign` |
+| Rule-level incidents and confidence gate | Incidents group matching signatures; low-confidence rulings stay hidden unless requested | `-IncludeLowConfidence` |
 | Alternate complete rule database | Rules path / picker | `-DatabasePath` |
 | Report destination, identifier masking, evidence bundle | Report folder, masking toggle, and evidence toggle (raw event channels when masking is off) | `-OutputDir`, `-Redact`, `-IncludeEvidence`; `-AllowRawEvidence` remains an explicit console-only override |
 | Offline evidence re-evaluation | Console-only batch/review workflow | `-EvidencePath` |
@@ -139,6 +140,7 @@ LogVerdict.exe                                  scan the last 30 days
 LogVerdict.exe -DiagnosticChannels              add six focused operational channels
 LogVerdict.exe -DaysBack 7 -AllChannels         narrower window, every populated channel
 LogVerdict.exe -IncludeBenign                   show the signatures ruled harmless too
+LogVerdict.exe -IncludeLowConfidence             include curated low-confidence rulings
 LogVerdict.exe -NoReport                        console only, write nothing
 LogVerdict.exe -OutputDir C:\Temp\lv             choose where reports land
 LogVerdict.exe -Redact                          mask identifiers before writing
@@ -157,7 +159,9 @@ LogVerdict.exe -AdvisoryPackage PowerShell -AdvisoryVersion 7.4.0  match the shi
 
 `-Redact` masks the account name, machine name, profile paths, SIDs and mail addresses in the returned result as well as in captured log messages before they are written. Redaction is deny-by-default: an unrecognised top-level result field refuses publication instead of being copied through silently. When combined with `-ExplainUnknown` or `-PromoteToRule`, the scan also masks the prompt-specific finding copy before it crosses the loopback Ollama boundary. Use it when the report is going to a ticket or a vendor - the default result keeps everything, because locally that is the evidence. The GUI's **Redact reports and clipboard** toggle applies the same masking to copied findings, and its status line states whether the copied payload is redacted. The reports say when they were redacted, and say that an identifier Windows wrote in a form this tool does not recognize may still be in there: read before sending.
 
-`-Format Markdown` writes `LogVerdict-Ticket-Summary.md`, a bounded paste-ready handoff that leads with the worst verdict, the records-to-signatures suppression count, findings needing attention and their one-line actions, the tool/rule-database versions, and coverage caveats. The Findings page has **Copy summary for ticket**, which uses the same projection; its redaction state follows the **Redact reports and clipboard** toggle. The summary contains no raw evidence and stays below 24 MiB even when fed an unusually large result object.
+`-Format Markdown` writes `LogVerdict-Ticket-Summary.md`, a bounded paste-ready handoff that leads with the worst verdict, the records-to-signatures suppression count, incident suppression, incidents needing attention and their one-line actions, the tool/rule-database versions, and coverage caveats. The Findings page has **Copy summary for ticket**, which uses the same projection; its redaction state follows the **Redact reports and clipboard** toggle. The summary contains no raw evidence and stays below 24 MiB even when fed an unusually large result object.
+
+Resolved signatures remain in `$r.Findings` for compatibility and correlation analysis. Reader-facing output uses `$r.Incidents`: signatures sharing a `RuleId` become one incident with constituent keys, combined occurrence count, and distinct result/extend/error codes. `$r.IncidentSummary.SuppressionRatio` is the fraction of signatures grouped into incidents. Low-confidence rules are excluded from the default scan result; pass `-IncludeLowConfidence` when reviewing them explicitly. Unknown signatures have confidence `none` and are never hidden by this gate.
 
 `-HistoryPath` opts into a local JSON history containing at most 30 recent scan summaries. It stores stable signature keys, counts, rates, verdict labels, and rule ids, not messages, paths, machine names, or account identifiers. `-HistoryWindowDays` bounds which prior scans are compared (default 30). Reports state the baseline method, comparison window, thresholds, missing-history state, and false-positive caveat. A trend signal is advisory only: it cannot raise a finding's verdict, `WorstVerdict`, or exit code.
 
@@ -320,6 +324,7 @@ As a module:
 Import-Module .\LogVerdict.psd1
 $r = Invoke-LogVerdictScan -DaysBack 30
 $focused = Invoke-LogVerdictScan -DaysBack 30 -DiagnosticChannels
+$withLowConfidence = Invoke-LogVerdictScan -DaysBack 30 -IncludeLowConfidence
 $drafted = Invoke-LogVerdictScan -DaysBack 30 -ExplainUnknown -OllamaModel llama3.2
 $historical = Invoke-LogVerdictScan -DaysBack 30 -HistoryPath "$env:LOCALAPPDATA\LogVerdict\history.json"
 $advisories = Get-LogVerdictAdvisory -Package PowerShell -Version 7.4.0

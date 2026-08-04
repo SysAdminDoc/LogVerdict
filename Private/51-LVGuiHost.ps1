@@ -79,7 +79,7 @@ function Get-LVGuiSetting {
         foreach ($name in @('allChannels', 'skipTextLogs', 'includeBenign')) {
             if ($null -eq $data.PSObject.Properties[$name] -or $data.$name -isnot [bool]) { return $null }
         }
-        foreach ($name in @('diagnosticChannels', 'skipReliability', 'redact', 'includeEvidence')) {
+        foreach ($name in @('diagnosticChannels', 'skipReliability', 'redact', 'includeEvidence', 'includeLowConfidence')) {
             if ($null -ne $data.PSObject.Properties[$name] -and $data.$name -isnot [bool]) { return $null }
         }
         foreach ($name in @('namedChannels', 'databasePath', 'outputDirectory')) {
@@ -106,6 +106,7 @@ function Get-LVGuiSetting {
             SkipTextLogs  = [bool]$data.skipTextLogs
             SkipReliability = if ($data.PSObject.Properties['skipReliability']) { [bool]$data.skipReliability } else { $false }
             IncludeBenign = [bool]$data.includeBenign
+            IncludeLowConfidence = if ($data.PSObject.Properties['includeLowConfidence']) { [bool]$data.includeLowConfidence } else { $false }
             NamedChannels = if ($data.PSObject.Properties['namedChannels']) { [string]$data.namedChannels } else { '' }
             DatabasePath = if ($data.PSObject.Properties['databasePath']) { [string]$data.databasePath } else { '' }
             OutputDirectory = if ($data.PSObject.Properties['outputDirectory']) { [string]$data.outputDirectory } else { '' }
@@ -150,6 +151,7 @@ function Save-LVGuiSetting {
         skipTextLogs  = [bool]$Settings.SkipTextLogs
         skipReliability = [bool]$Settings.SkipReliability
         includeBenign = [bool]$Settings.IncludeBenign
+        includeLowConfidence = [bool]$Settings.IncludeLowConfidence
         namedChannels = ([string]$Settings.NamedChannels).Trim()
         databasePath = ([string]$Settings.DatabasePath).Trim()
         outputDirectory = ([string]$Settings.OutputDirectory).Trim()
@@ -204,6 +206,7 @@ function Reset-LVGuiSetting {
         SkipTextLogs  = $false
         SkipReliability = $false
         IncludeBenign = $false
+        IncludeLowConfidence = $false
         NamedChannels = ''
         DatabasePath = ''
         OutputDirectory = ''
@@ -405,7 +408,7 @@ $script:LVGuiElement = @(
     'TxtSideMachine', 'TxtSideElevation', 'BtnSideElevate', 'TxtVersion',
     'TxtSideDbTitle', 'TxtSideDbMeta', 'TxtSideDbUpdated',
     'TxtOverviewDays', 'ChkOverviewAllChannels', 'ChkOverviewDiagnosticChannels',
-    'ChkOverviewIncludeText', 'ChkOverviewIncludeBenign', 'TxtOverviewChannels',
+    'ChkOverviewIncludeText', 'ChkOverviewIncludeBenign', 'ChkOverviewIncludeLowConfidence', 'TxtOverviewChannels',
     'TxtOverviewDatabase', 'BtnOverviewBrowseDatabase', 'ChkOverviewSkipReliability',
     'TxtOverviewOutputDir', 'BtnOverviewBrowseOutput', 'ChkOverviewRedact',
     'ChkOverviewEvidence', 'BtnResetSettings', 'TxtSettingsStatus',
@@ -529,7 +532,8 @@ function ConvertTo-LVGuiRow {
             $origin = [string]$f.Channel
         }
 
-        $haystack = (@($f.Title, $f.Provider, $f.Channel, $f.Id, $f.SampleMessage, $f.RuleId, $f.Key) -join ' ').ToLowerInvariant()
+        $haystack = (@($f.Title, $f.Provider, $f.Channel, $f.Id, $f.SampleMessage, $f.RuleId, $f.Key,
+                $f.IncidentId, $f.IncidentNote, $f.SignatureKeys, $f.DistinctCodes) -join ' ').ToLowerInvariant()
 
         # Sorting keys are separate from display strings on purpose. Sorting the grid
         # on "3 days ago" or on "CRITICAL" would order it alphabetically, which is
@@ -538,8 +542,13 @@ function ConvertTo-LVGuiRow {
         if ($null -ne $f.LastSeen) { $lastSeenSort = $f.LastSeen }
 
         $correlationIds = @()
-        if ($CorrelationIdsByKey -and $f.Key -and $CorrelationIdsByKey.ContainsKey([string]$f.Key)) {
-            $correlationIds = @($CorrelationIdsByKey[[string]$f.Key] | Select-Object -Unique)
+        if ($CorrelationIdsByKey) {
+            $correlationKeys = @($f.Key) + @($f.SignatureKeys)
+            foreach ($correlationKey in @($correlationKeys | Where-Object { $_ })) {
+                if ($CorrelationIdsByKey.ContainsKey([string]$correlationKey)) {
+                    $correlationIds = @($correlationIds + @($CorrelationIdsByKey[[string]$correlationKey]) | Select-Object -Unique)
+                }
+            }
         }
         $ruleStatus = 'unruled'
         if ($f.RuleId) {
@@ -551,8 +560,9 @@ function ConvertTo-LVGuiRow {
         # codes and the whole search haystack. Colour carries meaning in the verdict
         # column, so the verdict is spoken rather than merely shown.
         $spokenWhen = Format-LVGuiWhen -When $f.LastSeen
-        $automationName = '{0}. {1}. Seen {2} time(s), {3:0.00} per day, last {4}. Source {5}.' -f `
-            $style.Label, $f.Title, $f.Count, $f.PerDay, $spokenWhen, $origin
+        $signatureCount = if ($f.PSObject.Properties['SignatureCount'] -and $f.SignatureCount) { [int]$f.SignatureCount } else { 1 }
+        $automationName = '{0}. {1}. Seen {2} time(s) across {3} signature(s), {4:0.00} per day, last {5}. Source {6}.' -f `
+            $style.Label, $f.Title, $f.Count, $signatureCount, $f.PerDay, $spokenWhen, $origin
 
         [pscustomobject]@{
             Verdict      = $f.Verdict
@@ -567,6 +577,10 @@ function ConvertTo-LVGuiRow {
             RuleId       = [string]$f.RuleId
             RuleStatus   = $ruleStatus
             CorrelationIds = $correlationIds
+            IncidentId   = if ($f.PSObject.Properties['IncidentId']) { [string]$f.IncidentId } else { '' }
+            SignatureCount = $signatureCount
+            SignatureKeys  = @($f.SignatureKeys)
+            DistinctCodes  = @($f.DistinctCodes)
             Title        = $f.Title
             Count        = $f.Count
             PerDay       = $f.PerDay
@@ -762,6 +776,9 @@ function ConvertTo-LVGuiDetail {
     $meta = New-Object System.Collections.Generic.List[string]
     $meta.Add(('{0} occurrence(s)' -f $Finding.Count))
     $meta.Add(('{0}/day' -f $Finding.PerDay))
+    if ($Finding.PSObject.Properties['SignatureCount'] -and $Finding.SignatureCount) {
+        $meta.Add(('{0} constituent signature(s)' -f $Finding.SignatureCount))
+    }
     if ($Finding.Source -eq 'event') {
         $meta.Add(('{0} event {1}' -f $Finding.Provider, $Finding.Id))
         $meta.Add(('{0} channel' -f $Finding.Channel))
@@ -780,6 +797,9 @@ function ConvertTo-LVGuiDetail {
         @{ Name='provider locale'; Value=$Finding.ProviderLocale }
     )) {
         if ($context.Value) { $meta.Add(('{0} {1}' -f $context.Name, $context.Value)) }
+    }
+    if (@($Finding.DistinctCodes | Where-Object { $_ }).Count -gt 0) {
+        $meta.Add(('codes {0}' -f (@($Finding.DistinctCodes) -join ', ')))
     }
 
     $falsePositive = @($Finding.FalsePositives | Where-Object { $_ })

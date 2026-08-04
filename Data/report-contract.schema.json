@@ -70,6 +70,44 @@
         }
       }
     },
+    "Incidents": {
+      "type": "array",
+      "description": "Rule-level reader-facing groups. Findings remains the signature-level compatibility layer.",
+      "items": {
+        "type": "object",
+        "required": ["IncidentId", "RuleId", "Count", "SignatureCount", "SignatureKeys", "DistinctCodes"],
+        "properties": {
+          "IncidentId": { "type": "string" },
+          "Grouping": { "enum": ["RuleId", "Signature"] },
+          "RuleId": { "type": ["string", "null"] },
+          "Count": { "type": "integer", "minimum": 0 },
+          "CombinedCount": { "type": "integer", "minimum": 0 },
+          "PerDay": { "type": "number", "minimum": 0 },
+          "SignatureCount": { "type": "integer", "minimum": 1 },
+          "SignatureKeys": { "type": "array", "items": { "type": "string" } },
+          "DistinctCodes": { "type": "array", "items": { "type": "string" } },
+          "ResultCodes": { "type": "array", "items": { "type": "string" } },
+          "ExtendCodes": { "type": "array", "items": { "type": "string" } },
+          "ErrorCodes": { "type": "array", "items": { "type": "string" } },
+          "FirstSeen": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
+          "LastSeen": { "type": ["string", "null"], "format": "date-time", "pattern": "Z$" },
+          "Signatures": { "type": "array" },
+          "ConstituentSignatures": { "type": "array" }
+        }
+      }
+    },
+    "IncidentSummary": {
+      "type": "object",
+      "required": ["SignatureCount", "IncidentCount", "SuppressedSignatureCount", "SuppressionRatio"],
+      "properties": {
+        "SignatureCount": { "type": "integer", "minimum": 0 },
+        "IncidentCount": { "type": "integer", "minimum": 0 },
+        "SuppressedSignatureCount": { "type": "integer", "minimum": 0 },
+        "SuppressionRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "SuppressionPercent": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "LowConfidenceSuppressedCount": { "type": "integer", "minimum": 0 },
     "Correlations": {
       "type": "array",
       "items": {

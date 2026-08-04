@@ -746,3 +746,237 @@ function Resolve-LVVerdict {
 
     return ConvertTo-LVArrayOutput -Value @($sorted)
 }
+
+function Test-LVConfidenceIncluded {
+    <#
+        .SYNOPSIS
+        Whether a resolved finding belongs in the default result set.
+
+        .DESCRIPTION
+        Confidence is deliberately an inclusion boundary, not decoration. Unknown
+        findings have confidence 'none' and remain visible; only curated low-confidence
+        rulings are hidden unless the caller explicitly opts in.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Finding,
+        [switch]$IncludeLowConfidence
+    )
+
+    if ($IncludeLowConfidence) { return $true }
+    if (-not $Finding.PSObject.Properties['Confidence']) { return $true }
+    return ([string]$Finding.Confidence -ine 'low')
+}
+
+function Get-LVIncidentCodeSet {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Finding)
+
+    $resultCodes = New-Object 'System.Collections.Generic.List[string]'
+    $extendCodes = New-Object 'System.Collections.Generic.List[string]'
+    $errorCodes = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($propertyName in @('ResultCodes', 'ResultCode')) {
+        if (-not $Finding.PSObject.Properties[$propertyName]) { continue }
+        foreach ($value in @($Finding.$propertyName)) {
+            if ($null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+                $resultCodes.Add([string]$value) | Out-Null
+            }
+        }
+    }
+    foreach ($propertyName in @('ExtendCodes', 'ExtendCode')) {
+        if (-not $Finding.PSObject.Properties[$propertyName]) { continue }
+        foreach ($value in @($Finding.$propertyName)) {
+            if ($null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+                $extendCodes.Add([string]$value) | Out-Null
+            }
+        }
+    }
+    foreach ($propertyName in @('ErrorCodes', 'ErrorCode')) {
+        if (-not $Finding.PSObject.Properties[$propertyName]) { continue }
+        foreach ($value in @($Finding.$propertyName)) {
+            if ($null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+                $errorCodes.Add([string]$value) | Out-Null
+            }
+        }
+    }
+
+    $result = @($resultCodes.ToArray() | Sort-Object -Unique)
+    $extend = @($extendCodes.ToArray() | Sort-Object -Unique)
+    $errors = @($errorCodes.ToArray() | Sort-Object -Unique)
+    return [pscustomobject][ordered]@{
+        ResultCodes = $result
+        ExtendCodes = $extend
+        ErrorCodes  = $errors
+        DistinctCodes = @($result + $extend + $errors | Sort-Object -Unique)
+    }
+}
+
+function Get-LVIncidentConfidenceRank {
+    param([AllowNull()][string]$Confidence)
+
+    switch ($Confidence.ToLowerInvariant()) {
+        'high'   { return 3 }
+        'medium' { return 2 }
+        'low'    { return 1 }
+        default  { return 0 }
+    }
+}
+
+function Get-LVIncidentReduction {
+    <#
+        .SYNOPSIS
+        Collapse resolved signatures into rule-level incidents.
+
+        .DESCRIPTION
+        A rule is the stable unit of explanation. A single rule can match several
+        provider/error-code signatures, so presenting those signatures as separate
+        findings makes one incident look like many problems. The original signature
+        findings remain available to correlations and compatibility consumers; this
+        projection is what reports and the GUI use for the reader-facing result.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Finding
+    )
+
+    $groups = [ordered]@{}
+    foreach ($findingItem in @($Finding | Where-Object { $_ })) {
+        $ruleText = ''
+        if ($findingItem.PSObject.Properties['RuleId'] -and $null -ne $findingItem.RuleId) {
+            $ruleText = [string]$findingItem.RuleId
+        }
+        $keyText = if ($ruleText) { 'rule:' + $ruleText } else { 'signature:' + [string]$findingItem.Key }
+        if (-not $groups.Contains($keyText)) {
+            $groups[$keyText] = New-Object 'System.Collections.Generic.List[object]'
+        }
+        $groups[$keyText].Add($findingItem) | Out-Null
+    }
+
+    $incidents = New-Object System.Collections.Generic.List[object]
+    foreach ($groupKey in $groups.Keys) {
+        $members = @($groups[$groupKey].ToArray())
+        $representative = @($members | Sort-Object -Property `
+            @{ Expression = { Get-LVVerdictRank -Verdict $_.Verdict }; Descending = $true }, `
+            @{ Expression = { [int64]$_.Count }; Descending = $true }, `
+            @{ Expression = { [string]$_.Key }; Descending = $false } | Select-Object -First 1)[0]
+
+        $ruleId = $null
+        if ($groupKey.StartsWith('rule:', [StringComparison]::OrdinalIgnoreCase)) {
+            $ruleId = $groupKey.Substring(5)
+        }
+        $incidentId = if ($ruleId) { 'Incident/' + $ruleId } else { 'Incident/' + [string]$representative.Key }
+
+        [int64]$combinedCount = 0
+        [double]$combinedPerDay = 0
+        $firstSeenValues = New-Object System.Collections.Generic.List[datetime]
+        $lastSeenValues = New-Object System.Collections.Generic.List[datetime]
+        $times = New-Object 'System.Collections.Generic.List[datetime]'
+        $signatureKeys = New-Object 'System.Collections.Generic.List[string]'
+        $signatureSummaries = New-Object System.Collections.Generic.List[object]
+        $resultCodes = New-Object 'System.Collections.Generic.List[string]'
+        $extendCodes = New-Object 'System.Collections.Generic.List[string]'
+        $errorCodes = New-Object 'System.Collections.Generic.List[string]'
+        $confidenceRank = 3
+
+        foreach ($member in $members) {
+            if ($member.PSObject.Properties['Count'] -and $null -ne $member.Count) { $combinedCount += [int64]$member.Count }
+            if ($member.PSObject.Properties['PerDay'] -and $null -ne $member.PerDay) { $combinedPerDay += [double]$member.PerDay }
+            if ($member.PSObject.Properties['FirstSeen'] -and $member.FirstSeen) { $firstSeenValues.Add([datetime]$member.FirstSeen) | Out-Null }
+            if ($member.PSObject.Properties['LastSeen'] -and $member.LastSeen) { $lastSeenValues.Add([datetime]$member.LastSeen) | Out-Null }
+            if ($member.PSObject.Properties['Times']) {
+                foreach ($time in @($member.Times | Where-Object { $_ })) { $times.Add([datetime]$time) | Out-Null }
+            }
+            if ($member.Key) { $signatureKeys.Add([string]$member.Key) | Out-Null }
+
+            $codeSet = Get-LVIncidentCodeSet -Finding $member
+            foreach ($code in @($codeSet.ResultCodes)) { $resultCodes.Add($code) | Out-Null }
+            foreach ($code in @($codeSet.ExtendCodes)) { $extendCodes.Add($code) | Out-Null }
+            foreach ($code in @($codeSet.ErrorCodes)) { $errorCodes.Add($code) | Out-Null }
+
+            $memberConfidence = if ($member.PSObject.Properties['Confidence']) { [string]$member.Confidence } else { 'none' }
+            $confidenceRank = [Math]::Min($confidenceRank, (Get-LVIncidentConfidenceRank -Confidence $memberConfidence))
+            $summary = [pscustomobject][ordered]@{
+                Key           = [string]$member.Key
+                Source        = [string]$member.Source
+                Channel       = [string]$member.Channel
+                Provider      = [string]$member.Provider
+                Id            = $member.Id
+                Count         = if ($member.PSObject.Properties['Count']) { $member.Count } else { 0 }
+                PerDay        = if ($member.PSObject.Properties['PerDay']) { $member.PerDay } else { 0 }
+                FirstSeen     = if ($member.PSObject.Properties['FirstSeen']) { $member.FirstSeen } else { $null }
+                LastSeen      = if ($member.PSObject.Properties['LastSeen']) { $member.LastSeen } else { $null }
+                Verdict       = [string]$member.Verdict
+                RuleId        = if ($member.PSObject.Properties['RuleId']) { $member.RuleId } else { $null }
+                Confidence    = $memberConfidence
+                ResultCodes   = @($codeSet.ResultCodes)
+                ExtendCodes   = @($codeSet.ExtendCodes)
+                ErrorCodes    = @($codeSet.ErrorCodes)
+                DistinctCodes = @($codeSet.DistinctCodes)
+            }
+            $signatureSummaries.Add($summary) | Out-Null
+        }
+
+        $firstSeen = if ($firstSeenValues.Count -gt 0) { @($firstSeenValues.ToArray() | Sort-Object | Select-Object -First 1)[0] } else { $null }
+        $lastSeen = if ($lastSeenValues.Count -gt 0) { @($lastSeenValues.ToArray() | Sort-Object -Descending | Select-Object -First 1)[0] } else { $null }
+        $distinctResultCodes = @($resultCodes.ToArray() | Sort-Object -Unique)
+        $distinctExtendCodes = @($extendCodes.ToArray() | Sort-Object -Unique)
+        $distinctErrorCodes = @($errorCodes.ToArray() | Sort-Object -Unique)
+        $distinctCodes = @($distinctResultCodes + $distinctExtendCodes + $distinctErrorCodes | Sort-Object -Unique)
+        $confidence = switch ($confidenceRank) {
+            3 { 'high' }
+            2 { 'medium' }
+            1 { 'low' }
+            default { 'none' }
+        }
+
+        $incident = [pscustomobject]@{}
+        foreach ($property in $representative.PSObject.Properties) {
+            $incident | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force
+        }
+        $incident | Add-Member -NotePropertyName 'Key' -NotePropertyValue $incidentId -Force
+        $incident | Add-Member -NotePropertyName 'IncidentId' -NotePropertyValue $incidentId -Force
+        $incident | Add-Member -NotePropertyName 'Grouping' -NotePropertyValue $(if ($ruleId) { 'RuleId' } else { 'Signature' }) -Force
+        $incident | Add-Member -NotePropertyName 'RuleId' -NotePropertyValue $ruleId -Force
+        $incident | Add-Member -NotePropertyName 'Count' -NotePropertyValue $combinedCount -Force
+        $incident | Add-Member -NotePropertyName 'CombinedCount' -NotePropertyValue $combinedCount -Force
+        $incident | Add-Member -NotePropertyName 'PerDay' -NotePropertyValue ([Math]::Round($combinedPerDay, 4)) -Force
+        $incident | Add-Member -NotePropertyName 'FirstSeen' -NotePropertyValue $firstSeen -Force
+        $incident | Add-Member -NotePropertyName 'LastSeen' -NotePropertyValue $lastSeen -Force
+        $incident | Add-Member -NotePropertyName 'Times' -NotePropertyValue @($times.ToArray() | Sort-Object -Unique) -Force
+        $incident | Add-Member -NotePropertyName 'SignatureCount' -NotePropertyValue $members.Count -Force
+        $incident | Add-Member -NotePropertyName 'SignatureKeys' -NotePropertyValue @($signatureKeys.ToArray() | Sort-Object -Unique) -Force
+        $incident | Add-Member -NotePropertyName 'Signatures' -NotePropertyValue @($signatureSummaries.ToArray()) -Force
+        $incident | Add-Member -NotePropertyName 'ConstituentSignatures' -NotePropertyValue @($signatureSummaries.ToArray()) -Force
+        $incident | Add-Member -NotePropertyName 'ResultCodes' -NotePropertyValue $distinctResultCodes -Force
+        $incident | Add-Member -NotePropertyName 'ExtendCodes' -NotePropertyValue $distinctExtendCodes -Force
+        $incident | Add-Member -NotePropertyName 'ErrorCodes' -NotePropertyValue $distinctErrorCodes -Force
+        $incident | Add-Member -NotePropertyName 'DistinctCodes' -NotePropertyValue $distinctCodes -Force
+        $incident | Add-Member -NotePropertyName 'Confidence' -NotePropertyValue $confidence -Force
+        if ($members.Count -gt 1) {
+            $incident | Add-Member -NotePropertyName 'IncidentNote' -NotePropertyValue ('{0} distinct signature(s) matched this ruling and were combined into one incident.' -f $members.Count) -Force
+        } else {
+            $incident | Add-Member -NotePropertyName 'IncidentNote' -NotePropertyValue 'One signature produced this incident.' -Force
+        }
+        $incidents.Add($incident) | Out-Null
+    }
+
+    $sortedIncidents = @($incidents.ToArray() |
+        Sort-Object -Property @{ Expression = { Get-LVVerdictRank -Verdict $_.Verdict }; Descending = $true },
+            @{ Expression = { [int64]$_.Count }; Descending = $true },
+            @{ Expression = { [string]$_.IncidentId }; Descending = $false })
+    $signatureCount = @($Finding | Where-Object { $_ }).Count
+    $incidentCount = $sortedIncidents.Count
+    $suppressedCount = [Math]::Max(0, $signatureCount - $incidentCount)
+    $suppressionRatio = if ($signatureCount -gt 0) { [Math]::Round($suppressedCount / [double]$signatureCount, 4) } else { 0 }
+
+    return [pscustomobject][ordered]@{
+        Incidents = ConvertTo-LVArrayOutput -Value $sortedIncidents
+        Summary = [pscustomobject][ordered]@{
+            SignatureCount = $signatureCount
+            IncidentCount = $incidentCount
+            SuppressedSignatureCount = $suppressedCount
+            SuppressionRatio = $suppressionRatio
+            SuppressionPercent = [Math]::Round($suppressionRatio * 100, 1)
+        }
+    }
+}

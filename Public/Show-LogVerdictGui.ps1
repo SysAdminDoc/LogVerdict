@@ -73,6 +73,7 @@ function Show-LogVerdictGui {
     $initialSkipText = $(if ($savedSettings) { $savedSettings.SkipTextLogs } else { $false })
     $initialSkipReliability = $(if ($savedSettings) { $savedSettings.SkipReliability } else { $false })
     $initialIncludeBenign = $(if ($savedSettings) { $savedSettings.IncludeBenign } else { $false })
+    $initialIncludeLowConfidence = $(if ($savedSettings) { $savedSettings.IncludeLowConfidence } else { $false })
     $initialNamedChannels = $(if ($savedSettings) { [string]$savedSettings.NamedChannels } else { '' })
     $initialDatabasePath = $(if ($savedSettings) { [string]$savedSettings.DatabasePath } else { '' })
     $initialOutputDirectory = $(if ($savedSettings) { [string]$savedSettings.OutputDirectory } else { '' })
@@ -336,7 +337,7 @@ function Show-LogVerdictGui {
             $ui[$n].IsEnabled = -not $On
         }
         foreach ($n in @('TxtOverviewDays', 'ChkOverviewAllChannels', 'ChkOverviewIncludeText',
-                'ChkOverviewDiagnosticChannels', 'ChkOverviewIncludeBenign', 'TxtOverviewChannels',
+                'ChkOverviewDiagnosticChannels', 'ChkOverviewIncludeBenign', 'ChkOverviewIncludeLowConfidence', 'TxtOverviewChannels',
                 'TxtOverviewDatabase', 'BtnOverviewBrowseDatabase', 'ChkOverviewSkipReliability',
                 'TxtOverviewOutputDir', 'BtnOverviewBrowseOutput', 'ChkOverviewRedact',
                 'ChkOverviewEvidence', 'BtnResetSettings', 'BtnCoverageElevate', 'BtnSideElevate')) {
@@ -356,7 +357,7 @@ function Show-LogVerdictGui {
 
         $state.Result = $Result
         $state.ScanStartedAt = $null
-        $state.FindingStore = @($Result.Findings)
+        $state.FindingStore = @(Get-LVReportIncident -Result $Result)
         $ui.BtnCopySummary.IsEnabled = $true
         $correlationIdsByKey = @{}
         foreach ($correlation in @($Result.Correlations | Where-Object { $_ })) {
@@ -400,7 +401,7 @@ function Show-LogVerdictGui {
 
         # Counts are of everything found, not of what the filter is showing, so
         # switching a chip off never makes its own number change under the cursor.
-        $counts = Get-LVGuiVerdictCount -Finding @($Result.Findings)
+        $counts = Get-LVGuiVerdictCount -Finding @($state.FindingStore)
         foreach ($v in $script:LVVerdictDisplayOrder) {
             $style = Get-LVVerdictStyle -Verdict $v
             $chip = $chipControl[$v]
@@ -437,9 +438,9 @@ function Show-LogVerdictGui {
             'informational' { 'Informational only' }
             default         { 'No action required' }
         }
-        $ui.TxtOverviewLastVerdict.Text = $(if (@($Result.Findings).Count -eq 0) { 'No action required' } else { $overviewVerdict })
+        $ui.TxtOverviewLastVerdict.Text = $(if (@($state.FindingStore).Count -eq 0) { 'No action required' } else { $overviewVerdict })
         $ui.TxtOverviewLastVerdict.Foreground = $worst.Accent
-        $ui.TxtOverviewFindingCount.Text = '{0:N0}' -f @($Result.Findings).Count
+        $ui.TxtOverviewFindingCount.Text = '{0:N0}' -f @($state.FindingStore).Count
         $ui.TxtOverviewScanTime.Text = 'Completed {0:yyyy-MM-dd HH:mm} in {1:N1}s' -f $Result.ScanTime, $Result.Duration.TotalSeconds
 
         $coverageNotes = @($Result.CoverageNotes | Where-Object { $_ })
@@ -577,11 +578,14 @@ function Show-LogVerdictGui {
 
         $ui.TxtActivitySubtitle.Text = 'Latest scan - {0:yyyy-MM-dd HH:mm}' -f $Result.ScanTime
         $ui.TxtActivityState.Text = 'Completed in {0:N1}s' -f $Result.Duration.TotalSeconds
+        $incidentSummary = Get-LVReportIncidentSummary -Result $Result
         if ($Result.Reduction.PSObject.Properties['InitialSignatureCount']) {
-            $ui.TxtActivityHeadline.Text = '{0:N0} records -> {1:N0} masked -> {2:N0} after slot pass' -f `
-                $Result.Reduction.RecordCount, $Result.Reduction.InitialSignatureCount, $Result.Reduction.SignatureCount
+            $ui.TxtActivityHeadline.Text = '{0:N0} records -> {1:N0} masked -> {2:N0} signatures -> {3:N0} incidents ({4:P0} suppression)' -f `
+                $Result.Reduction.RecordCount, $Result.Reduction.InitialSignatureCount, $Result.Reduction.SignatureCount,
+                $incidentSummary.IncidentCount, $incidentSummary.SuppressionRatio
         } else {
-            $ui.TxtActivityHeadline.Text = '{0:N0} records reduced to {1:N0} signatures' -f $Result.Reduction.RecordCount, $Result.Reduction.SignatureCount
+            $ui.TxtActivityHeadline.Text = '{0:N0} records reduced to {1:N0} signatures -> {2:N0} incidents ({3:P0} suppression)' -f `
+                $Result.Reduction.RecordCount, $Result.Reduction.SignatureCount, $incidentSummary.IncidentCount, $incidentSummary.SuppressionRatio
         }
         $ui.BtnActivityRunAgain.Content = 'Run again'
         $ui.TxtActivityDuration.Text = '{0:N1}s' -f $Result.Duration.TotalSeconds
@@ -616,8 +620,8 @@ function Show-LogVerdictGui {
         & $showDetail $null
         & $applyFilter
 
-        $summary = 'Scan complete. {0} finding(s), worst is {1}. {2:N0} record(s) reduced to {3:N0} signature(s).' -f `
-            @($Result.Findings).Count, $worst.Label, $Result.Reduction.RecordCount, $Result.Reduction.SignatureCount
+        $summary = 'Scan complete. {0} incident(s), worst is {1}. {2:N0} record(s) reduced to {3:N0} signature(s) ({4:P0} incident suppression).' -f `
+            @($state.FindingStore).Count, $worst.Label, $Result.Reduction.RecordCount, $Result.Reduction.SignatureCount, $incidentSummary.SuppressionRatio
         & $setStatus $summary
     }
 
@@ -631,6 +635,7 @@ function Show-LogVerdictGui {
     $ui.ChkOverviewDiagnosticChannels.IsChecked = $initialDiagnosticChannels
     $ui.ChkOverviewIncludeText.IsChecked = -not $initialSkipText
     $ui.ChkOverviewIncludeBenign.IsChecked = $initialIncludeBenign
+    $ui.ChkOverviewIncludeLowConfidence.IsChecked = $initialIncludeLowConfidence
     $ui.TxtOverviewChannels.Text = $initialNamedChannels
     $ui.TxtOverviewDatabase.Text = $initialDatabasePath
     $ui.ChkOverviewSkipReliability.IsChecked = $initialSkipReliability
@@ -689,6 +694,7 @@ function Show-LogVerdictGui {
         $ui.ChkOverviewIncludeText.IsChecked = $true
         $ui.ChkOverviewDiagnosticChannels.IsChecked = $false
         $ui.ChkOverviewIncludeBenign.IsChecked = $false
+        $ui.ChkOverviewIncludeLowConfidence.IsChecked = $false
         $ui.TxtOverviewChannels.Text = ''
         $ui.TxtOverviewDatabase.Text = ''
         $ui.ChkOverviewSkipReliability.IsChecked = $false
@@ -931,6 +937,7 @@ function Show-LogVerdictGui {
             SkipTextLogs  = -not [bool]$ui.ChkOverviewIncludeText.IsChecked
             SkipReliability = [bool]$ui.ChkOverviewSkipReliability.IsChecked
             IncludeBenign = [bool]$ui.ChkOverviewIncludeBenign.IsChecked
+            IncludeLowConfidence = [bool]$ui.ChkOverviewIncludeLowConfidence.IsChecked
         }
         if ($AdvisoryPath) { $scanArgs['AdvisoryPath'] = $AdvisoryPath }
         if ($AdvisoryPackage) { $scanArgs['AdvisoryPackage'] = $AdvisoryPackage }
@@ -1128,6 +1135,7 @@ function Show-LogVerdictGui {
             SkipTextLogs  = -not [bool]$ui.ChkOverviewIncludeText.IsChecked
             SkipReliability = [bool]$ui.ChkOverviewSkipReliability.IsChecked
             IncludeBenign = [bool]$ui.ChkOverviewIncludeBenign.IsChecked
+            IncludeLowConfidence = [bool]$ui.ChkOverviewIncludeLowConfidence.IsChecked
             NamedChannels = $ui.TxtOverviewChannels.Text
             DatabasePath = $ui.TxtOverviewDatabase.Text
             OutputDirectory = $ui.TxtOverviewOutputDir.Text

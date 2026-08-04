@@ -39,6 +39,10 @@ function Invoke-LogVerdictScan {
         Keep signatures ruled benign in the result. Off by default - the entire point
         is to remove them.
 
+        .PARAMETER IncludeLowConfidence
+        Keep curated low-confidence rulings in the result. Off by default so a weak
+        ruling cannot crowd the report; unknown signatures remain visible.
+
         .PARAMETER Redact
         Return a redacted result with account, machine, profile-path, SID, address,
         token, and secret identifiers masked. This applies to the result object itself;
@@ -112,6 +116,7 @@ function Invoke-LogVerdictScan {
         [switch]$SkipReliability,
         [switch]$PerformanceTelemetry,
         [switch]$IncludeBenign,
+        [switch]$IncludeLowConfidence,
         [string]$DatabasePath,
         [string]$EvidencePath,
         [switch]$Redact,
@@ -144,6 +149,7 @@ function Invoke-LogVerdictScan {
             SkipReliability = $SkipReliability
             PerformanceTelemetry = $PerformanceTelemetry
             IncludeBenign  = $IncludeBenign
+            IncludeLowConfidence = $IncludeLowConfidence
             DatabasePath   = $DatabasePath
             Redact         = $Redact
             ExplainUnknown = $ExplainUnknown
@@ -460,6 +466,16 @@ function Invoke-LogVerdictScan {
     Write-LVLog -Level info -Message ('Applying {0} rule(s) from the verdict database...' -f @($db.rules).Count)
     $findings = Resolve-LVVerdict -Signature $signatures -Database $db
 
+    $lowConfidenceSuppressed = 0
+    if (-not $IncludeLowConfidence) {
+        $beforeLowConfidence = @($findings).Count
+        $findings = @($findings | Where-Object { Test-LVConfidenceIncluded -Finding $_ })
+        $lowConfidenceSuppressed = $beforeLowConfidence - @($findings).Count
+        if ($lowConfidenceSuppressed -gt 0) {
+            Write-LVLog -Level ok -Message ('{0} low-confidence ruling(s) hidden (use -IncludeLowConfidence to see them)' -f $lowConfidenceSuppressed)
+        }
+    }
+
     # Correlate BEFORE benign suppression. A benign signature is still perfectly good
     # evidence of when something happened, and dropping it here would silently break any
     # pairing that involves one - the correlation would stop firing for a reason nothing
@@ -499,6 +515,9 @@ function Invoke-LogVerdictScan {
             $promotedDrafts = @(Write-LVModelDraftRule -Finding $accepted -Path $LocalRulePath -MachineName $env:COMPUTERNAME)
         }
     }
+
+    $incidentReduction = Get-LVIncidentReduction -Finding @($findings)
+    $incidents = @($incidentReduction.Incidents)
 
     # Local history is deliberately updated after curated resolution, benign
     # suppression, and optional model annotation. It reports change around the
@@ -685,6 +704,9 @@ function Invoke-LogVerdictScan {
         ProviderProjections = @($providerProjections.ToArray())
         Reduction      = $stat
         Findings       = @($findings)
+        Incidents      = @($incidents)
+        IncidentSummary = $incidentReduction.Summary
+        LowConfidenceSuppressedCount = $lowConfidenceSuppressed
         Correlations   = @($correlations)
         CrashArtifacts = @($crash)
         SetupDiag      = $setupDiagStatus
@@ -705,6 +727,7 @@ function Invoke-LogVerdictScan {
             skipReliability = [bool]$SkipReliability
             performanceTelemetry = [bool]$PerformanceTelemetry
             includeBenign = [bool]$IncludeBenign
+            includeLowConfidence = [bool]$IncludeLowConfidence
             explainUnknown = [bool]$ExplainUnknown
             promoteToRule = [bool]$PromoteToRule
             evidencePath = $false

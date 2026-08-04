@@ -518,6 +518,7 @@ function Invoke-LVOfflineScan {
         [switch]$SkipReliability,
         [switch]$PerformanceTelemetry,
         [switch]$IncludeBenign,
+        [switch]$IncludeLowConfidence,
         [string]$DatabasePath,
         [int]$MaxPerChannel = 20000,
         [ValidateRange(1, 512)][int]$MaxEvtxFiles = 64,
@@ -724,6 +725,16 @@ function Invoke-LVOfflineScan {
         $databaseFreshness = Get-LVDatabaseFreshnessSummary -Database $db -AsOf ([datetime]::UtcNow.Date)
         Write-LVLog -Level info -Message ('Applying {0} rule(s) from the verdict database...' -f @($db.rules).Count)
         $findings = @(Resolve-LVVerdict -Signature $signatures -Database $db)
+
+        $lowConfidenceSuppressed = 0
+        if (-not $IncludeLowConfidence) {
+            $beforeLowConfidence = @($findings).Count
+            $findings = @($findings | Where-Object { Test-LVConfidenceIncluded -Finding $_ })
+            $lowConfidenceSuppressed = $beforeLowConfidence - @($findings).Count
+            if ($lowConfidenceSuppressed -gt 0) {
+                Write-LVLog -Level ok -Message ('{0} low-confidence ruling(s) hidden (use -IncludeLowConfidence to see them)' -f $lowConfidenceSuppressed)
+            }
+        }
         $correlations = @(Resolve-LVCorrelation -Finding $findings -Database $db)
         if ($resolutionTimer) {
             $resolutionTimer.Stop()
@@ -753,6 +764,9 @@ function Invoke-LVOfflineScan {
                 $promotedDrafts = @(Write-LVModelDraftRule -Finding $accepted -Path $LocalRulePath -MachineName $evidenceMachine)
             }
         }
+
+        $incidentReduction = Get-LVIncidentReduction -Finding @($findings)
+        $incidents = @($incidentReduction.Incidents)
 
         $coverageNotes = New-Object System.Collections.Generic.List[string]
         $coverageNotes.Add('This is offline analysis. No event channel, text log, Reliability Monitor provider, or crash directory on the reviewing PC was queried.') | Out-Null
@@ -884,6 +898,9 @@ function Invoke-LVOfflineScan {
             CoverageNotes  = @($coverageNotes.ToArray())
             Reduction      = $stat
             Findings       = @($findings)
+            Incidents      = @($incidents)
+            IncidentSummary = $incidentReduction.Summary
+            LowConfidenceSuppressedCount = $lowConfidenceSuppressed
             Correlations   = @($correlations)
             CrashArtifacts = @($crash)
             EvidenceManifest = @($evtxPlan.Manifest)
@@ -900,6 +917,17 @@ function Invoke-LVOfflineScan {
             DatabaseDate   = $db.updated
             RuleCount      = @($db.rules).Count
             DatabaseFreshness = $databaseFreshness
+            ScanOptions    = [ordered]@{
+                channels = @($channels)
+                skipTextLogs = [bool]$SkipTextLogs
+                skipReliability = [bool]$SkipReliability
+                performanceTelemetry = [bool]$PerformanceTelemetry
+                includeBenign = [bool]$IncludeBenign
+                includeLowConfidence = [bool]$IncludeLowConfidence
+                explainUnknown = [bool]$ExplainUnknown
+                promoteToRule = [bool]$PromoteToRule
+                evidencePath = $true
+            }
             ModelExplanationsEnabled = $modelRequested
             ModelExplanationCount = @($findings | Where-Object { $_.PSObject.Properties['ModelExplanation'] -and $_.ModelExplanation }).Count
             PromotedDraftRules = @($promotedDrafts)

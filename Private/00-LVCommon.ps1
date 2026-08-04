@@ -1110,7 +1110,7 @@ function Assert-LVRedactedResultShape {
         'TruncatedChannels', 'MetadataUnreadableCount', 'ChannelEnumerationStatus', 'ChannelEnumerationFailed',
         'ChannelEnumerationFailures', 'CoverageNotes', 'Coverage',
         'PerformanceTelemetry', 'Performance', 'HealthProfiles', 'ProviderExtensions',
-        'ProviderProjections', 'Reduction', 'Findings', 'Correlations', 'CrashArtifacts',
+        'ProviderProjections', 'Reduction', 'Findings', 'Incidents', 'IncidentSummary', 'LowConfidenceSuppressedCount', 'Correlations', 'CrashArtifacts',
         'SetupDiag', 'Horizon', 'HorizonWarning', 'Stability', 'ReliabilityAvailable',
         'DatabaseName', 'DatabaseDate', 'RuleCount', 'DatabaseFreshness', 'ScanOptions',
         'CollectionBudget', 'CaseProfile', 'ModelExplanationsEnabled', 'ModelExplanationCount',

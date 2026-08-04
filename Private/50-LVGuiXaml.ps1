@@ -678,7 +678,9 @@ function Get-LVGuiXaml {
                       <CheckBox x:Name="ChkOverviewDiagnosticChannels" Content="Focused diagnostic channels" Margin="0,0,20,6"/>
                       <CheckBox x:Name="ChkOverviewIncludeText" Content="Include setup logs"
                                 IsChecked="True" Margin="0,0,20,6"/>
-                      <CheckBox x:Name="ChkOverviewIncludeBenign" Content="Show harmless" Margin="0,0,0,6"/>
+                      <CheckBox x:Name="ChkOverviewIncludeBenign" Content="Show harmless" Margin="0,0,20,6"/>
+                      <CheckBox x:Name="ChkOverviewIncludeLowConfidence" Content="Show low-confidence rulings" Margin="0,0,0,6"
+                                ToolTip="Include curated low-confidence rulings for an explicit review pass."/>
                     </WrapPanel>
                   </StackPanel>
                 </Grid>
