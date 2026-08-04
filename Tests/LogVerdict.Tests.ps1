@@ -3983,6 +3983,96 @@ Describe 'Report rendering' {
         }
     }
 
+    It 'pins reserved templates, reports canonical ids, and keeps registry fallback explicit' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $standalonePath = Join-Path $TestDrive 'canonical-template.json'
+            [ordered]@{
+                schemaVersion = 1; id = 'FindingLine'; kind = 'line'; projection = [ordered]@{
+                    key = [ordered]@{ '$path' = 'key' }
+                }
+            } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $standalonePath -Encoding UTF8
+            $canonical = Export-LogVerdictStandard -Result $result -Format findingline -TemplatePath $standalonePath -Path (Join-Path $TestDrive 'canonical.jsonl')
+            $canonical.Format | Should -BeExactly 'FindingLine'
+            $canonical.TemplateName | Should -BeExactly 'FindingLine'
+
+            $reservedPath = Join-Path $TestDrive 'reserved-template.json'
+            [ordered]@{
+                schemaVersion = 1; name = 'LogVerdict.ExportTemplates'; templates = @(
+                    [ordered]@{ id = 'Ecs'; kind = 'single'; projection = 'builtin:sarif' }
+                )
+            } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $reservedPath -Encoding UTF8
+            { Get-LVStandardTemplate -Format Ecs -Path $reservedPath } |
+                Should -Throw '*reserved*projection*'
+
+            $singleRegistryPath = Join-Path $TestDrive 'single-registry.json'
+            [ordered]@{
+                schemaVersion = 1; name = 'LogVerdict.ExportTemplates'; templates = @(
+                    [ordered]@{ id = 'Only'; kind = 'single'; projection = [ordered]@{ value = 'ok' } }
+                )
+            } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $singleRegistryPath -Encoding UTF8
+            $warning = & {
+                $captured = @()
+                try { Get-LVStandardTemplate -Format Missing -Path $singleRegistryPath -WarningVariable captured } catch { $null = $_ }
+                $captured
+            }
+            { Get-LVStandardTemplate -Format Missing -Path $singleRegistryPath } |
+                Should -Throw '*No export template named*'
+            ($warning -join ' ') | Should -Match 'Missing.*Only.*fallback'
+        }
+    }
+
+    It 'bounds template evaluation and rejects operator objects with extra keys' {
+        InModuleScope LogVerdict {
+            $scope = [pscustomobject]@{
+                key = 'value'
+                root = [pscustomobject]@{ safe = 'ok' }
+            }
+            $map = [pscustomobject]@{
+                '$map' = [pscustomobject]@{
+                    path = 'items'
+                    projection = [pscustomobject]@{ value = '$item' }
+                }
+            }
+            $scope | Add-Member -NotePropertyName items -NotePropertyValue @('one', 'two', 'three')
+            { ConvertTo-LVTemplateValue -Value $map -Scope $scope -Budget (New-LVTemplateBudget -MaxNodes 2) } |
+                Should -Throw '*ExportTemplateBudgetExceeded*nodes*'
+            $pathExpression = [pscustomobject]@{ '$path' = 'items' }
+            { ConvertTo-LVTemplateValue -Value $pathExpression -Scope $scope -Budget (New-LVTemplateBudget -MaxNodes 2) } |
+                Should -Throw '*ExportTemplateBudgetExceeded*nodes*'
+
+            $depthBudget = New-LVTemplateBudget -MaxDepth 1
+            $nested = [pscustomobject]@{ outer = [pscustomobject]@{ inner = 'value' } }
+            { ConvertTo-LVTemplateValue -Value $nested -Scope $scope -Budget $depthBudget } |
+                Should -Throw '*ExportTemplateBudgetExceeded*depth*'
+
+            $clockBudget = New-LVTemplateBudget -MaxMilliseconds 1000
+            $clockBudget.StartedUtc = [datetime]::UtcNow.AddSeconds(-5)
+            { ConvertTo-LVTemplateValue -Value 'value' -Scope $scope -Budget $clockBudget } |
+                Should -Throw '*ExportTemplateBudgetExceeded*wall clock*'
+
+            $extra = [pscustomobject]@{ '$path' = 'key'; extra = 'must reject' }
+            { ConvertTo-LVTemplateValue -Value $extra -Scope $scope } |
+                Should -Throw '*one operator and no extra keys*'
+            $extraDictionary = [ordered]@{ '$path' = 'key'; extra = 'must reject' }
+            { ConvertTo-LVTemplateValue -Value $extraDictionary -Scope $scope } |
+                Should -Throw '*one operator and no extra keys*'
+            (ConvertTo-LVTemplateValue -Value ([pscustomobject]@{ '$rootPath' = 'model' }) -Scope $scope) |
+                Should -BeNullOrEmpty
+        }
+    }
+
+    It 'rejects oversized template files before parsing' {
+        InModuleScope LogVerdict {
+            $path = Join-Path $TestDrive 'oversized-template.json'
+            $bytes = New-Object byte[] ($script:LVStandardTemplateMaxBytes + 1)
+            [IO.File]::WriteAllBytes($path, $bytes)
+            { Get-LVStandardTemplate -Format Ecs -Path $path } |
+                Should -Throw '*size limit*'
+        }
+    }
+
     It 'scopes OCSF output to normalized evidence instead of a detection class' {
         InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
             param($r)

@@ -306,10 +306,25 @@ if ([int]$exportTemplateSchema.properties.schemaVersion.const -ne 1 -or
 }
 Test-LVReleaseJsonSchema -Path $exportTemplatePath -SchemaPath $exportTemplateSchemaPath -Label 'export templates'
 $exportTemplates = Get-Content -LiteralPath $exportTemplatePath -Raw -Encoding UTF8 | ConvertFrom-Json
-foreach ($builtInFormat in @('Ecs', 'Ocsf', 'Sarif', 'OpenTelemetry', 'Stix', 'Jsonl')) {
+$reservedExportProjections = [ordered]@{
+    Ecs            = [pscustomobject]@{ Projection = 'builtin:ecs'; Kind = 'single'; Source = $null }
+    Ocsf           = [pscustomobject]@{ Projection = 'builtin:ocsf'; Kind = 'single'; Source = $null }
+    Sarif          = [pscustomobject]@{ Projection = 'builtin:sarif'; Kind = 'single'; Source = $null }
+    OpenTelemetry  = [pscustomobject]@{ Projection = 'builtin:opentelemetry'; Kind = 'single'; Source = $null }
+    Stix           = [pscustomobject]@{ Projection = 'builtin:stix'; Kind = 'single'; Source = $null }
+    Jsonl          = [pscustomobject]@{ Projection = 'builtin:timeline'; Kind = 'line'; Source = 'timeline' }
+}
+foreach ($builtInFormat in @($reservedExportProjections.Keys)) {
     $builtIn = @($exportTemplates.templates | Where-Object { $_.id -eq $builtInFormat })
     if ($builtIn.Count -ne 1 -or -not $builtIn[0].projection) {
         throw ("Export template registry is missing built-in format '{0}'." -f $builtInFormat)
+    }
+    $expected = $reservedExportProjections[$builtInFormat]
+    if ([string]$builtIn[0].projection -cne [string]$expected.Projection -or
+        [string]$builtIn[0].kind -cne [string]$expected.Kind -or
+        [string]$builtIn[0].source -cne [string]$expected.Source) {
+        throw ("Export template '{0}' is reserved for projection '{1}', kind '{2}', and source '{3}'." -f
+            $builtInFormat, $expected.Projection, $expected.Kind, $expected.Source)
     }
 }
 

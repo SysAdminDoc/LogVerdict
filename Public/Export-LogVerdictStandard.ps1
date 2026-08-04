@@ -59,7 +59,7 @@ function Export-LogVerdictStandard {
             if ($Path) {
                 Write-LVTemplateJsonl -Path $Path -Lines $lines -Append:$Append
                 return [pscustomobject][ordered]@{
-                    Format = $Format; TemplateName = [string]$template.id; Path = $Path
+                    Format = [string]$template.id; TemplateName = [string]$template.id; Path = $Path
                     LineCount = $lines.Count; Document = $null; Appended = [bool]$Append
                 }
             }
@@ -76,7 +76,7 @@ function Export-LogVerdictStandard {
             Write-LVTextFile -Path $Path -Content ($document | ConvertTo-Json -Depth 30)
         }
         return [pscustomobject][ordered]@{
-            Format = $Format; TemplateName = [string]$template.id; Path = $Path
+            Format = [string]$template.id; TemplateName = [string]$template.id; Path = $Path
             Document = $document; Appended = $false
         }
     }

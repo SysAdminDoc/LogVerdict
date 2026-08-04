@@ -377,8 +377,10 @@ module. A template declares `schemaVersion: 1`, an `id`, `kind` (`single` or `li
 and a `projection` over the normalized report contract. Projections support `$path`,
 `$rootPath`, `$map`, `$filter`, `$concat`, `$if`, `$equals`, `$contains`, `$coalesce`,
 `$count`, `$format`, and `$literal`; they cannot execute PowerShell or read outside the
-scan result. Line templates default to the `findings` collection and can select another
-collection with `source`.
+normalized export model (raw `model` and `result` scopes are intentionally unavailable).
+Line templates default to the `findings` collection and can select another collection
+with `source`; each template is bounded by emitted-node, recursion-depth, wall-clock,
+and file-size limits.
 
 To check whether a fix worked, save a JSON report before the change, scan again afterwards, and compare them. The output contains only signatures that are new, resolved, or worsening, as flat PowerShell objects that can be filtered or exported directly:
 

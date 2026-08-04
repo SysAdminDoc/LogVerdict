@@ -2,6 +2,86 @@
 # before a standards projection so each adapter preserves the same evidence contract.
 
 $script:LVStandardExportVersion = '1.0.0'
+$script:LVStandardTemplateMaxBytes = 1048576
+$script:LVStandardTemplateReservedProjections = [ordered]@{
+    Ecs            = 'builtin:ecs'
+    Ocsf           = 'builtin:ocsf'
+    Sarif          = 'builtin:sarif'
+    OpenTelemetry  = 'builtin:opentelemetry'
+    Stix           = 'builtin:stix'
+    Jsonl          = 'builtin:timeline'
+}
+
+function New-LVTemplateBudget {
+    [CmdletBinding()]
+    param(
+        [ValidateRange(1, 10000000)][int64]$MaxNodes = 100000,
+        [ValidateRange(1, 600000)][int]$MaxMilliseconds = 2000,
+        [ValidateRange(1, 256)][int]$MaxDepth = 32
+    )
+
+    return [pscustomobject][ordered]@{
+        MaxNodes        = [int64]$MaxNodes
+        MaxMilliseconds = [int]$MaxMilliseconds
+        MaxDepth        = [int]$MaxDepth
+        StartedUtc      = [datetime]::UtcNow
+        EmittedNodes    = [int64]0
+    }
+}
+
+function Assert-LVTemplateBudget {
+    param(
+        [Parameter(Mandatory)]$Budget,
+        [int]$Depth = 0
+    )
+
+    $Budget.EmittedNodes = [int64]$Budget.EmittedNodes + 1
+    if ($Budget.EmittedNodes -gt [int64]$Budget.MaxNodes) {
+        throw ("ExportTemplateBudgetExceeded: maximum emitted nodes ({0}) exceeded." -f $Budget.MaxNodes)
+    }
+    if ($Depth -gt [int]$Budget.MaxDepth) {
+        throw ("ExportTemplateBudgetExceeded: maximum recursion depth ({0}) exceeded." -f $Budget.MaxDepth)
+    }
+    $elapsed = ([datetime]::UtcNow - $Budget.StartedUtc).TotalMilliseconds
+    if ($elapsed -ge [int]$Budget.MaxMilliseconds) {
+        throw ("ExportTemplateBudgetExceeded: maximum wall clock ({0} ms) exceeded." -f $Budget.MaxMilliseconds)
+    }
+}
+
+function Assert-LVStandardTemplateRegistry {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Templates)
+
+    if ($Templates.Count -eq 0) {
+        throw 'Export template registry must contain at least one template.'
+    }
+    $seen = @{}
+    foreach ($template in $Templates) {
+        if ($null -eq $template) { throw 'Export template registry cannot contain a null template.' }
+        $id = [string]$template.id
+        if ($id -notmatch '^[A-Za-z][A-Za-z0-9._-]{0,63}$') {
+            throw ("Export template id '{0}' is invalid." -f $id)
+        }
+        $idKey = $id.ToLowerInvariant()
+        if ($seen.ContainsKey($idKey)) {
+            throw ("Export template registry contains duplicate id '{0}'." -f $id)
+        }
+        $seen[$idKey] = $true
+        $reserved = @($script:LVStandardTemplateReservedProjections.Keys | Where-Object { $_ -ieq $id })
+        if ($reserved.Count -eq 0) { continue }
+        $expectedProjection = [string]$script:LVStandardTemplateReservedProjections[$reserved[0]]
+        if ([string]$template.projection -cne $expectedProjection) {
+            throw ("Export template id '{0}' is reserved for projection '{1}', not '{2}'." -f $id, $expectedProjection, [string]$template.projection)
+        }
+        $expectedKind = if ($reserved[0] -ieq 'Jsonl') { 'line' } else { 'single' }
+        if ([string]$template.kind -cne $expectedKind) {
+            throw ("Export template id '{0}' is reserved for kind '{1}', not '{2}'." -f $id, $expectedKind, [string]$template.kind)
+        }
+        if ($reserved[0] -ieq 'Jsonl' -and [string]$template.source -cne 'timeline') {
+            throw "Export template id 'Jsonl' is reserved for source 'timeline'."
+        }
+    }
+    return $true
+}
 
 function Get-LVStandardTemplate {
     <#
@@ -25,6 +105,10 @@ function Get-LVStandardTemplate {
     if ($templatePath) {
         if (-not (Test-Path -LiteralPath $templatePath -PathType Leaf)) {
             throw ("Export template was not found: {0}" -f $templatePath)
+        }
+        $templateFile = Get-Item -LiteralPath $templatePath -ErrorAction Stop
+        if ([int64]$templateFile.Length -gt [int64]$script:LVStandardTemplateMaxBytes) {
+            throw ("Export template '{0}' exceeds the {1}-byte size limit." -f $templatePath, $script:LVStandardTemplateMaxBytes)
         }
         try {
             $document = Get-Content -LiteralPath $templatePath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -53,6 +137,7 @@ function Get-LVStandardTemplate {
     }
 
     $templateDocuments = @()
+    $isStandalone = $false
     if ($document.PSObject.Properties['templates']) {
         if ([string]$document.name -ne 'LogVerdict.ExportTemplates') {
             throw "Export template registry must declare name 'LogVerdict.ExportTemplates'."
@@ -62,15 +147,19 @@ function Get-LVStandardTemplate {
         # A standalone template is the contribution path: a user can ship one
         # JSON file and select it with -TemplatePath without editing this module.
         $templateDocuments = @($document)
+        $isStandalone = $true
     } else {
         throw "Export template document must contain either a 'templates' registry or one standalone 'id' template."
     }
+    Assert-LVStandardTemplateRegistry -Templates $templateDocuments | Out-Null
 
     $template = @($templateDocuments | Where-Object { [string]$_.id -ieq $Format } | Select-Object -First 1)
-    if ($template.Count -eq 0 -and $templateDocuments.Count -eq 1 -and $Path) {
+    if ($template.Count -eq 0 -and $isStandalone) {
         # With a standalone file the file itself is authoritative; the default
         # Ecs format remains convenient for callers that omit -Format.
         $template = @($templateDocuments[0])
+    } elseif ($template.Count -eq 0 -and $templateDocuments.Count -eq 1) {
+        Write-Warning ("Export template registry does not contain requested format '{0}'; it declares '{1}'. No single-template fallback is applied." -f $Format, [string]$templateDocuments[0].id)
     }
     if ($template.Count -eq 0) {
         throw ("No export template named '{0}' was found." -f $Format)
@@ -109,6 +198,38 @@ function Get-LVTemplatePathValue {
     return $current
 }
 
+function ConvertTo-LVTemplateOutputValue {
+    param(
+        [AllowNull()]$Value,
+        [Parameter(Mandatory)]$Budget,
+        [int]$Depth = 0
+    )
+
+    Assert-LVTemplateBudget -Budget $Budget -Depth $Depth
+    if ($null -eq $Value -or $Value -is [string] -or $Value -is [ValueType]) { return $Value }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $out = [ordered]@{}
+        foreach ($key in @($Value.Keys)) {
+            $out[[string]$key] = ConvertTo-LVTemplateOutputValue -Value $Value[$key] -Budget $Budget -Depth ($Depth + 1)
+        }
+        return [pscustomobject]$out
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        return @($Value | ForEach-Object {
+            ConvertTo-LVTemplateOutputValue -Value $_ -Budget $Budget -Depth ($Depth + 1)
+        })
+    }
+    $properties = @($Value.PSObject.Properties)
+    if ($properties.Count -gt 0) {
+        $out = [ordered]@{}
+        foreach ($property in $properties) {
+            $out[$property.Name] = ConvertTo-LVTemplateOutputValue -Value $property.Value -Budget $Budget -Depth ($Depth + 1)
+        }
+        return [pscustomobject]$out
+    }
+    return $Value
+}
+
 function Test-LVTemplateTruthy {
     param([AllowNull()]$Value)
 
@@ -141,18 +262,34 @@ function Get-LVTemplateChildScope {
     return [pscustomobject]$child
 }
 
+function Get-LVTemplateRootScope {
+    param([Parameter(Mandatory)]$Model)
+
+    return [pscustomobject][ordered]@{
+        context = $Model.Context
+        findings = @($Model.Findings)
+        advisories = @($Model.Advisories)
+        correlations = @($Model.Correlations)
+    }
+}
+
 function ConvertTo-LVTemplateValue {
     <#
         Evaluate the deliberately small, data-only template language. Templates
-        can select report-contract paths, map a collection, concatenate arrays,
-        select a conditional value, and format a scalar. They cannot execute
-        PowerShell or read anything outside the supplied normalized model.
+        can select normalized report-contract paths, map a collection, concatenate
+        arrays, select a conditional value, and format a scalar. The scope omits
+        the raw result and model objects, so property getters outside the normalized
+        projection are never reachable.
     #>
     param(
         [AllowNull()]$Value,
-        [Parameter(Mandatory)]$Scope
+        [Parameter(Mandatory)]$Scope,
+        [AllowNull()]$Budget,
+        [int]$Depth = 0
     )
 
+    if ($null -eq $Budget) { $Budget = New-LVTemplateBudget }
+    Assert-LVTemplateBudget -Budget $Budget -Depth $Depth
     if ($null -eq $Value) { return $null }
     if ($Value -is [string]) {
         if ($Value.StartsWith('$$', [StringComparison]::Ordinal)) { return $Value.Substring(1) }
@@ -162,30 +299,48 @@ function ConvertTo-LVTemplateValue {
         return $Value
     }
     if ($Value -is [System.Collections.IDictionary]) {
-        $out = [ordered]@{}
-        foreach ($key in @($Value.Keys)) { $out[[string]$key] = ConvertTo-LVTemplateValue -Value $Value[$key] -Scope $Scope }
-        return [pscustomobject]$out
+        $dictionaryOperatorKeys = @($Value.Keys | Where-Object { [string]$_ -like '$*' })
+        if ($dictionaryOperatorKeys.Count -gt 0) {
+            if ($dictionaryOperatorKeys.Count -gt 1) {
+                throw 'Export template expression objects may contain only one operator.'
+            }
+            if (@($Value.Keys).Count -ne 1) {
+                throw 'Export template expression objects may contain only one operator and no extra keys.'
+            }
+            $Value = [pscustomobject][ordered]@{ [string]$dictionaryOperatorKeys[0] = $Value[$dictionaryOperatorKeys[0]] }
+        } else {
+            $out = [ordered]@{}
+            foreach ($key in @($Value.Keys)) {
+                $out[[string]$key] = ConvertTo-LVTemplateValue -Value $Value[$key] -Scope $Scope -Budget $Budget -Depth ($Depth + 1)
+            }
+            return [pscustomobject]$out
+        }
     }
     if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
-        return @($Value | ForEach-Object { ConvertTo-LVTemplateValue -Value $_ -Scope $Scope })
+        return @($Value | ForEach-Object {
+            ConvertTo-LVTemplateValue -Value $_ -Scope $Scope -Budget $Budget -Depth ($Depth + 1)
+        })
     }
 
     $operatorProperties = @($Value.PSObject.Properties | Where-Object { $_.Name -like '$*' })
     if ($operatorProperties.Count -gt 1) {
         throw 'Export template expression objects may contain only one operator.'
     }
-    if ($operatorProperties.Count -eq 1 -and @($Value.PSObject.Properties).Count -eq 1) {
+    if ($operatorProperties.Count -eq 1 -and @($Value.PSObject.Properties).Count -ne 1) {
+        throw 'Export template expression objects may contain only one operator and no extra keys.'
+    }
+    if ($operatorProperties.Count -eq 1) {
         $operator = $operatorProperties[0].Name
         $spec = $operatorProperties[0].Value
         switch ($operator) {
             '$path' {
                 if ($spec -isnot [string]) { throw 'The $path template operator requires a string path.' }
-                return Get-LVTemplatePathValue -Scope $Scope -Path ([string]$spec)
+                return ConvertTo-LVTemplateOutputValue -Value (Get-LVTemplatePathValue -Scope $Scope -Path ([string]$spec)) -Budget $Budget -Depth ($Depth + 1)
             }
             '$rootPath' {
                 if ($spec -isnot [string]) { throw 'The $rootPath template operator requires a string path.' }
                 $root = if ($Scope.PSObject.Properties['root']) { $Scope.root } else { $Scope }
-                return Get-LVTemplatePathValue -Scope $root -Path ([string]$spec)
+                return ConvertTo-LVTemplateOutputValue -Value (Get-LVTemplatePathValue -Scope $root -Path ([string]$spec)) -Budget $Budget -Depth ($Depth + 1)
             }
             '$map' {
                 if (-not $spec.PSObject.Properties['path'] -or -not $spec.PSObject.Properties['projection']) {
@@ -196,7 +351,7 @@ function ConvertTo-LVTemplateValue {
                 $index = 0
                 foreach ($item in @($source)) {
                     $child = Get-LVTemplateChildScope -Parent $Scope -Item $item -Index $index
-                    $mapped.Add((ConvertTo-LVTemplateValue -Value $spec.projection -Scope $child)) | Out-Null
+                    $mapped.Add((ConvertTo-LVTemplateValue -Value $spec.projection -Scope $child -Budget $Budget -Depth ($Depth + 1))) | Out-Null
                     $index++
                 }
                 return @($mapped.ToArray())
@@ -210,68 +365,72 @@ function ConvertTo-LVTemplateValue {
                 $index = 0
                 foreach ($item in @($source)) {
                     $child = Get-LVTemplateChildScope -Parent $Scope -Item $item -Index $index
-                    if (Test-LVTemplateTruthy (ConvertTo-LVTemplateValue -Value $spec.where -Scope $child)) {
+                    if (Test-LVTemplateTruthy (ConvertTo-LVTemplateValue -Value $spec.where -Scope $child -Budget $Budget -Depth ($Depth + 1))) {
                         $filtered.Add($item) | Out-Null
                     }
                     $index++
                 }
-                return @($filtered.ToArray())
+                return ConvertTo-LVTemplateOutputValue -Value @($filtered.ToArray()) -Budget $Budget -Depth ($Depth + 1)
             }
             '$concat' {
                 $joined = New-Object System.Collections.Generic.List[object]
                 foreach ($part in @($spec)) {
-                    $evaluated = ConvertTo-LVTemplateValue -Value $part -Scope $Scope
+                    $evaluated = ConvertTo-LVTemplateValue -Value $part -Scope $Scope -Budget $Budget -Depth ($Depth + 1)
                     foreach ($item in @($evaluated)) { $joined.Add($item) | Out-Null }
                 }
                 return @($joined.ToArray())
             }
             '$array' {
-                return @(ConvertTo-LVTemplateValue -Value $spec -Scope $Scope)
+                return @(ConvertTo-LVTemplateValue -Value $spec -Scope $Scope -Budget $Budget -Depth ($Depth + 1))
             }
             '$if' {
                 if (-not $spec.PSObject.Properties['condition'] -or -not $spec.PSObject.Properties['then']) {
                     throw 'The $if template operator requires condition and then.'
                 }
-                $condition = Test-LVTemplateTruthy (ConvertTo-LVTemplateValue -Value $spec.condition -Scope $Scope)
-                if ($condition) { return ConvertTo-LVTemplateValue -Value $spec.then -Scope $Scope }
-                if ($spec.PSObject.Properties['else']) { return ConvertTo-LVTemplateValue -Value $spec.else -Scope $Scope }
+                $condition = Test-LVTemplateTruthy (ConvertTo-LVTemplateValue -Value $spec.condition -Scope $Scope -Budget $Budget -Depth ($Depth + 1))
+                if ($condition) { return ConvertTo-LVTemplateValue -Value $spec.then -Scope $Scope -Budget $Budget -Depth ($Depth + 1) }
+                if ($spec.PSObject.Properties['else']) { return ConvertTo-LVTemplateValue -Value $spec.else -Scope $Scope -Budget $Budget -Depth ($Depth + 1) }
                 return $null
             }
             '$equals' {
                 $operands = @($spec)
                 if ($operands.Count -ne 2) { throw 'The $equals template operator requires exactly two operands.' }
-                $left = ConvertTo-LVTemplateValue -Value $operands[0] -Scope $Scope
-                $right = ConvertTo-LVTemplateValue -Value $operands[1] -Scope $Scope
+                $left = ConvertTo-LVTemplateValue -Value $operands[0] -Scope $Scope -Budget $Budget -Depth ($Depth + 1)
+                $right = ConvertTo-LVTemplateValue -Value $operands[1] -Scope $Scope -Budget $Budget -Depth ($Depth + 1)
                 return ($left -eq $right)
             }
             '$contains' {
                 $operands = @($spec)
                 if ($operands.Count -ne 2) { throw 'The $contains template operator requires exactly two operands.' }
-                $haystack = ConvertTo-LVTemplateValue -Value $operands[0] -Scope $Scope
-                $needle = ConvertTo-LVTemplateValue -Value $operands[1] -Scope $Scope
+                $haystack = ConvertTo-LVTemplateValue -Value $operands[0] -Scope $Scope -Budget $Budget -Depth ($Depth + 1)
+                $needle = ConvertTo-LVTemplateValue -Value $operands[1] -Scope $Scope -Budget $Budget -Depth ($Depth + 1)
                 return (@($haystack) -contains $needle)
             }
             '$coalesce' {
                 foreach ($candidate in @($spec)) {
-                    $evaluated = ConvertTo-LVTemplateValue -Value $candidate -Scope $Scope
+                    $evaluated = ConvertTo-LVTemplateValue -Value $candidate -Scope $Scope -Budget $Budget -Depth ($Depth + 1)
                     if ($null -ne $evaluated -and ([string]$evaluated).Length -gt 0) { return $evaluated }
                 }
                 return $null
             }
             '$count' {
-                $evaluated = ConvertTo-LVTemplateValue -Value $spec -Scope $Scope
+                $evaluated = ConvertTo-LVTemplateValue -Value $spec -Scope $Scope -Budget $Budget -Depth ($Depth + 1)
                 return @($evaluated).Count
             }
             '$format' {
                 if (-not $spec.PSObject.Properties['format']) { throw 'The $format template operator requires a format string.' }
+                if ([string]$spec.format -and ([string]$spec.format).Length -gt 256) {
+                    throw 'Export template format strings may not exceed 256 characters.'
+                }
                 $arguments = @()
                 if ($spec.PSObject.Properties['args']) {
-                    $arguments = @($spec.args | ForEach-Object { ConvertTo-LVTemplateValue -Value $_ -Scope $Scope })
+                    if (@($spec.args).Count -gt 32) { throw 'Export template format arguments may not exceed 32 values.' }
+                    $arguments = @($spec.args | ForEach-Object { ConvertTo-LVTemplateValue -Value $_ -Scope $Scope -Budget $Budget -Depth ($Depth + 1) })
                 }
                 return [string]::Format([Globalization.CultureInfo]::InvariantCulture, [string]$spec.format, [object[]]$arguments)
             }
             '$literal' {
-                return $spec
+                return ConvertTo-LVTemplateOutputValue -Value $spec -Budget $Budget -Depth ($Depth + 1)
             }
             default { throw ("Unsupported export template operator '{0}'." -f $operator) }
         }
@@ -279,7 +438,7 @@ function ConvertTo-LVTemplateValue {
     if ($Value.PSObject.Properties.Count -gt 0) {
         $out = [ordered]@{}
         foreach ($property in @($Value.PSObject.Properties)) {
-            $out[$property.Name] = ConvertTo-LVTemplateValue -Value $property.Value -Scope $Scope
+            $out[$property.Name] = ConvertTo-LVTemplateValue -Value $property.Value -Scope $Scope -Budget $Budget -Depth ($Depth + 1)
         }
         return [pscustomobject]$out
     }
@@ -289,16 +448,18 @@ function ConvertTo-LVTemplateValue {
 function ConvertTo-LVTemplateRecord {
     param(
         [Parameter(Mandatory)]$Model,
-        [Parameter(Mandatory)]$Template
+        [Parameter(Mandatory)]$Template,
+        [AllowNull()]$Budget
     )
 
+    if ($null -eq $Budget) { $Budget = New-LVTemplateBudget }
+    $root = Get-LVTemplateRootScope -Model $Model
     $context = [ordered]@{
         context = $Model.Context
-        model = $Model
-        findings = @($Model.Findings)
-        advisories = @($Model.Advisories)
-        correlations = @($Model.Correlations)
-        root = $Model
+        findings = $root.findings
+        advisories = $root.advisories
+        correlations = $root.correlations
+        root = $root
     }
     $sourceName = if ($Template.source) { [string]$Template.source } else { 'findings' }
     $source = Get-LVTemplatePathValue -Scope ([pscustomobject]$context) -Path $sourceName
@@ -309,17 +470,16 @@ function ConvertTo-LVTemplateRecord {
     foreach ($item in @($source)) {
         $scope = [ordered]@{
             context = $Model.Context
-            model = $Model
             record = $item
             item = $item
-            root = $Model
+            root = $root
         }
         if ($item -and $item.PSObject.Properties) {
             foreach ($property in @($item.PSObject.Properties)) {
                 if (-not $scope.Contains($property.Name)) { $scope[$property.Name] = $property.Value }
             }
         }
-        $value = ConvertTo-LVTemplateValue -Value $Template.projection -Scope ([pscustomobject]$scope)
+        $value = ConvertTo-LVTemplateValue -Value $Template.projection -Scope ([pscustomobject]$scope) -Budget $Budget
         if ($Template.recordType -and $value -is [pscustomobject] -and -not $value.PSObject.Properties['recordType']) {
             $value | Add-Member -NotePropertyName recordType -NotePropertyValue ([string]$Template.recordType) -Force
         }
@@ -331,9 +491,11 @@ function ConvertTo-LVTemplateRecord {
 function ConvertTo-LVTemplateDocument {
     param(
         [Parameter(Mandatory)]$Model,
-        [Parameter(Mandatory)]$Template
+        [Parameter(Mandatory)]$Template,
+        [AllowNull()]$Budget
     )
 
+    if ($null -eq $Budget) { $Budget = New-LVTemplateBudget }
     if ([string]$Template.projection -like 'builtin:*') {
         switch ([string]$Template.projection) {
             'builtin:ecs' { return ConvertTo-LVEcsExport -Model $Model }
@@ -345,15 +507,15 @@ function ConvertTo-LVTemplateDocument {
             default { throw ("Unsupported built-in export projection '{0}'." -f $Template.projection) }
         }
     }
+    $root = Get-LVTemplateRootScope -Model $Model
     $scope = [pscustomobject][ordered]@{
         context = $Model.Context
-        model = $Model
-        findings = @($Model.Findings)
-        advisories = @($Model.Advisories)
-        correlations = @($Model.Correlations)
-        root = $Model
+        findings = $root.findings
+        advisories = $root.advisories
+        correlations = $root.correlations
+        root = $root
     }
-    return ConvertTo-LVTemplateValue -Value $Template.projection -Scope $scope
+    return ConvertTo-LVTemplateValue -Value $Template.projection -Scope $scope -Budget $Budget
 }
 
 function ConvertTo-LVStandardTimestamp {
@@ -904,13 +1066,15 @@ function Write-LVJsonlTimeline {
 function ConvertTo-LVTemplateJsonLine {
     param(
         [Parameter(Mandatory)]$Model,
-        [Parameter(Mandatory)]$Template
+        [Parameter(Mandatory)]$Template,
+        [AllowNull()]$Budget
     )
 
+    if ($null -eq $Budget) { $Budget = New-LVTemplateBudget }
     $values = if ([string]$Template.projection -eq 'builtin:timeline') {
         @(Get-LVTimelineLine -Result $Model.Result -Redact:([bool]$Model.Context.privacy.redacted))
     } else {
-        @(ConvertTo-LVTemplateRecord -Model $Model -Template $Template)
+        @(ConvertTo-LVTemplateRecord -Model $Model -Template $Template -Budget $Budget)
     }
     foreach ($value in $values) {
         $safe = ConvertTo-LVJsonSafeValue -Value $value
