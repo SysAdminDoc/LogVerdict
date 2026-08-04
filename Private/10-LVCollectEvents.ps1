@@ -78,7 +78,10 @@ function Get-LVChannelStatus {
         Hashtable keyed by channel name, values carrying Access and Oldest.
     #>
     [CmdletBinding()]
-    param([string[]]$Channel = (Get-LVDefaultChannel))
+    param(
+        [string[]]$Channel = (Get-LVDefaultChannel),
+        [AllowNull()][hashtable]$Metadata
+    )
 
     $status = @{}
     $total = @($Channel).Count
@@ -105,7 +108,11 @@ function Get-LVChannelStatus {
         }
         try {
             try {
-                $configuration = @(Get-WinEvent -ListLog $ch -ErrorAction Stop | Select-Object -First 1)
+                if ($Metadata -and $Metadata.ContainsKey($ch)) {
+                    $configuration = @($Metadata[$ch])
+                } else {
+                    $configuration = @(Get-WinEvent -ListLog $ch -ErrorAction Stop | Select-Object -First 1)
+                }
                 if ($configuration.Count -gt 0) {
                     foreach ($property in @('RecordCount', 'MaximumSizeInBytes', 'LogMode', 'IsEnabled', 'LogFilePath')) {
                         if ($configuration[0].PSObject.Properties[$property]) {
@@ -163,6 +170,7 @@ function Get-LVPopulatedChannel {
 
     $listErrors = $null
     $logs = @()
+    $script:LVChannelMetadata = @{}
     $script:LVChannelMetadataFailures = @()
     try {
         $logs = Get-WinEvent -ListLog * -ErrorAction SilentlyContinue -ErrorVariable listErrors |
@@ -175,6 +183,9 @@ function Get-LVPopulatedChannel {
 
     $script:LVChannelMetadataErrorCount = @($listErrors).Count
     $script:LVChannelMetadataFailures = @($listErrors | ForEach-Object { $_.Exception.Message })
+    foreach ($log in @($logs | Where-Object { $_ -and $_.LogName })) {
+        $script:LVChannelMetadata[[string]$log.LogName] = $log
+    }
     if ($script:LVChannelMetadataErrorCount -gt 0) {
         Write-LVLog -Level warn -Message ("{0} channel(s) would not report their metadata and were not enumerated; elevation may reveal more." -f $script:LVChannelMetadataErrorCount)
     }

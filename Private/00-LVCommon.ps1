@@ -54,6 +54,83 @@ $script:LVRuleConfidence = @('high', 'medium', 'low', 'draft')
 $script:LVPromotableTemplateSlot = @('NUM', 'HEX', 'VER')
 $script:LVLowCardinalityMax = 3
 
+# Template masking runs once per collected text record. Construct the regexes once at
+# module load rather than asking the process-wide regex cache to rebuild a twenty-pattern
+# working set on every line (the cache is only fifteen entries by default). Compiled
+# instances are immutable and safe to reuse by the single scan pipeline.
+$script:LVTemplateRegex = [ordered]@{
+    Token = [regex]::new('\S+', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Guid  = [regex]::new('\{?[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}?', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Sid   = [regex]::new('\bS-\d-\d+(?:-\d+){1,14}\b', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Pkg   = [regex]::new('[\w.\-]+~[0-9A-Fa-f]{16}~\w*~\w*~[\d.]+', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Url   = [regex]::new('(?i)\b(?:https?|ftp)://[^\s<>"'']+', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Upn   = [regex]::new('\b[\w.+-]+@[\w-]+\.[\w.-]+\b', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    DateTime = [regex]::new('\b\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}:\d{2}\S*)?', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Time  = [regex]::new('\b\d{2}:\d{2}:\d{2}(\.\d+)?\b', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Path  = [regex]::new('\b[A-Za-z]:\\[^\s,;"'')]*', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Unc   = [regex]::new('\\\\[^\s,;"'') ]+', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Mac   = [regex]::new('(?i)(?<![0-9A-F])(?:[0-9A-F]{2}[:-]){5}[0-9A-F]{2}(?![0-9A-F])', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Ipv4  = [regex]::new('\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Ipv6  = [regex]::new('(?i)(?<![0-9A-F:])(?:[0-9A-F]{0,4}:){2,7}[0-9A-F]{0,4}(?![0-9A-F:])', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Kb    = [regex]::new('\bKB\d{5,}\b', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Ver   = [regex]::new('(?i)(?<![\w.])v?\d+(?:\.\d+){1,4}(?![\w.])', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Fqdn  = [regex]::new('(?i)\b(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,63}\b', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    LongHex = [regex]::new('\b0x[0-9A-Fa-f]{9,}\b', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    LongAddress = [regex]::new('\b[0-9A-Fa-f]{16,}\b', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Hex   = [regex]::new('\b0x[0-9A-Fa-f]{1,8}\b', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    Number = [regex]::new('\b\d+\b', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+}
+
+# The individual instances above remain named because a few callers need the
+# token matcher directly, but template reduction scans each line with one ordered
+# alternation. A single composite scan is materially cheaper than twenty full-string
+# scans and preserves the same priority (structured identities before generic
+# numbers) through the alternation order.
+$script:LVTemplateMatchTypes = [ordered]@{
+    Guid        = 'GUID'
+    Sid         = 'SID'
+    Pkg         = 'PKG'
+    Url         = 'URL'
+    Upn         = 'UPN'
+    DateTime    = 'TIME'
+    Time        = 'TIME'
+    Path        = 'PATH'
+    Unc         = 'UNC'
+    Mac         = 'MAC'
+    Ipv4        = 'IP'
+    Ipv6        = 'IPV6'
+    Kb          = 'KB'
+    Ver         = 'VER'
+    Fqdn        = 'FQDN'
+    LongHex     = 'ADDR'
+    LongAddress = 'ADDR'
+    Hex         = 'HEX'
+    Number      = 'NUM'
+}
+$compositeParts = New-Object System.Collections.Generic.List[string]
+foreach ($name in $script:LVTemplateMatchTypes.Keys) {
+    [void]$compositeParts.Add(('(?<{0}>' -f $name) + $script:LVTemplateRegex[$name].ToString() + ')')
+}
+$script:LVTemplateRegex.Composite = [regex]::new(
+    ($compositeParts -join '|'),
+    [System.Text.RegularExpressions.RegexOptions]::Compiled)
+$script:LVTemplateMatchOrder = @($script:LVTemplateMatchTypes.Keys)
+$script:LVTemplateCompositeGroups = New-Object System.Collections.Generic.List[object]
+foreach ($name in $script:LVTemplateMatchOrder) {
+    $groupNumber = $script:LVTemplateRegex.Composite.GroupNumberFromName($name)
+    $script:LVTemplateCompositeGroups.Add([pscustomobject]@{
+        Number = $groupNumber
+        Name   = $name
+        Type   = [string]$script:LVTemplateMatchTypes[$name]
+        Priority = $script:LVTemplateCompositeGroups.Count
+    }) | Out-Null
+}
+
+# Get-LVShortHash is used for every text-log family key. HashAlgorithm instances reset
+# after ComputeHash, so a single module-local provider avoids allocating and disposing a
+# SHA-256 implementation for every record while retaining the same digest bytes.
+$script:LVShortHashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
+
 # A ruling that asserts "Microsoft says ignore this" is only as good as the day it was
 # checked. Rules older than this without re-verification are reported as stale.
 $script:LVVerificationMaxAgeMonths = 24
@@ -718,30 +795,49 @@ function Get-LVNormalizedSlotValue {
 
 function Add-LVTemplateMask {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '',
-        Justification = 'Type, Slot, and Predicate are captured by the Regex.Replace evaluator closure; static analysis does not follow that closure.')]
+        Justification = 'Type, Slot, and Predicate are consumed by the manual match loop; static analysis does not follow the dynamic slot collection.')]
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$Text,
-        [Parameter(Mandatory)][string]$Pattern,
+        [Parameter(Mandatory)][regex]$Pattern,
         [Parameter(Mandatory)][string]$Type,
         [Parameter(Mandatory)]$Slot,
         [scriptblock]$Predicate
     )
 
-    return [regex]::Replace($Text, $Pattern, {
-        param($Match)
-        if ($Predicate -and -not (& $Predicate $Match.Value)) { return $Match.Value }
+    $templateMatches = $Pattern.Matches($Text)
+    if ($templateMatches.Count -eq 0) { return $Text }
 
-        # Letters only. A numeric marker would itself be consumed by the generic number
-        # mask during a later pass. Repeating X avoids a practical slot-count ceiling.
-        $marker = '__LVSLOT' + ('X' * ($Slot.Count + 1)) + '__'
-        $Slot.Add([pscustomobject]@{
-            Index  = $Slot.Count
-            Type   = $Type
-            Value  = Get-LVNormalizedSlotValue -Type $Type -Value $Match.Value
-            Marker = $marker
-        }) | Out-Null
-        return $marker
-    })
+    # A PowerShell MatchEvaluator crosses the script/runtime boundary once per
+    # match. Template masking runs for every text-log record, so build the
+    # replacement in one pass over the match collection instead. The order and
+    # slot numbering remain identical to the evaluator path, including the IPv6
+    # predicate that can preserve a false-positive match.
+    $builder = New-Object System.Text.StringBuilder
+    $offset = 0
+    foreach ($match in $templateMatches) {
+        if ($match.Index -gt $offset) {
+            [void]$builder.Append($Text, $offset, $match.Index - $offset)
+        }
+        if ($Predicate -and -not (& $Predicate $match.Value)) {
+            [void]$builder.Append($match.Value)
+        } else {
+            # Letters only. A numeric marker would itself be consumed by the generic number
+            # mask during a later pass. Repeating X avoids a practical slot-count ceiling.
+            $marker = '__LVSLOT' + ('X' * ($Slot.Count + 1)) + '__'
+            $Slot.Add([pscustomobject]@{
+                Index  = $Slot.Count
+                Type   = $Type
+                Value  = Get-LVNormalizedSlotValue -Type $Type -Value $match.Value
+                Marker = $marker
+            }) | Out-Null
+            [void]$builder.Append($marker)
+        }
+        $offset = $match.Index + $match.Length
+    }
+    if ($offset -lt $Text.Length) {
+        [void]$builder.Append($Text, $offset, $Text.Length - $offset)
+    }
+    return $builder.ToString()
 }
 
 function ConvertTo-LVTemplateData {
@@ -757,45 +853,74 @@ function ConvertTo-LVTemplateData {
     #>
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
 
-    $t = $Text
     $slots = New-Object System.Collections.Generic.List[object]
-    $tokenCount = @([regex]::Matches($Text, '\S+')).Count
+    $tokenCount = $script:LVTemplateRegex.Token.Matches($Text).Count
 
-    $t = Add-LVTemplateMask $t '\{?[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}?' 'GUID' $slots
-    $t = Add-LVTemplateMask $t '\bS-\d-\d+(?:-\d+){1,14}\b' 'SID' $slots
-    # Windows package identity: name~publicKeyToken~arch~language~version. Masked whole
-    # so one servicing failure recurring across thirty updates is one signature and not
-    # thirty. The trailing version is consumed here, which is also what stops it being
-    # misread as an IP address below.
-    $t = Add-LVTemplateMask $t '[\w.\-]+~[0-9A-Fa-f]{16}~\w*~\w*~[\d.]+' 'PKG' $slots
-    $t = Add-LVTemplateMask $t '(?i)\b(?:https?|ftp)://[^\s<>"'']+' 'URL' $slots
-    $t = Add-LVTemplateMask $t '\b[\w.+-]+@[\w-]+\.[\w.-]+\b' 'UPN' $slots
-    $t = Add-LVTemplateMask $t '\b\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}:\d{2}\S*)?' 'TIME' $slots
-    $t = Add-LVTemplateMask $t '\b\d{2}:\d{2}:\d{2}(\.\d+)?\b' 'TIME' $slots
-    $t = Add-LVTemplateMask $t '\b[A-Za-z]:\\[^\s,;"'')]*' 'PATH' $slots
-    $t = Add-LVTemplateMask $t '\\\\[^\s,;"'') ]+' 'UNC' $slots
-    $t = Add-LVTemplateMask $t '(?i)(?<![0-9A-F])(?:[0-9A-F]{2}[:-]){5}[0-9A-F]{2}(?![0-9A-F])' 'MAC' $slots
+    # Collect all non-overlapping matches in one pass. Slot indexes historically
+    # followed pattern priority rather than source position, so bucket matches by
+    # the precomputed priority before assigning markers, then rebuild the source
+    # in position order.
+    $templateMatches = New-Object System.Collections.Generic.List[object]
+    $priorityMatches = @{}
+    foreach ($match in $script:LVTemplateRegex.Composite.Matches($Text)) {
+        $matchType = $null
+        foreach ($group in $script:LVTemplateCompositeGroups) {
+            if ($match.Groups[$group.Number].Success) {
+                $matchType = $group
+                break
+            }
+        }
+        if ($null -eq $matchType) { continue }
 
-    # A build number and an IPv4 address are both dotted integers, so the octet range
-    # is what separates them: no octet can exceed 255, but a version segment routinely
-    # does. Anything dotted that fails the address test is treated as a version.
-    $t = Add-LVTemplateMask $t '\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b' 'IP' $slots
-    $ipv6 = {
-        param($Value)
-        $address = $null
-        return ([Net.IPAddress]::TryParse($Value, [ref]$address) -and
-            $address.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetworkV6)
+        if ($matchType.Name -eq 'Ipv6') {
+            $address = $null
+            if (-not ([Net.IPAddress]::TryParse($match.Value, [ref]$address) -and
+                    $address.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetworkV6)) {
+                continue
+            }
+        }
+        $entry = [pscustomobject]@{
+            Type     = $matchType.Type
+            Value    = $match.Value
+            Start    = $match.Index
+            Length   = $match.Length
+        }
+        $templateMatches.Add($entry) | Out-Null
+        if (-not $priorityMatches.ContainsKey($matchType.Priority)) {
+            $priorityMatches[$matchType.Priority] = New-Object System.Collections.Generic.List[object]
+        }
+        $priorityMatches[$matchType.Priority].Add($entry) | Out-Null
     }
-    $t = Add-LVTemplateMask $t '(?i)(?<![0-9A-F:])(?:[0-9A-F]{0,4}:){2,7}[0-9A-F]{0,4}(?![0-9A-F:])' 'IPV6' $slots $ipv6
-    $t = Add-LVTemplateMask $t '\bKB\d{5,}\b' 'KB' $slots
-    $t = Add-LVTemplateMask $t '(?i)(?<![\w.])v?\d+(?:\.\d+){1,4}(?![\w.])' 'VER' $slots
-    $t = Add-LVTemplateMask $t '(?i)\b(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,63}\b' 'FQDN' $slots
-    $t = Add-LVTemplateMask $t '\b0x[0-9A-Fa-f]{9,}\b' 'ADDR' $slots
-    $t = Add-LVTemplateMask $t '\b[0-9A-Fa-f]{16,}\b' 'ADDR' $slots
-    $t = Add-LVTemplateMask $t '\b0x[0-9A-Fa-f]{1,8}\b' 'HEX' $slots
-    $t = Add-LVTemplateMask $t '\b\d+\b' 'NUM' $slots
 
-    $t = $t -replace '\s+', ' '
+    $markers = @{}
+    foreach ($priorityValue in 0..($script:LVTemplateMatchOrder.Count - 1)) {
+        foreach ($match in $priorityMatches[$priorityValue]) {
+            $marker = '__LVSLOT' + ('X' * ($slots.Count + 1)) + '__'
+            $slots.Add([pscustomobject]@{
+                Index  = $slots.Count
+                Type   = $match.Type
+                Value  = Get-LVNormalizedSlotValue -Type $match.Type -Value $match.Value
+                Marker = $marker
+            }) | Out-Null
+            $markers[$match.Start] = $marker
+        }
+    }
+
+    $builder = New-Object System.Text.StringBuilder
+    $cursor = 0
+    foreach ($match in $templateMatches) {
+        if ($match.Start -lt $cursor) { continue }
+        if ($match.Start -gt $cursor) {
+            [void]$builder.Append($Text, $cursor, $match.Start - $cursor)
+        }
+        [void]$builder.Append($markers[$match.Start])
+        $cursor = $match.Start + $match.Length
+    }
+    if ($cursor -lt $Text.Length) {
+        [void]$builder.Append($Text, $cursor, $Text.Length - $cursor)
+    }
+
+    $t = $builder.ToString() -replace '\s+', ' '
     $marked = $t.Trim()
     $masked = $marked
     foreach ($slot in $slots) { $masked = $masked.Replace($slot.Marker, ('<{0}>' -f $slot.Type)) }
@@ -1082,13 +1207,8 @@ function ConvertTo-LVRedactedResult {
 
 function Get-LVShortHash {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Text))
-        return (($bytes[0..5] | ForEach-Object { $_.ToString('x2') }) -join '')
-    } finally {
-        $sha.Dispose()
-    }
+    $bytes = $script:LVShortHashAlgorithm.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Text))
+    return (($bytes[0..5] | ForEach-Object { $_.ToString('x2') }) -join '')
 }
 
 function ConvertTo-LVSafeName {

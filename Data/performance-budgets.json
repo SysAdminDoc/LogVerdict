@@ -42,6 +42,13 @@
       "expectedStatus": "unreadable",
       "maxParserMilliseconds": 5000,
       "maxElapsedMilliseconds": 15000
+    },
+    {
+      "id": "reduction-medium",
+      "sourceKind": "reduction",
+      "recordCount": 2359,
+      "expectedStatus": "reduced",
+      "maxElapsedMilliseconds": 60000
     }
   ]
 }

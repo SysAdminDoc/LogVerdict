@@ -150,6 +150,57 @@ function Invoke-LVBenchmarkEvtxFixture {
     }
 }
 
+function Invoke-LVBenchmarkReductionFixture {
+    param(
+        [Parameter(Mandatory)]$Module,
+        [Parameter(Mandatory)][string]$FixtureId,
+        [Parameter(Mandatory)][int]$RecordCount
+    )
+
+    $records = New-Object System.Collections.Generic.List[object]
+    $now = Get-Date
+    for ($i = 1; $i -le $RecordCount; $i++) {
+        $family = $i % 12
+        $records.Add([pscustomobject]@{
+            Source = 'textlog'
+            Channel = 'Synthetic'
+            Provider = 'Synthetic'
+            Id = 0
+            Level = 2
+            LevelName = 'Error'
+            TimeCreated = $now.AddSeconds(-$i)
+            MachineName = 'BENCHMARK-HOST'
+            RecordId = $i
+            Message = ('Synthetic family {0} failed to write C:\\Temp\\component-{1}.log with error 0x80070005 at request {2}' -f $family, $i, $i)
+        }) | Out-Null
+    }
+
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $state = & $Module {
+        param($InputRecords)
+        $reduced = Get-LVSignatureReduction -Record $InputRecords -WindowDays 30
+        [pscustomobject]@{
+            RecordCount = @($InputRecords).Count
+            SignatureCount = @($reduced.Signatures).Count
+        }
+    } @($records.ToArray())
+    $timer.Stop()
+
+    return [pscustomobject][ordered]@{
+        Id = $FixtureId
+        SourceKind = 'reduction'
+        Status = 'reduced'
+        ObservedRecords = [int64]$state.RecordCount
+        SkippedRecords = 0
+        UndatedRecords = 0
+        InputLines = [int64]$state.SignatureCount
+        InputBytes = $null
+        ElapsedMilliseconds = [int64][Math]::Round($timer.Elapsed.TotalMilliseconds, 0)
+        ParserMilliseconds = $null
+        BudgetStop = $null
+    }
+}
+
 if (-not (Test-Path -LiteralPath $BudgetPath -PathType Leaf)) {
     throw ("Performance budget file not found: {0}" -f $BudgetPath)
 }
@@ -192,6 +243,10 @@ try {
                 if ($byteCount -le 0) { throw 'EVTX fixture byteCount must be positive' }
                 New-LVBenchmarkEvtxFixture -Path $path -ByteCount $byteCount
                 $entry = Invoke-LVBenchmarkEvtxFixture -FixtureId $id -Path $path
+            } elseif ([string]$definition.sourceKind -eq 'reduction') {
+                $recordCount = [int]$definition.recordCount
+                if ($recordCount -le 0) { throw 'reduction fixture recordCount must be positive' }
+                $entry = Invoke-LVBenchmarkReductionFixture -Module $module -FixtureId $id -RecordCount $recordCount
             } else {
                 throw ("unsupported sourceKind '{0}'" -f $definition.sourceKind)
             }

@@ -119,7 +119,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Structured finding filters and sorting | UI Automation-labelled source/channel/provider/event ID/correlation/rule-state filters plus count/rate/latest sorting over lightweight row projections | GUI |
 | GUI accessibility and scaling smoke | STA UI Automation names, keyboard targets, normal/high-contrast resources, long/error text, and 125% layout checks | `Tools/Test-LogVerdictGui.ps1` |
 | Opt-in diagnostic performance telemetry | Content-free source status, bounded counts, caps, and elapsed timing in JSON, text, HTML, CSV, and standard exports | `-PerformanceTelemetry` |
-| Content-free performance budgets | Temporary small, large, malformed-text, and malformed-EVTX fixtures; aggregate counts/status/timing only, checked on Windows PowerShell 5.1 and PowerShell 7.6 LTS | `Tools/Test-LogVerdictPerformance.ps1` |
+| Content-free performance budgets | Temporary small, large, malformed-text, malformed-EVTX, and 2,359-record reduction fixtures; aggregate counts/status/timing only, checked on Windows PowerShell 5.1 and PowerShell 7.6 LTS | `Tools/Test-LogVerdictPerformance.ps1` |
 | Shared collection safety budgets | One byte, normalized-record, and elapsed-time allowance across live/offline collectors; incomplete sources remain `truncated` or `timeout` | `-MaxCollectionBytes`, `-MaxCollectionRecords`, `-MaxCollectionSeconds` |
 | Output format selection | The window always saves Text, JSON, CSV, and HTML together | `-Format` (`Text`, `Json`, `Csv`, `Html`, or `All`) |
 | Console lifecycle | Not applicable to a persistent window | `-NoReport`, `-Pause`, `-NoPause` |
@@ -202,11 +202,12 @@ The provenance is evidence about how an artifact was built, not a code signature
 executables remain unsigned by design.
 
 CI also runs `Tools\Test-LogVerdictPerformance.ps1` on both supported PowerShell
-runtimes. It creates small, large, malformed-text, and malformed-EVTX inputs only in
+runtimes. It creates small, large, malformed-text, malformed-EVTX, and reduction inputs only in
 the runner's temporary directory, deletes them after the run, and writes an aggregate
 report containing statuses, bounded record counts, sizes, and timing. The checked-in
 `Data\performance-budgets.json` makes end-to-end and parser-level timing regressions
-fail the gate; the report never contains fixture text or paths.
+fail the gate, including a separate 60-second ceiling for the reduction stage; the
+report never contains fixture text or paths.
 Drop a `verdicts.local.json` beside either .exe to add your own rules; they are merged automatically and win ties against the compiled-in ones. A full `Data\verdicts.json` beside the .exe replaces the compiled-in database entirely.
 
 Rule updates are opt-in. `Update-LogVerdictDatabase` fetches `verdicts.json` from a

@@ -19,11 +19,12 @@
         "required": ["id", "sourceKind", "expectedStatus", "maxElapsedMilliseconds"],
         "properties": {
           "id": { "type": "string", "minLength": 1 },
-          "sourceKind": { "enum": ["text", "offline-evtx"] },
+          "sourceKind": { "enum": ["text", "offline-evtx", "reduction"] },
           "lineCount": { "type": "integer", "minimum": 1 },
           "errorEvery": { "type": "integer", "minimum": 1 },
           "malformedTimestamps": { "type": "boolean" },
           "byteCount": { "type": "integer", "minimum": 1 },
+          "recordCount": { "type": "integer", "minimum": 1 },
           "expectedStatus": { "type": "string", "minLength": 1 },
           "minObservedRecords": { "type": "integer", "minimum": 0 },
           "expectedUndatedRecords": { "type": "integer", "minimum": 0 },

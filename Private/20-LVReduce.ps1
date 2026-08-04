@@ -142,12 +142,12 @@ function Get-LVSignatureReduction {
                 LevelName     = $r.LevelName
                 SampleMessage = $r.Message
                 Samples       = (New-Object System.Collections.Generic.List[string])
-                ResultCodes   = @()
-                ExtendCodes   = @()
-                Phases        = @()
-                Operations    = @()
-                ProviderLocales = @()
-                FallbackMessages = @()
+                ResultCodes   = New-Object 'System.Collections.Generic.HashSet[string]'
+                ExtendCodes   = New-Object 'System.Collections.Generic.HashSet[string]'
+                Phases        = New-Object 'System.Collections.Generic.HashSet[string]'
+                Operations    = New-Object 'System.Collections.Generic.HashSet[string]'
+                ProviderLocales = New-Object 'System.Collections.Generic.HashSet[string]'
+                FallbackMessages = New-Object 'System.Collections.Generic.HashSet[string]'
                 # Every occurrence time, capped. FirstSeen and LastSeen describe the span
                 # but say nothing about what happened INSIDE it, and correlation is
                 # entirely a question about the inside: two signatures whose spans overlap
@@ -179,9 +179,7 @@ function Get-LVSignatureReduction {
             @{ Context = 'FallbackMessage'; Bucket = 'FallbackMessages' }
         )) {
             $value = ConvertTo-LVErrorContextText $item.Context.($field.Context)
-            if ($value -and @($b.($field.Bucket)) -notcontains $value) {
-                $b.($field.Bucket) = @($b.($field.Bucket)) + $value
-            }
+            if ($value) { [void]$b.($field.Bucket).Add($value) }
         }
 
         # Undated records carry a null time (text-log lines with no parseable

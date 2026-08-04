@@ -211,11 +211,13 @@ function Invoke-LogVerdictScan {
 
     # A named channel list is the most specific request. Keep it ahead of broad
     # switches so a wrapper can safely pass its defaults alongside an explicit list.
+    $channelMetadata = $null
     if ($Channel) {
         $channels = $Channel
     } elseif ($AllChannels) {
         Write-LVLog -Level info -Message 'Enumerating populated channels...'
         $channels = Get-LVPopulatedChannel
+        $channelMetadata = $script:LVChannelMetadata
         Write-LVLog -Level ok -Message ('{0} channel(s) hold records' -f $channels.Count)
     } elseif ($DiagnosticChannels) {
         $channels = Get-LVDiagnosticChannel
@@ -237,7 +239,7 @@ function Invoke-LogVerdictScan {
     $script:LVTextLogCoverage = @()
 
     Write-LVLog -Level info -Message ('Probing {0} channel(s) for access and history...' -f @($channels).Count)
-    $channelStatus = Get-LVChannelStatus -Channel $channels
+    $channelStatus = Get-LVChannelStatus -Channel $channels -Metadata $channelMetadata
 
     $readable = @($channelStatus.Values | Where-Object { $_.Access -eq 'readable' }).Count
     Write-LVLog -Level info -Message ('Reading {0} readable channel(s)...' -f $readable)
