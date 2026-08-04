@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [0.8.2] - 2026-08-02
 
+- Added Constrained Language Mode detection and capability reporting, a fail-closed GUI refusal with named exit code 5, and a `Compress-Archive` evidence-creation fallback while documenting the remaining FullLanguage surfaces.
 - Added a pinned, content-free Windows 2k log-parsing benchmark with on-demand corpus fetching, MIT annotation metadata, and regression budgets for the real template masker.
 - Made unavailable error catalogs, invalid GUI settings, and evidence packaging outcomes explicit through structured status/reason data, added coverage notes for catalog failures, and made priority navigation clear filters before selecting a hidden finding.
 - Split the live scan pipeline and WPF GUI into independently testable collection, resolution, rendering, action, and event layers while keeping the public commands as thin entry points.

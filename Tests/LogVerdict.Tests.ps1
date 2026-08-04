@@ -422,6 +422,8 @@ Describe 'CI gate wiring' {
         ([regex]::Matches($script:CiWorkflow, 'actions/upload-artifact@[0-9a-f]{40}')).Count | Should -Be 3
         $script:CiWorkflow | Should -Match 'name: Run analyzer\r?\n\s+shell: \$\{\{ matrix\.shell \}\}'
         $script:CiWorkflow | Should -Not -Match 'name: Run analyzer\r?\n\s+if:'
+        $script:CiWorkflow | Should -Match 'name: Audit constrained-language compatibility'
+        $script:CiWorkflow | Should -Match 'PSUseConstrainedLanguageMode'
         $script:CiWorkflow | Should -Match 'name: Verify supply-chain metadata directly'
         $script:CiWorkflow | Should -Match 'Tools\\Test-LogVerdictSupplyChain\.ps1'
         $script:CiWorkflow | Should -Match 'name: Run runtime-agnostic release gates'
@@ -431,6 +433,70 @@ Describe 'CI gate wiring' {
         $script:CiWorkflow | Should -Match 'if \(-not \$\?\) \{ exit 1 \}'
         $script:CiWorkflow | Should -Match 'probeExit = if \(\$LASTEXITCODE\)'
         $script:CiWorkflow | Should -Match 'reportExit = \[int\]\$LASTEXITCODE'
+    }
+}
+
+Describe 'Constrained Language Mode compatibility' {
+    BeforeAll {
+        $script:ClmRoot = Split-Path $PSScriptRoot -Parent
+    }
+
+    It 'probes the runtime, documents the degraded matrix, and configures the analyzer audit' {
+        $common = Get-Content -LiteralPath (Join-Path $script:ClmRoot 'Private\00-LVCommon.ps1') -Raw
+        $gui = Get-Content -LiteralPath (Join-Path $script:ClmRoot 'Public\Show-LogVerdictGui.ps1') -Raw
+        $wrapper = Get-Content -LiteralPath (Join-Path $script:ClmRoot 'LogVerdict-GUI.ps1') -Raw
+        $readme = Get-Content -LiteralPath (Join-Path $script:ClmRoot 'README.md') -Raw
+        $settings = Import-PowerShellDataFile -LiteralPath (Join-Path $script:ClmRoot 'PSScriptAnalyzerSettings.psd1')
+
+        $common | Should -Match '\$ExecutionContext\.SessionState\.LanguageMode'
+        $gui | Should -Match 'LVGuiConstrainedLanguageErrorId'
+        $wrapper | Should -Match 'exit 5'
+        $readme | Should -Match 'Offline ZIP re-evaluation'
+        $settings.Rules.PSUseConstrainedLanguageMode.Enable | Should -BeTrue
+        @($settings.ExcludeRules) | Should -Contain 'PSUseConstrainedLanguageMode'
+    }
+
+    It 'refuses the GUI before any WPF or apartment work when the mode is constrained' {
+        InModuleScope LogVerdict {
+            $oldMode = $script:LVConstrainedLanguage
+            try {
+                $script:LVConstrainedLanguage = $true
+                Mock Write-LVLog {}
+
+                { Show-LogVerdictGui -DaysBack 1 } | Should -Throw '*LogVerdict.GuiConstrainedLanguage*'
+                Should -Invoke Write-LVLog -Times 1 -Exactly -ParameterFilter {
+                    $Message -match 'exit code 5'
+                }
+            } finally {
+                $script:LVConstrainedLanguage = $oldMode
+            }
+        }
+    }
+
+    It 'uses Compress-Archive for evidence creation in constrained mode' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $oldMode = $script:LVConstrainedLanguage
+            $staging = Join-Path $Root 'evidence-staging'
+            $zip = Join-Path $Root 'evidence.zip'
+            try {
+                New-Item -ItemType Directory -Path $staging -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $staging 'evidence.txt') -Value 'bounded evidence' -Encoding UTF8
+                $script:LVConstrainedLanguage = $true
+
+                New-LVEvidenceArchive -Staging $staging -Destination $zip
+
+                Test-Path -LiteralPath $zip | Should -BeTrue
+                $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+                try {
+                    @($archive.Entries | Select-Object -ExpandProperty FullName) | Should -Contain 'evidence.txt'
+                } finally {
+                    $archive.Dispose()
+                }
+            } finally {
+                $script:LVConstrainedLanguage = $oldMode
+            }
+        }
     }
 }
 

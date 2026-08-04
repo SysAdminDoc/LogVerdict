@@ -138,6 +138,20 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1 -EnableExit
 
+      - name: Audit constrained-language compatibility
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $settings = @{ Rules = @{ PSUseConstrainedLanguageMode = @{ Enable = $true } } }
+          $paths = @('.\Private', '.\Public', '.\Invoke-LogVerdict.ps1', '.\LogVerdict-GUI.ps1')
+          $findings = @($paths | ForEach-Object {
+            Invoke-ScriptAnalyzer -Path $_ -Recurse -IncludeRule PSUseConstrainedLanguageMode -Settings $settings -Severity Warning
+          })
+          Write-Host ('PSUseConstrainedLanguageMode findings: {0}' -f $findings.Count)
+          $findings | Group-Object ScriptName | Sort-Object Name | Select-Object Name, Count | Format-Table -AutoSize
+          $findings | Select-Object -First 25 ScriptName, Line, Column, Message | Format-Table -Wrap
+          Write-Host 'Findings are an explicit compatibility inventory; the supported surface is documented in README.md.'
+
       - name: Run runtime-agnostic release gates
         shell: ${{ matrix.shell }}
         run: |

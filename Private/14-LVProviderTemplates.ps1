@@ -6,7 +6,7 @@ $script:LVProviderTemplateAllowedLicenses = @('Apache-2.0', 'BSD-2-Clause', 'BSD
 $script:LVProviderTemplateMaxFileBytes = 16777216
 $script:LVProviderTemplateMaxEntries = 100000
 $script:LVProviderTemplateMaxTextBytes = 32768
-$script:LVProviderTemplateCoverage = [pscustomobject]@{ Cache = $null; LocalMissing = [int64]0; CacheResolved = [int64]0 }
+$script:LVProviderTemplateCoverage = @{ Cache = $null; LocalMissing = [int64]0; CacheResolved = [int64]0 }
 $script:LVProviderTemplateCacheError = $null
 
 function Get-LVProviderTemplateCachePath {

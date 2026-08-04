@@ -504,6 +504,26 @@ without treating it as a resolved event.
 
 WPF needs a single-threaded apartment. Windows PowerShell is STA by default; `pwsh` is not, so `LogVerdict-GUI.ps1` relaunches itself under `powershell.exe -STA`. Calling `Show-LogVerdictGui` directly from `pwsh` throws and tells you why.
 
+### Locked-down endpoints and ConstrainedLanguage
+
+The module records `$ExecutionContext.SessionState.LanguageMode` while it loads. On
+an unsigned script demoted by App Control to `ConstrainedLanguage`, the WPF GUI
+refuses to start with the named `LogVerdict.GuiConstrainedLanguage` error and exit
+code `5`. It writes one diagnostic line instead of attempting XAML and producing a
+type-resolution stack trace. The module imports and exposes its commands, but a
+complete PowerShell-module scan is not advertised as CLM-compatible yet: the
+collector and privacy pipeline still use typed collections and other non-core .NET
+operations. Evidence packaging uses `Compress-Archive` in that mode; full-language
+hosts keep the faster `System.IO.Compression.ZipFile` path.
+
+| Capability | FullLanguage | ConstrainedLanguage |
+|---|---|---|
+| Event and WMI collection | Supported | Built-in cmdlets remain available, but the complete module scan requires FullLanguage |
+| WPF GUI | Supported in STA | Refused with `LogVerdict.GuiConstrainedLanguage` (exit `5`) |
+| Evidence zip | `System.IO.Compression.ZipFile` | `Compress-Archive` fallback |
+| Offline ZIP re-evaluation | Safe bounded `ZipFile.OpenRead` path | Requires FullLanguage; safe entry inspection is not bypassed |
+| Provider/template and other optional .NET extensions | Supported | May be unavailable; the report records the affected coverage instead of claiming success |
+
 ### Exit codes
 
 | Code | Meaning |
@@ -513,6 +533,7 @@ WPF needs a single-threaded apartment. Windows PowerShell is STA by default; `pw
 | 2 | Actionable finding |
 | 3 | Critical finding |
 | 4 | The scan itself failed |
+| 5 | The GUI is unavailable under ConstrainedLanguage |
 
 ### Verdicts
 

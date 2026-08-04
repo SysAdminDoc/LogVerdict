@@ -58,6 +58,21 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$languageMode = [string]$ExecutionContext.SessionState.LanguageMode
+if ($languageMode -eq 'ConstrainedLanguage') {
+    $message = 'The LogVerdict GUI is unavailable under ConstrainedLanguage because WPF XAML requires FullLanguage.'
+    Write-Host ('[x] {0} ({1}, exit code {2})' -f $message, 'LogVerdict.GuiConstrainedLanguage', 5) -ForegroundColor Red
+    try {
+        $logRoot = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'LogVerdict' } else { Join-Path $env:TEMP 'LogVerdict' }
+        if (-not (Test-Path -LiteralPath $logRoot)) { New-Item -ItemType Directory -Path $logRoot -Force | Out-Null }
+        Add-Content -LiteralPath (Join-Path $logRoot 'LogVerdict.log') `
+            -Value ('[{0:yyyy-MM-dd HH:mm:ss}] {1} ({2})' -f (Get-Date), $message, 'LogVerdict.GuiConstrainedLanguage') -Encoding UTF8
+    } catch {
+        Write-Host ('[x] Could not write the constrained-language log line: {0}' -f $_.Exception.Message) -ForegroundColor Red
+    }
+    exit 5
+}
+
 # WPF will not start on a multi-threaded apartment. Windows PowerShell is STA by
 # default but pwsh is MTA, and there is no way to change a thread's apartment after
 # it starts - so relaunch through powershell.exe -STA carrying the same arguments.
@@ -100,6 +115,11 @@ try {
     Show-LogVerdictGui @guiArgs
     exit 0
 } catch {
+    if ($_.Exception.Message -like '*LogVerdict.GuiConstrainedLanguage*') {
+        Write-Host ('[x] {0} (exit code 5)' -f $_.Exception.Message) -ForegroundColor Red
+        exit 5
+    }
+
     # A GUI that dies before it can paint has nowhere to show an error, so the detail
     # goes to a crash log first and a message box second. Never fail silently: a
     # window that simply does not appear is the least debuggable outcome there is.

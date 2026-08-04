@@ -5,47 +5,47 @@
 # substitutions, and blocks a redacted bundle when a known sensitive shape remains.
 
 $script:LVPrivacyPattern = @(
-    [pscustomobject]@{
+    @{
         Id = 'sid'; Category = 'SID'; Substitution = '<SID>'
         Regex = '(?<![\w])S-\d-\d+(?:-\d+){1,14}(?![-\d])'
     }
-    [pscustomobject]@{
+    @{
         Id = 'upn'; Category = 'account-or-mail'; Substitution = '<UPN>'
         Regex = '[\w.+-]+@[\w-]+\.[\w.-]+'
     }
-    [pscustomobject]@{
+    @{
         Id = 'profile-path'; Category = 'profile-path'; Substitution = 'C:\Users\<USER>'
         Regex = '(?i)[A-Z]:\\Users\\(?!(?:<|&lt;))[^\\/:*?"<>|\r\n]+'
     }
-    [pscustomobject]@{
+    @{
         Id = 'ipv4'; Category = 'network-address'; Substitution = '<IP>'
         Regex = '\b(?:\d{1,3}\.){3}\d{1,3}\b'
     }
-    [pscustomobject]@{
+    @{
         Id = 'mac'; Category = 'network-address'; Substitution = '<MAC>'
         Regex = '(?i)\b(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b'
     }
-    [pscustomobject]@{
+    @{
         Id = 'credential'; Category = 'credential-or-secret'; Substitution = '<SECRET>'
         Regex = '(?i)\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|token)\b\s*[:=]\s*["'']?(?!<[^>]+>)[^\s,;}'']+'
     }
-    [pscustomobject]@{
+    @{
         Id = 'bearer-token'; Category = 'bearer-token'; Substitution = '<TOKEN>'
         Regex = '(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{12,}'
     }
-    [pscustomobject]@{
+    @{
         Id = 'jwt'; Category = 'jwt'; Substitution = '<TOKEN>'
         Regex = '\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b'
     }
-    [pscustomobject]@{
+    @{
         Id = 'aws-access-key'; Category = 'cloud-access-key'; Substitution = '<TOKEN>'
         Regex = '\bAKIA[0-9A-Z]{16}\b'
     }
-    [pscustomobject]@{
+    @{
         Id = 'github-token'; Category = 'github-token'; Substitution = '<TOKEN>'
         Regex = '\bgh[pousr]_[A-Za-z0-9]{20,}\b'
     }
-    [pscustomobject]@{
+    @{
         Id = 'script-block'; Category = 'PowerShell-script-block'; Substitution = '<SCRIPTBLOCK>'
         Regex = '(?i)(?:ScriptBlockText\s*[:=]|<ScriptBlock>|EncodedCommand\s*[:=]|FromBase64String\s*\()'
     }

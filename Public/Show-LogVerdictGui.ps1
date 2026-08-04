@@ -67,6 +67,12 @@ function Show-LogVerdictGui {
         [switch]$PassThru
     )
 
+    if ($script:LVConstrainedLanguage) {
+        $message = 'The LogVerdict GUI is unavailable under ConstrainedLanguage because WPF XAML requires FullLanguage. Use the console triage entry point instead.'
+        Write-LVLog -Level error -Message ('{0} ({1}, exit code {2})' -f $message, $script:LVGuiConstrainedLanguageErrorId, $script:LVGuiConstrainedLanguageExitCode)
+        throw ('[{0}] {1}' -f $script:LVGuiConstrainedLanguageErrorId, $message)
+    }
+
     if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
         throw 'The LogVerdict window needs a single-threaded apartment. Start PowerShell with -STA, or run LogVerdict-GUI.ps1 which handles this for you.'
     }

@@ -1,5 +1,14 @@
 # Shared helpers. Loaded first (numeric filename prefix controls dot-source order).
 
+# App Control can demote an unsigned script to ConstrainedLanguage without blocking
+# it. Capture that decision while the module is loading so every entry point can make
+# an explicit capability choice instead of discovering it through a type-resolution
+# stack trace later.
+$script:LVLanguageMode = [string]$ExecutionContext.SessionState.LanguageMode
+$script:LVConstrainedLanguage = $script:LVLanguageMode -eq 'ConstrainedLanguage'
+$script:LVGuiConstrainedLanguageExitCode = 5
+$script:LVGuiConstrainedLanguageErrorId = 'LogVerdict.GuiConstrainedLanguage'
+
 # Verdict vocabulary, ordered least to most alarming. The rank drives report sorting
 # and the exit code. "unknown" outranks "informational" on purpose: an unrecognized
 # error is a lead, not background noise.
@@ -115,29 +124,34 @@ $script:LVTemplateMatchTypes = [ordered]@{
     Hex         = 'HEX'
     Number      = 'NUM'
 }
-$compositeParts = New-Object System.Collections.Generic.List[string]
+$compositeParts = @()
 foreach ($name in $script:LVTemplateMatchTypes.Keys) {
-    [void]$compositeParts.Add(('(?<{0}>' -f $name) + $script:LVTemplateRegex[$name].ToString() + ')')
+    $compositeParts += ('(?<{0}>' -f $name) + $script:LVTemplateRegex[$name].ToString() + ')'
 }
 $script:LVTemplateRegex.Composite = [regex]::new(
     ($compositeParts -join '|'),
     [System.Text.RegularExpressions.RegexOptions]::Compiled)
 $script:LVTemplateMatchOrder = @($script:LVTemplateMatchTypes.Keys)
-$script:LVTemplateCompositeGroups = New-Object System.Collections.Generic.List[object]
-foreach ($name in $script:LVTemplateMatchOrder) {
-    $groupNumber = $script:LVTemplateRegex.Composite.GroupNumberFromName($name)
-    $script:LVTemplateCompositeGroups.Add([pscustomobject]@{
-        Number = $groupNumber
-        Name   = $name
-        Type   = [string]$script:LVTemplateMatchTypes[$name]
-        Priority = $script:LVTemplateCompositeGroups.Count
-    }) | Out-Null
+$script:LVTemplateCompositeGroups = @()
+if (-not $script:LVConstrainedLanguage) {
+    foreach ($name in $script:LVTemplateMatchOrder) {
+        $groupNumber = $script:LVTemplateRegex.Composite.GroupNumberFromName($name)
+        $script:LVTemplateCompositeGroups += [pscustomobject]@{
+            Number = $groupNumber
+            Name   = $name
+            Type   = [string]$script:LVTemplateMatchTypes[$name]
+            Priority = $script:LVTemplateCompositeGroups.Count
+        }
+    }
 }
 
 # Get-LVShortHash is used for every text-log family key. HashAlgorithm instances reset
 # after ComputeHash, so a single module-local provider avoids allocating and disposing a
 # SHA-256 implementation for every record while retaining the same digest bytes.
-$script:LVShortHashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
+$script:LVShortHashAlgorithm = $null
+if (-not $script:LVConstrainedLanguage) {
+    try { $script:LVShortHashAlgorithm = [System.Security.Cryptography.SHA256]::Create() } catch { $script:LVShortHashAlgorithm = $null }
+}
 
 # A ruling that asserts "Microsoft says ignore this" is only as good as the day it was
 # checked. Rules older than this without re-verification are reported as stale.
@@ -150,7 +164,7 @@ $script:LVDefaultStaleAfterDays = 180
 $script:LVUICulture = (Get-UICulture).Name
 
 $script:LVMaxLogLines = 5000
-$script:LVLogLines = New-Object System.Collections.Generic.List[string]
+$script:LVLogLines = if ($script:LVConstrainedLanguage) { @() } else { New-Object System.Collections.Generic.List[string] }
 $script:LVLogLinesTruncated = $false
 
 # Event collection keeps a second, unfiltered range when the normal scan level
@@ -504,7 +518,7 @@ function New-LVCollectionBudget {
         [ValidateRange(1, 86400)][int]$MaxSeconds = 600
     )
 
-    return [pscustomobject][ordered]@{
+    $budget = [ordered]@{
         MaxBytes     = [int64]$MaxBytes
         MaxRecords   = [int64]$MaxRecords
         MaxSeconds   = [int]$MaxSeconds
@@ -512,6 +526,8 @@ function New-LVCollectionBudget {
         BytesRead    = [int64]0
         RecordsRead  = [int64]0
     }
+    if ($script:LVConstrainedLanguage) { return $budget }
+    return [pscustomobject]$budget
 }
 
 function Get-LVCollectionBudgetStopReason {
@@ -566,6 +582,7 @@ function Add-LVLogLine {
         [Parameter(Mandatory)][string]$Line
     )
 
+    if ($script:LVConstrainedLanguage) { return }
     if ($List.Count -ge $script:LVMaxLogLines) {
         $dropCount = [Math]::Max(1, [int][Math]::Floor($script:LVMaxLogLines / 4))
         $List.RemoveRange(0, [Math]::Min($dropCount, $List.Count))
@@ -591,7 +608,9 @@ function Write-LVLog {
 
     $line = '{0} {1}' -f $marks[$Level], $Message
     $stamped = '{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $line
-    Add-LVLogLine -List $script:LVLogLines -Line $stamped
+    if (-not $script:LVConstrainedLanguage) {
+        Add-LVLogLine -List $script:LVLogLines -Line $stamped
+    }
 
     # Enqueue, never invoke a callback: the scan runs on a worker thread and touching
     # a WPF control from there throws. A queue lets the UI thread pull on its own timer.
@@ -827,7 +846,7 @@ function New-LVPerformanceRecord {
 }
 
 function Get-LVLogTranscript {
-    $lines = @($script:LVLogLines.ToArray())
+    $lines = if ($script:LVLogLines -is [array]) { @($script:LVLogLines) } else { @($script:LVLogLines.ToArray()) }
     if ($script:LVLogLinesTruncated) {
         $lines = @('[!] Log transcript truncated; only the most recent {0} line(s) are retained.' -f $script:LVMaxLogLines) + $lines
     }
@@ -1375,8 +1394,19 @@ function ConvertTo-LVRedactedResult {
 
 function Get-LVShortHash {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
-    $bytes = $script:LVShortHashAlgorithm.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Text))
-    return (($bytes[0..5] | ForEach-Object { $_.ToString('x2') }) -join '')
+    if ($script:LVShortHashAlgorithm) {
+        $bytes = $script:LVShortHashAlgorithm.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Text))
+        return (($bytes[0..5] | ForEach-Object { $_.ToString('x2') }) -join '')
+    }
+
+    # ConstrainedLanguage blocks non-core cryptography types. Keep signatures
+    # deterministic for the degraded triage path with a small FNV-1a fallback;
+    # full-language runs retain the SHA-256 prefix used by the normal contract.
+    [int64]$hash = 2166136261
+    foreach ($character in $Text.ToCharArray()) {
+        $hash = (($hash -bxor [int64][char]$character) * 16777619) % 4294967296
+    }
+    return ('{0:x8}' -f $hash).Substring(0, 6)
 }
 
 function ConvertTo-LVSafeName {

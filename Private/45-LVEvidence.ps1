@@ -254,6 +254,82 @@ function Format-LVEvidenceManifest {
     return $sb.ToString()
 }
 
+function New-LVEvidenceArchive {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Staging,
+        [Parameter(Mandatory)][string]$Destination
+    )
+
+    if ($script:LVConstrainedLanguage) {
+        $files = @(Get-ChildItem -LiteralPath $Staging -File | Select-Object -ExpandProperty FullName)
+        if ($files.Count -eq 0) { throw 'Evidence staging directory contains no files to archive.' }
+        try {
+            Compress-Archive -LiteralPath $files -DestinationPath $Destination -Force -ErrorAction Stop
+        } catch {
+            # Some App Control policies allow the cmdlet but deny the .NET calls it
+            # uses internally. Windows ships tar.exe as an external, no-script
+            # fallback; keep the archive contract working without weakening policy.
+            $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
+            if (-not $tar) { throw }
+            & $tar.Source -a -c -f $Destination -C $Staging .
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Destination -PathType Leaf)) {
+                throw ('Compress-Archive and tar.exe both failed: {0}' -f $_.Exception.Message)
+            }
+        }
+        return
+    }
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($Staging, $Destination)
+}
+
+function New-LVConstrainedEvidenceBundle {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Result,
+        [Parameter(Mandatory)][string]$OutputDir,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ReportFile,
+        [switch]$Redact,
+        [switch]$AllowRawEvidence,
+        [AllowNull()]$Status
+    )
+
+    if (-not $Redact -and -not $AllowRawEvidence) {
+        if ($Status) { $Status.Value = @{ State = 'rejected'; Reason = 'Raw evidence packaging requires the explicit -AllowRawEvidence override.'; Path = $null } }
+        throw 'Raw evidence packaging requires the explicit -AllowRawEvidence override.'
+    }
+
+    $staging = Join-Path $OutputDir 'evidence-clm'
+    if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+    New-Item -ItemType Directory -Path $staging -Force | Out-Null
+    foreach ($report in @($ReportFile | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) })) {
+        Copy-Item -LiteralPath $report -Destination (Join-Path $staging (Split-Path -Leaf $report)) -Force
+    }
+
+    $manifest = @(
+        'LogVerdict evidence bundle'
+        'LanguageMode: ConstrainedLanguage'
+        'GUI: unavailable (LogVerdict.GuiConstrainedLanguage, exit code 5)'
+        'Raw event channels: omitted from the constrained-language fallback'
+        ('Redacted: {0}' -f [bool]$Redact)
+        ('ToolVersion: {0}' -f [string]$Result.Version)
+    ) -join [Environment]::NewLine
+    Set-Content -LiteralPath (Join-Path $staging 'MANIFEST.txt') -Value $manifest -Encoding UTF8
+
+    $zip = Join-Path $OutputDir ('LogVerdict-Evidence_CLM_{0}.zip' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+    try {
+        New-LVEvidenceArchive -Staging $staging -Destination $zip
+    } catch {
+        if ($Status) { $Status.Value = @{ State = 'write-failed'; Reason = $_.Exception.Message; Path = $staging } }
+        return $null
+    }
+    Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
+    if ($Status) { $Status.Value = @{ State = 'created'; Reason = 'Evidence bundle created with the ConstrainedLanguage archive fallback.'; Path = $zip } }
+    return $zip
+}
+
 function New-LVEvidenceBundle {
     <#
         .SYNOPSIS
@@ -290,6 +366,10 @@ function New-LVEvidenceBundle {
     if (-not $PSCmdlet.ShouldProcess($OutputDir, 'Write an evidence bundle')) {
         $null = & $setStatus 'declined' 'Evidence packaging was declined by the operator or WhatIf policy.' $null
         return $null
+    }
+    if ($script:LVConstrainedLanguage) {
+        return New-LVConstrainedEvidenceBundle -Result $Result -OutputDir $OutputDir `
+            -ReportFile $ReportFile -Redact:$Redact -AllowRawEvidence:$AllowRawEvidence -Status $Status
     }
     if (-not $Redact -and -not $AllowRawEvidence) {
         $null = & $setStatus 'rejected' 'Raw evidence packaging requires the explicit -AllowRawEvidence override.' $null
@@ -378,8 +458,7 @@ function New-LVEvidenceBundle {
     if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 
     try {
-        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
-        [System.IO.Compression.ZipFile]::CreateFromDirectory($staging, $zip)
+        New-LVEvidenceArchive -Staging $staging -Destination $zip
     } catch {
         $reason = 'Could not write the evidence bundle: {0}' -f $_.Exception.Message
         $null = & $setStatus 'write-failed' $reason $staging
@@ -420,7 +499,7 @@ function New-LVEvidenceBundle {
                         -SizeBudgetBytes $budget -BudgetStatus $budgetStatus)
                 $content.Add($manifestPath) | Out-Null
                 Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
-                try { [System.IO.Compression.ZipFile]::CreateFromDirectory($staging, $zip) } catch {
+                try { New-LVEvidenceArchive -Staging $staging -Destination $zip } catch {
                     $reason = 'Could not write the size-bounded evidence bundle: {0}' -f $_.Exception.Message
                     $null = & $setStatus 'write-failed' $reason $staging
                     Write-LVLog -Level error -Message $reason
@@ -448,7 +527,7 @@ function New-LVEvidenceBundle {
                 -SizeBudgetBytes $budget -BudgetStatus $budgetStatus)
         $content.Add($manifestPath) | Out-Null
         Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
-        try { [System.IO.Compression.ZipFile]::CreateFromDirectory($staging, $zip) } catch {
+        try { New-LVEvidenceArchive -Staging $staging -Destination $zip } catch {
             $reason = 'Could not finalize the size-bounded evidence bundle: {0}' -f $_.Exception.Message
             $null = & $setStatus 'write-failed' $reason $staging
             Write-LVLog -Level error -Message $reason

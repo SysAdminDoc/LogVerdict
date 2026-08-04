@@ -22,8 +22,18 @@
         # nothing else, which trains contributors to ignore its output entirely.
         'PSAvoidUsingWriteHost',
 
+        # This optional PSScriptAnalyzer 1.25.0 rule is run by the dedicated CI
+        # constrained-language audit. Its findings are intentionally non-blocking in
+        # the ordinary quality gate because the README documents the deliberate
+        # FullLanguage boundary for typed scan, privacy, and WPF paths.
+        'PSUseConstrainedLanguageMode',
+
         # New-LVCoverageRecord is an in-memory object factory. Its New-* verb is part of
         # the project's existing constructor naming convention and does not mutate state.
         'PSUseShouldProcessForStateChangingFunctions'
     )
+
+    Rules = @{
+        PSUseConstrainedLanguageMode = @{ Enable = $true }
+    }
 }
