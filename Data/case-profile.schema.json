@@ -20,8 +20,8 @@
   "properties": {
     "profileId": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "schemaVersion": { "const": 1 },
-    "name": { "type": "string", "minLength": 1 },
-    "purpose": { "type": "string" },
+    "name": { "type": "string", "minLength": 1, "pattern": "^[^\\r\\n:]*$" },
+    "purpose": { "type": "string", "pattern": "^[^\\r\\n:]*$" },
     "operator": {
       "type": "object",
       "additionalProperties": false,
@@ -31,7 +31,7 @@
         "ticket": { "type": [ "string", "null" ] }
       }
     },
-    "notes": { "type": "array", "items": { "type": "string" } },
+    "notes": { "type": "array", "items": { "type": "string", "pattern": "^[^\\r\\n:]*$" } },
     "sources": {
       "type": "array",
       "items": {
@@ -41,7 +41,7 @@
         "properties": {
           "source": { "type": "string" },
           "kind": { "type": "string" },
-          "name": { "type": "string" },
+          "name": { "type": "string", "pattern": "^[^\\r\\n]*$" },
           "status": { "type": "string" },
           "sha256": { "type": [ "string", "null" ], "pattern": "^[0-9a-f]{64}$" },
           "sizeBytes": { "type": [ "integer", "null" ], "minimum": 0 }

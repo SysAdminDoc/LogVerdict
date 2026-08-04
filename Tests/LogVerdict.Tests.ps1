@@ -96,6 +96,78 @@ Describe 'Case profiles and responder handoffs' {
         (Get-Content -LiteralPath (Join-Path $firstDir 'LogVerdict-Timesketch.csv') -Raw) | Should -BeExactly (Get-Content -LiteralPath (Join-Path $secondDir 'LogVerdict-Timesketch.csv') -Raw)
     }
 
+    It 'neutralises formula cells in every handoff CSV writer' {
+        InModuleScope LogVerdict -Parameters @{ sourceResult = $script:CaseResult } {
+            param($sourceResult)
+            $result = $sourceResult | Select-Object *
+            $finding = $sourceResult.Findings[0] | Select-Object *
+            foreach ($property in @(
+                [pscustomobject]@{ Name = 'Title'; Value = 'title' }
+                [pscustomobject]@{ Name = 'Plain'; Value = 'plain' }
+                [pscustomobject]@{ Name = 'Why'; Value = 'why' }
+                [pscustomobject]@{ Name = 'Action'; Value = 'action' }
+            )) {
+                $finding | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force
+            }
+            $finding.SampleMessage = '=cmd|/C calc'
+            $finding.Title = '+title'
+            $finding.Plain = '-plain'
+            $finding.Why = '@why'
+            $finding.Action = "`tcmd"
+            $result.Findings = @($finding)
+
+            $reportRow = @(ConvertTo-LVCsvReport -Result $result | ConvertFrom-Csv)[0]
+            $reportRow.SampleMessage | Should -BeExactly "'=cmd|/C calc"
+            $reportRow.Title | Should -BeExactly "'+title"
+            $reportRow.Plain | Should -BeExactly "'-plain"
+            $reportRow.Why | Should -BeExactly "'@why"
+            $reportRow.Action | Should -BeExactly "'`tcmd"
+
+            $profile = New-LVCaseProfileObject -Result $result -Name 'CSV handoff'
+            $output = Join-Path $TestDrive 'formula-handoff'
+            Export-LogVerdictHandoff -Result $result -Profile $profile -OutputDir $output | Out-Null
+            $timesketch = @(Import-Csv -LiteralPath (Join-Path $output 'LogVerdict-Timesketch.csv'))[0]
+            $hayabusa = @(Import-Csv -LiteralPath (Join-Path $output 'LogVerdict-Hayabusa.csv'))[0]
+            $timesketch.message | Should -BeExactly "'=cmd|/C calc"
+            $hayabusa.Details | Should -BeExactly "'=cmd|/C calc"
+        }
+    }
+
+    It 'rejects unsafe case-profile prose before profile-id validation' {
+        InModuleScope LogVerdict -Parameters @{ sourceResult = $script:CaseResult } {
+            param($sourceResult)
+            $profile = New-LVCaseProfileObject -Result $sourceResult -Name 'Safe name'
+            foreach ($field in @('name', 'purpose')) {
+                $profile.$field = "bad: <value>"
+                @(Get-LVCaseProfileProblems -Profile $profile) -join ' ' | Should -Match $field
+                $profile.$field = "bad`nvalue"
+                @(Get-LVCaseProfileProblems -Profile $profile) -join ' ' | Should -Match $field
+            }
+            $profile.name = 'Safe name'
+            $profile.purpose = 'Safe purpose'
+            $profile | Add-Member -NotePropertyName notes -NotePropertyValue @('bad: note') -Force
+            @(Get-LVCaseProfileProblems -Profile $profile) -join ' ' | Should -Match 'notes'
+            $profile | Add-Member -NotePropertyName notes -NotePropertyValue @("bad`nnote") -Force
+            @(Get-LVCaseProfileProblems -Profile $profile) -join ' ' | Should -Match 'notes'
+        }
+    }
+
+    It 'quotes recipe values and strips line breaks from text-source comments' {
+        InModuleScope LogVerdict -Parameters @{ sourceResult = $script:CaseResult } {
+            param($sourceResult)
+            $profile = New-LVCaseProfileObject -Result $sourceResult -Name 'Recipe profile'
+            $profile.sources = @($profile.sources + [pscustomobject]@{
+                source = 'textlog'; kind = 'textlog'; name = "evil`nname\file"; status = 'readable'; sha256 = $null; sizeBytes = $null
+            })
+            $kape = Get-LVCaseKapeRecipe -Profile $profile
+            $kape | Should -Not -Match "evil`nname"
+            $kape | Should -Match ([regex]::Escape('"evil name\\file"'))
+            $velociraptor = Get-LVCaseVelociraptorRecipe -Profile $profile
+            $velociraptor | Should -Match ('(?m)^name: "Custom\.LogVerdict\.' + $profile.profileId.Substring(0, 16))
+            $velociraptor | Should -Match ('LET profile_id = "' + $profile.profileId + '"')
+        }
+    }
+
     It 'keeps the profile visible in reports and standard export context' {
         $result = $script:CaseResult | Select-Object *
         $profile = New-LogVerdictCaseProfile -Result $result -Name 'Report case' -Note 'operator note'
@@ -3771,6 +3843,35 @@ Describe 'Report rendering' {
                 if ($null -eq $previousLocale) { Remove-Item Env:LOGVERDICT_LOCALE -ErrorAction SilentlyContinue }
                 else { $env:LOGVERDICT_LOCALE = $previousLocale }
             }
+        }
+    }
+
+    It 'HTML-encodes hostile report fields and contributed localization text' {
+        InModuleScope LogVerdict -Parameters @{ sourceResult = $script:FakeResult } {
+            param($sourceResult)
+            $result = $sourceResult | Select-Object *
+            $result.Version = '<script>alert(1)</script>'
+            $result.DaysBack = '<svg onload=1>'
+            $result.Elevated = '<img src=x>'
+            $result | Add-Member -NotePropertyName CaseProfile -NotePropertyValue ([pscustomobject]@{
+                profileId = ('a' * 64); name = '<b>case</b>'; sources = @(); notes = @()
+                redaction = [pscustomobject]@{ requested = '<i>raw</i>' }
+            }) -Force
+            $result.CrashArtifacts = @([pscustomobject]@{
+                Kind = '<img src=x onerror=1>'; When = Get-Date '2026-08-01'; Path = 'C:\logs\crash.wer'
+            })
+            $html = ConvertTo-LVHtmlReport -Result $result
+            $html | Should -Not -Match '<script>alert\(1\)</script>|<svg onload=1>|<img src=x onerror=1>'
+            $html | Should -Match '&lt;script&gt;alert\(1\)&lt;/script&gt;|&lt;svg onload=1&gt;|&lt;img src=x onerror=1&gt;'
+
+            Mock Get-LVText {
+                param($Key, $Default)
+                if ($Key -eq 'report.heading.findings') { return '<img src=x onerror=1>' }
+                return $Default
+            }
+            $localized = ConvertTo-LVLocalizedMarkup -Markup '<div>Findings</div>'
+            $localized | Should -Not -Match '<img src=x onerror=1>'
+            $localized | Should -Match '&lt;img src=x onerror=1&gt;'
         }
     }
 

@@ -462,8 +462,17 @@ function ConvertTo-LVLocalizedMarkup {
         if (-not $source) { continue }
         $target = Get-LVText -Key $entry.Name -Default $source
         if ($target -eq $source) { continue }
+        # The replacement runs over a completed HTML document. Localization data
+        # is a contribution surface, so encode both the source variant and target
+        # before replacing text nodes; never allow a locale to add markup.
+        $safeTarget = ConvertTo-LVHtmlEncoded $target
+        $sourceVariants = @($source)
+        $safeSource = ConvertTo-LVHtmlEncoded $source
+        if ($safeSource -ne $source) { $sourceVariants += $safeSource }
         foreach ($closing in @('<', ':', '.', '</')) {
-            $localized = $localized.Replace(('>{0}{1}' -f $source, $closing), ('>{0}{1}' -f $target, $closing))
+            foreach ($sourceVariant in $sourceVariants) {
+                $localized = $localized.Replace(('>{0}{1}' -f $sourceVariant, $closing), ('>{0}{1}' -f $safeTarget, $closing))
+            }
         }
     }
     return $localized

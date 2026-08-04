@@ -85,8 +85,8 @@ function Export-LogVerdictHandoff {
         Write-LVTextFile -Path $profilePathOut -Content ($Profile | ConvertTo-Json -Depth 30)
         Write-LVTextFile -Path (Join-Path $OutputDir $files.kape) -Content (Get-LVCaseKapeRecipe -Profile $Profile)
         Write-LVTextFile -Path (Join-Path $OutputDir $files.velociraptor) -Content (Get-LVCaseVelociraptorRecipe -Profile $Profile)
-        $timesketchContent = if (@($timesketch).Count -gt 0) { (($timesketch | ConvertTo-Csv -NoTypeInformation) -join [Environment]::NewLine) + [Environment]::NewLine } else { '' }
-        $hayabusaContent = if (@($hayabusa).Count -gt 0) { (($hayabusa | ConvertTo-Csv -NoTypeInformation) -join [Environment]::NewLine) + [Environment]::NewLine } else { '' }
+        $timesketchContent = ConvertTo-LVProtectedCsv -Rows @($timesketch)
+        $hayabusaContent = ConvertTo-LVProtectedCsv -Rows @($hayabusa)
         Write-LVTextFile -Path (Join-Path $OutputDir $files.timesketch) -Content $timesketchContent
         Write-LVTextFile -Path (Join-Path $OutputDir $files.hayabusa) -Content $hayabusaContent
         $timelineResult = if ($Redact -or $Profile.redaction.requested) { ConvertTo-LVRedactedResult -Result $Result } else { $Result }

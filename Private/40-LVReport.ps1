@@ -44,6 +44,32 @@ function Add-LVLine {
     [void]$Builder.AppendLine((ConvertTo-LVLocalizedReportLine -Text $Text))
 }
 
+function Add-LVHtml {
+    <#
+        Append one formatted HTML line. Arguments are encoded by default; a
+        caller must name a raw argument explicitly when it is a constant HTML
+        fragment such as a trusted style token.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][System.Text.StringBuilder]$Builder,
+        [Parameter(Mandatory)][string]$Format,
+        [AllowNull()][object[]]$Arguments = @(),
+        [int[]]$RawArgumentIndex = @()
+    )
+
+    $safeArguments = New-Object object[] $Arguments.Count
+    for ($index = 0; $index -lt $Arguments.Count; $index++) {
+        if (@($RawArgumentIndex) -contains $index) {
+            $safeArguments[$index] = $Arguments[$index]
+        } else {
+            $safeArguments[$index] = ConvertTo-LVHtmlEncoded ([string]$Arguments[$index])
+        }
+    }
+    $formatted = [string]::Format([Globalization.CultureInfo]::InvariantCulture, $Format, [object[]]$safeArguments)
+    Add-LVLine -Builder $Builder -Text $formatted
+}
+
 function Format-LVWhen {
     <#
         .SYNOPSIS
@@ -456,6 +482,36 @@ function ConvertTo-LVFlatFindingRow {
     }
 }
 
+function Protect-LVCsvCell {
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return $null }
+    $text = [string]$Value
+    if ($text -match '^[=+\-@\t\r]') { return "'" + $text }
+    return $text
+}
+
+function Protect-LVCsvRow {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Row)
+
+    $safe = [ordered]@{}
+    foreach ($property in @($Row.PSObject.Properties)) {
+        $safe[$property.Name] = Protect-LVCsvCell -Value $property.Value
+    }
+    return [pscustomobject]$safe
+}
+
+function ConvertTo-LVProtectedCsv {
+    [CmdletBinding()]
+    param([AllowEmptyCollection()][object[]]$Rows = @())
+
+    if ($Rows.Count -eq 0) { return '' }
+    $safeRows = @($Rows | ForEach-Object { Protect-LVCsvRow -Row $_ })
+    return (($safeRows | ConvertTo-Csv -NoTypeInformation) -join [Environment]::NewLine) + [Environment]::NewLine
+}
+
 function ConvertTo-LVCoverageCsvRow {
     param([Parameter(Mandatory)]$Result, [Parameter(Mandatory)]$Coverage)
 
@@ -577,7 +633,7 @@ function ConvertTo-LVCsvReport {
         $rows += ConvertTo-LVPerformanceCsvRow -Result $Result -Performance $performance
     }
     if ($rows.Count -gt 0) {
-        $csvLines = @($rows | ConvertTo-Csv -NoTypeInformation)
+        $csvLines = @(($rows | ForEach-Object { Protect-LVCsvRow -Row $_ }) | ConvertTo-Csv -NoTypeInformation)
         if ($csvLines.Count -gt 0) { $csvLines[0] = ConvertTo-LVLocalizedCsvHeader -Header $csvLines[0] }
         return ($csvLines -join [Environment]::NewLine) + [Environment]::NewLine
     }
@@ -902,7 +958,7 @@ function ConvertTo-LVHtmlReport {
     $reportLocale = Get-LVLocalizationLocale
     Add-LVLine $sb ('<!DOCTYPE html><html lang="{0}"><head><meta charset="utf-8">' -f (ConvertTo-LVHtmlEncoded $reportLocale))
     Add-LVLine $sb '<meta name="viewport" content="width=device-width,initial-scale=1">'
-    Add-LVLine $sb ('<title>LogVerdict - {0}</title>' -f (ConvertTo-LVHtmlEncoded $Result.MachineName))
+    Add-LVHtml -Builder $sb -Format '<title>LogVerdict - {0}</title>' -Arguments @($Result.MachineName)
     Add-LVLine $sb '<style>'
     Add-LVLine $sb @'
 :root{--base:#1e1e2e;--mantle:#181825;--crust:#11111b;--s0:#313244;--s1:#45475a;
@@ -1028,7 +1084,8 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
     Add-LVLine $sb '</style></head><body><div class="wrap">'
 
     Add-LVLine $sb '<header class="report-header"><h1>Log<span>Verdict</span></h1>'
-    Add-LVLine $sb ('<div class="sub">{0} &middot; scanned {1:yyyy-MM-dd HH:mm} &middot; last {2} day(s) &middot; elevated: {3} &middot; v{4}</div></header>' -f (ConvertTo-LVHtmlEncoded $Result.MachineName), $Result.ScanTime, $Result.DaysBack, $Result.Elevated, $Result.Version)
+    Add-LVHtml -Builder $sb -Format '<div class="sub">{0} &middot; scanned {1} &middot; last {2} day(s) &middot; elevated: {3} &middot; v{4}</div></header>' `
+        -Arguments @($Result.MachineName, (Format-LVWhen $Result.ScanTime), $Result.DaysBack, $Result.Elevated, $Result.Version)
     Add-LVLine $sb '<nav aria-label="Report navigation"><a class="skip-link" href="#finding-list">Skip to findings</a></nav><main id="main-content" tabindex="-1">'
 
     $needsAttention = @($Result.Findings | Where-Object { (Get-LVVerdictRank -Verdict $_.Verdict) -ge (Get-LVVerdictRank -Verdict 'unknown') }).Count
@@ -1134,9 +1191,8 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
     }
     if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {
         Add-LVLine $sb '<div class="warn"><strong>CASE PROFILE / HANDOFF.</strong><div>Collection metadata and operator context; this is not a verdict.</div>'
-        Add-LVLine $sb ('<div>Profile ID: {0}; name: {1}; sources: {2}; redacted: {3}</div>' -f `
-            (ConvertTo-LVHtmlEncoded $Result.CaseProfile.profileId), (ConvertTo-LVHtmlEncoded $Result.CaseProfile.name),
-            @($Result.CaseProfile.sources).Count, $Result.CaseProfile.redaction.requested)
+        Add-LVHtml -Builder $sb -Format '<div>Profile ID: {0}; name: {1}; sources: {2}; redacted: {3}</div>' `
+            -Arguments @($Result.CaseProfile.profileId, $Result.CaseProfile.name, @($Result.CaseProfile.sources).Count, $Result.CaseProfile.redaction.requested)
         foreach ($note in @($Result.CaseProfile.notes | Where-Object { $_ })) {
             Add-LVLine $sb ('<div>Note: {0}</div>' -f (ConvertTo-LVHtmlEncoded $note))
         }
@@ -1339,7 +1395,8 @@ footer{color:var(--over);font-size:12px;margin-top:36px;border-top:1px solid var
         Add-LVLine $sb '<section class="f" aria-labelledby="crash-heading"><h2 id="crash-heading">Crash evidence on disk</h2>'
         Add-LVLine $sb '<div class="meta">Report.wer fields and supported kernel dump headers are decoded. Naming a driver from a dump stack still needs a debugger and symbols.</div>'
         foreach ($c in $Result.CrashArtifacts) {
-            Add-LVLine $sb ('<div class="row"><div class="lbl">{0}</div><div>{1:yyyy-MM-dd HH:mm} &middot; {2}</div></div>' -f $c.Kind, $c.When, (ConvertTo-LVHtmlEncoded $c.Path))
+            Add-LVHtml -Builder $sb -Format '<div class="row"><div class="lbl">{0}</div><div>{1} &middot; {2}</div></div>' `
+                -Arguments @($c.Kind, (Format-LVWhen $c.When), $c.Path)
             if ($c.Kind -eq 'minidump' -and $c.BugCheckCode) {
                 Add-LVLine $sb ('<div class="meta">Bug check {0} ({1}); parameters {2}</div>' -f (ConvertTo-LVHtmlEncoded $c.BugCheckCode), (ConvertTo-LVHtmlEncoded $c.Architecture), (ConvertTo-LVHtmlEncoded (@($c.BugCheckParameters) -join ', ')))
             } elseif ($c.Kind -eq 'wer' -and $c.Decoded) {
