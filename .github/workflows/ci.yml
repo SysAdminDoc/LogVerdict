@@ -25,7 +25,7 @@ jobs:
         shell: ${{ matrix.shell }}
         run: |
           $ErrorActionPreference = 'Stop'
-          Install-Module Pester -RequiredVersion 5.9.0 -Scope CurrentUser -Force -AllowClobber
+          Install-Module Pester -RequiredVersion 6.0.1 -Scope CurrentUser -Force -AllowClobber
           Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -AllowClobber
           Install-Module ps2exe -RequiredVersion 1.0.18 -Scope CurrentUser -Force -AllowClobber
 
@@ -48,8 +48,21 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $runtime = '${{ matrix.shell }}'
           $exe = if ($runtime -eq 'powershell') { 'powershell.exe' } else { 'pwsh.exe' }
-          & $exe -NoProfile -STA -ExecutionPolicy Bypass -Command "Import-Module Pester -RequiredVersion 5.9.0; Invoke-Pester -Path .\Tests -CI -Output Normal"
-          if (-not $?) { exit 1 }
+          $configuration = @'
+          $config = New-PesterConfiguration
+          $config.Run.Path = '.\Tests'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Normal'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = 'testResults.xml'
+          $config.TestResult.OutputFormat = 'NUnitXml'
+          Import-Module Pester -RequiredVersion 6.0.1 -Force
+          Invoke-Pester -Configuration $config
+          '@
+          $scriptPath = Join-Path $env:RUNNER_TEMP 'logverdict-pester-run.ps1'
+          Set-Content -LiteralPath $scriptPath -Value $configuration -Encoding UTF8
+          & $exe -NoProfile -STA -ExecutionPolicy Bypass -File $scriptPath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run GUI accessibility and scaling smoke matrix
         shell: ${{ matrix.shell }}
@@ -152,7 +165,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Install-Module Pester -RequiredVersion 5.9.0 -Scope CurrentUser -Force -AllowClobber
+          Install-Module Pester -RequiredVersion 6.0.1 -Scope CurrentUser -Force -AllowClobber
           Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -AllowClobber
           Install-Module ps2exe -RequiredVersion 1.0.18 -Scope CurrentUser -Force -AllowClobber
 

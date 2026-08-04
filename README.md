@@ -229,7 +229,7 @@ The helper reads the two supported PowerShell CVEs from the NVD 2.0 API, derives
 
 Case profiles make a scan repeatable without copying raw event messages. `New-LogVerdictCaseProfile` records the selected sources, time bounds, redaction policy, operator choices, notes, and per-source SHA-256 values under a canonical profile id. `Invoke-LogVerdictScan -CaseProfilePath` attaches a validated profile for attribution; it does not override explicit scan parameters. `Export-LogVerdictHandoff` writes the profile, reviewable KAPE and Velociraptor collection recipes, deterministic attributed Timesketch and Hayabusa CSV timelines, and `LogVerdict-Timeline.jsonl`. The JSONL file is UTF-8 without a BOM, emits one versioned metadata/event/finding/correlation/coverage/provider object per line, normalizes timestamps to UTC, carries provider/channel/event/record IDs and rule provenance, and states whether the line is raw or redacted. It is written incrementally and atomically, so large handoffs do not create a second complete output graph. Timesketch rows include `message`, `datetime`, and `timestamp_desc`; source hashes and the profile id remain on every handoff row. The handoff contains normalized findings, not raw EVTX.
 The cache declares a 60-day UTC freshness threshold and reports fresh, stale, or unavailable state in advisory scan context. A stale or unavailable cache never changes event findings, WorstVerdict, or the event exit code. Ordinary push and pull-request quality gates warn when the cache is stale; the package release validation gate rejects stale metadata until the cache is refreshed.
-The shipped coverage manifest records Windows PowerShell 5.1 and PowerShell 7.6 LTS verification, plus the pinned Pester 5.9.0, PSScriptAnalyzer 1.25.0, and ps2exe 1.0.18 roles and runtimes. The CI Core leg fails closed below PowerShell 7.6; Windows PowerShell 5.1 remains the Desktop-edition floor.
+The shipped coverage manifest records Windows PowerShell 5.1 and PowerShell 7.6 LTS verification, plus the pinned Pester 6.0.1, PSScriptAnalyzer 1.25.0, and ps2exe 1.0.18 roles and runtimes. The CI Core leg fails closed below PowerShell 7.6; Windows PowerShell 5.1 remains the Desktop-edition floor.
 
 `-Format Csv` writes `LogVerdict-Report.csv` with one scalar row per ordinary finding. Its stable columns include
 the scan identity, source (`event`, `text`, or `reliability`), provider and event id, occurrence count and rate,
@@ -607,8 +607,8 @@ Unknown signatures also inspect the timestamps retained inside each signature. A
 burst with its onset and window in the console, text, HTML, JSON, and CSV outputs; the verdict remains `unknown`
 because timing is evidence to triage, not proof of a cause. A regular trickle is left unlabelled.
 
-Tests need the pinned [Pester](https://pester.dev/) 5.9.0 contract. Pester 6 is reported as an
-advisory until the suite is migrated:
+Tests use the pinned [Pester](https://pester.dev/) 6.0.1 contract. Mock assertions use Pester 6's
+`Should -Invoke` operators, and the suite runs on both Windows PowerShell 5.1 and PowerShell 7.6:
 
 ```powershell
 Invoke-Pester -Path .\Tests

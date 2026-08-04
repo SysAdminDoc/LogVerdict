@@ -1,4 +1,4 @@
-#requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
+#requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '6.0.1' }
 
 BeforeAll {
     $script:ModulePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'LogVerdict.psd1'
@@ -705,7 +705,7 @@ Describe 'Dependency advisory knowledge' {
             @($database.coverage.runtime.verifiedRuntimes) | Should -Contain 'Windows PowerShell 5.1'
             @($database.coverage.runtime.verifiedRuntimes) | Should -Contain 'PowerShell 7.6 LTS'
             foreach ($tool in @(
-                [pscustomobject]@{ Name = 'Pester'; Version = '5.9.0' }
+                [pscustomobject]@{ Name = 'Pester'; Version = '6.0.1' }
                 [pscustomobject]@{ Name = 'PSScriptAnalyzer'; Version = '1.25.0' }
                 [pscustomobject]@{ Name = 'ps2exe'; Version = '1.0.18' }
             )) {
@@ -1801,7 +1801,7 @@ Describe 'Channel access classification' {
             $status['Fake'].Access | Should -BeExactly 'readable'
             $status['Fake'].IsEnabled | Should -BeFalse
             $status['Fake'].Reason | Should -Match 'disabled'
-            Assert-MockCalled Get-WinEvent -Times 0 -ParameterFilter { $LogName -eq 'Fake' }
+            Should -Invoke Get-WinEvent -Times 0 -ParameterFilter { $LogName -eq 'Fake' }
         }
     }
 
@@ -2481,7 +2481,7 @@ Describe 'SetupDiag Panther integration' {
             $signature = @(Group-LVSignature -Record @($status.Records[0]) -WindowDays 1)[0]
             $finding = @(Resolve-LVVerdict -Signature @($signature) -Database (Get-LogVerdictDatabase))[0]
             $finding.RuleId | Should -BeExactly 'LV-0327'
-            Assert-MockCalled Invoke-LVSetupDiagProcess -Times 0 -Exactly -Scope It
+            Should -Invoke Invoke-LVSetupDiagProcess -Times 0 -Exactly -Scope It
         }
     }
 
@@ -2508,7 +2508,7 @@ Describe 'SetupDiag Panther integration' {
             @($status.Records).Count | Should -Be 1
             $status.Records[0].ProfileGuid | Should -BeExactly 'A4028172-1B09-48F8-AD3B-86CDD7D55852'
             $status.Records[0].ResultCode | Should -BeExactly '0x80070057'
-            Assert-MockCalled Invoke-LVSetupDiagProcess -Times 0 -Exactly -Scope It
+            Should -Invoke Invoke-LVSetupDiagProcess -Times 0 -Exactly -Scope It
         }
     }
 
@@ -2540,7 +2540,7 @@ Describe 'SetupDiag Panther integration' {
             $status.ExecutionStatus | Should -BeExactly 'executed'
             @($status.Records).Count | Should -Be 1
             $status.Records[0].Provenance | Should -BeExactly 'executed'
-            Assert-MockCalled Invoke-LVSetupDiagProcess -Times 1 -Exactly -Scope It -ParameterFilter {
+            Should -Invoke Invoke-LVSetupDiagProcess -Times 1 -Exactly -Scope It -ParameterFilter {
                 $ExecutablePath -eq $exe -and $LogsPath -eq $root -and $TimeoutSeconds -eq 120
             }
         }
@@ -2562,8 +2562,8 @@ Describe 'SetupDiag Panther integration' {
             $status.Status | Should -BeExactly 'untrusted'
             $status.Message | Should -Match 'Authenticode trust policy'
             $status.CoverageNote | Should -BeExactly $status.Message
-            Assert-MockCalled Test-LVSetupDiagExecutableTrust -Times 1 -Exactly -Scope It
-            Assert-MockCalled Invoke-LVSetupDiagProcess -Times 0 -Exactly -Scope It
+            Should -Invoke Test-LVSetupDiagExecutableTrust -Times 1 -Exactly -Scope It
+            Should -Invoke Invoke-LVSetupDiagProcess -Times 0 -Exactly -Scope It
         }
     }
 
@@ -2584,8 +2584,8 @@ Describe 'SetupDiag Panther integration' {
 
             $status = Get-LVSetupDiagRecord -DaysBack 1 -LogCandidate @($root)
             $status.Status | Should -BeExactly 'matched'
-            Assert-MockCalled Test-LVSetupDiagExecutableTrust -Times 1 -Exactly -Scope It
-            Assert-MockCalled Invoke-LVSetupDiagProcess -Times 1 -Exactly -Scope It
+            Should -Invoke Test-LVSetupDiagExecutableTrust -Times 1 -Exactly -Scope It
+            Should -Invoke Invoke-LVSetupDiagProcess -Times 1 -Exactly -Scope It
         }
     }
 
@@ -2599,7 +2599,7 @@ Describe 'SetupDiag Panther integration' {
             $status.Status | Should -BeExactly 'absent'
             $status.Message | Should -Match 'built-in text rules'
             @($status.Records).Count | Should -Be 0
-            Assert-MockCalled Invoke-LVSetupDiagProcess -Times 0 -Exactly -Scope It
+            Should -Invoke Invoke-LVSetupDiagProcess -Times 0 -Exactly -Scope It
         }
     }
 
@@ -2981,7 +2981,7 @@ Describe 'Event collection failure handling' {
             $status = @{ Fake = [pscustomobject]@{ Access='readable'; IsEnabled=$false; Reason=$null } }
             $rec = @(Get-LVEventRecord -Channel @('Fake') -DaysBack 30 -ChannelStatus $status)
             $rec.Count | Should -Be 0
-            Assert-MockCalled Get-WinEvent -Times 0
+            Should -Invoke Get-WinEvent -Times 0
             $script:LVEventCoverage[0].Status | Should -BeExactly 'disabled'
             $script:LVEventCoverage[0].Reason | Should -Match 'disabled'
         }
@@ -3301,7 +3301,7 @@ Describe 'Provider and configuration health profiles' {
             $evidence.Records.Count | Should -Be 1
             $evidence.Records[0].Origin | Should -BeExactly 'shadow-copy'
             $evidence.Coverage[0].Status | Should -BeExactly 'readable'
-            Assert-MockCalled Read-LVArchivedEventFile -Times 1 -Exactly
+            Should -Invoke Read-LVArchivedEventFile -Times 1 -Exactly
         }
     }
 
@@ -4140,7 +4140,7 @@ Describe 'Local model explanations' {
             }
 
             $out = @(Add-LVModelExplanation -Finding @($finding) -Model 'test-model')
-            Assert-MockCalled Invoke-RestMethod -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-RestMethod -Times 1 -Exactly -ParameterFilter {
                 $Method -eq 'Post' -and $Uri -eq 'http://127.0.0.1:11434/api/generate'
             }
             $body = $script:LVModelRequestBody | ConvertFrom-Json
@@ -4186,7 +4186,7 @@ Describe 'Local model explanations' {
             Mock Invoke-RestMethod { throw 'should not be called' }
             $known = [pscustomobject]@{ Key='Acme/1'; Verdict='actionable'; RuleId='LV-0001' }
             $out = @(Add-LVModelExplanation -Finding @($known))
-            Assert-MockCalled Invoke-RestMethod -Times 0 -Exactly
+            Should -Invoke Invoke-RestMethod -Times 0 -Exactly
             $out[0].PSObject.Properties.Name | Should -Not -Contain 'ModelExplanation'
         }
     }
@@ -6408,7 +6408,7 @@ Describe 'Rule provenance' {
             $status = Get-LVChannelStatus -Channel @('Fake') -Metadata $script:LVChannelMetadata
             $status['Fake'].Access | Should -BeExactly 'readable'
             $status['Fake'].RecordCount | Should -Be 2
-            Assert-MockCalled Get-WinEvent -Times 0 -ParameterFilter { $ListLog -eq 'Fake' }
+            Should -Invoke Get-WinEvent -Times 0 -ParameterFilter { $ListLog -eq 'Fake' }
         }
     }
 
@@ -6895,10 +6895,10 @@ Describe 'Offline evidence analysis' {
             $result.DaysBack | Should -Be 9
             $result.Findings[0].RuleId | Should -Be 'LV-0091'
             $result.CoverageNotes | Should -Contain 'The package contains no raw event channel export. Findings were re-evaluated from the captured report summaries only.'
-            Assert-MockCalled Get-LVChannelStatus -Times 0
-            Assert-MockCalled Get-LVTextLogRecord -Times 0
-            Assert-MockCalled Get-LVReliabilityRecord -Times 0
-            Assert-MockCalled Get-LVCrashArtifact -Times 0
+            Should -Invoke Get-LVChannelStatus -Times 0
+            Should -Invoke Get-LVTextLogRecord -Times 0
+            Should -Invoke Get-LVReliabilityRecord -Times 0
+            Should -Invoke Get-LVCrashArtifact -Times 0
         }
     }
 
@@ -7836,7 +7836,7 @@ Describe 'Reliability Monitor collection' {
             $script:LVReliabilityAvailable | Should -BeFalse
             $script:LVReliabilityStatus | Should -BeExactly 'policy-disabled'
             $script:LVReliabilitySkipReason | Should -Match 'WMIEnable=0'
-            Assert-MockCalled Get-CimInstance -Times 0
+            Should -Invoke Get-CimInstance -Times 0
         }
     }
 

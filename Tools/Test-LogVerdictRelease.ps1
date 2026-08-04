@@ -156,7 +156,7 @@ if ($PSVersionTable.PSVersion -lt [version]'5.1') {
 }
 
 foreach ($requiredTool in @(
-        [pscustomobject]@{ Name = 'Pester'; Version = '5.9.0' }
+        [pscustomobject]@{ Name = 'Pester'; Version = '6.0.1' }
         [pscustomobject]@{ Name = 'PSScriptAnalyzer'; Version = '1.25.0' }
         [pscustomobject]@{ Name = 'ps2exe'; Version = '1.0.18' }
     )) {
@@ -292,7 +292,7 @@ foreach ($runtimeName in @('Windows PowerShell 5.1', 'PowerShell 7.6 LTS')) {
     }
 }
 foreach ($requiredTool in @(
-    [pscustomobject]@{ Name = 'Pester'; Version = '5.9.0' }
+    [pscustomobject]@{ Name = 'Pester'; Version = '6.0.1' }
     [pscustomobject]@{ Name = 'PSScriptAnalyzer'; Version = '1.25.0' }
     [pscustomobject]@{ Name = 'ps2exe'; Version = '1.0.18' }
 )) {

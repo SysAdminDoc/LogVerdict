@@ -50,12 +50,17 @@ $env:LOGVERDICT_TEST_HIGH_CONTRAST = $(if ($Theme -eq 'HighContrast') { '1' } el
 $env:LOGVERDICT_TEST_DPI_SCALE = ([double]$ScalePercent / 100).ToString(
     '0.##', [Globalization.CultureInfo]::InvariantCulture)
 
-Import-Module Pester -RequiredVersion 5.9.0 -Force
+Import-Module Pester -RequiredVersion 6.0.1 -Force
 $testPath = if ($TestPath) { $TestPath } else { Join-Path $repoRoot 'Tests\LogVerdict.Tests.ps1' }
 if (-not (Test-Path -LiteralPath $testPath -PathType Leaf)) {
     throw "GUI Pester test path was not found: $testPath"
 }
-$result = Invoke-Pester -Path $testPath -FullNameFilter 'GUI*' -Output Normal -PassThru
+$configuration = New-PesterConfiguration
+$configuration.Run.Path = $testPath
+$configuration.Run.PassThru = $true
+$configuration.Filter.FullName = 'GUI*'
+$configuration.Output.Verbosity = 'Normal'
+$result = Invoke-Pester -Configuration $configuration
 if ($result.FailedCount -gt 0) {
     exit 1
 }

@@ -4,13 +4,13 @@
   "dependencies": [
     {
       "name": "Pester",
-      "version": "5.9.0",
+      "version": "6.0.1",
       "purpose": "test",
       "source": "PowerShell Gallery",
       "hashKind": "module-file-manifest",
-      "contentSha256": "f5dcee019795b826340c76ae9ddfd0192bd31ab20eca75c444d107f50e6cf57d",
-      "fileCount": 18,
-      "totalBytes": 1145464
+      "contentSha256": "067aee7a43f5b7e130514200b6c0f21cf871843d3f119d8b8df18003219eec13",
+      "fileCount": 16,
+      "totalBytes": 1422171
     },
     {
       "name": "PSScriptAnalyzer",
