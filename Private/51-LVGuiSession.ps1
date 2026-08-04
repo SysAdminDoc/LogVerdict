@@ -31,7 +31,8 @@ function New-LVGuiSession {
     )
 
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
-    $savedSettings = Get-LVGuiSetting
+    $settingsStatus = $null
+    $savedSettings = Get-LVGuiSetting -Status ([ref]$settingsStatus)
     $initialDays = $DaysBack
     if (-not $DaysBackExplicit -and $savedSettings) {
         $initialDays = $savedSettings.DaysBack
@@ -65,6 +66,10 @@ function New-LVGuiSession {
             throw ("LogVerdict markup is missing the element '{0}'." -f $name)
         }
         $ui[$name] = $element
+    }
+    if ($settingsStatus -and $settingsStatus.State -notin @('loaded', 'missing')) {
+        $ui.TxtSettingsStatus.Text = $settingsStatus.Reason
+        $ui.TxtSettingsStatus.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'Yellow')
     }
 
     $themeSnapshot = Get-LVGuiThemeSnapshot -Window $window
@@ -146,6 +151,7 @@ function New-LVGuiSession {
         PageControl = $pageControl
         NavControl = $navControl
         DocumentationScreenshotPath = $DocumentationScreenshotPath
+        SettingsStatus = $settingsStatus
         SystemThemeChanged = $null
         Actions = [ordered]@{}
         InitialDays = $initialDays

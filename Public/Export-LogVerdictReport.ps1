@@ -156,17 +156,24 @@ function Export-LogVerdictReport {
 
         $bundle = $null
         $privacyAudit = $null
+        $bundleStatus = [pscustomobject][ordered]@{
+            State  = 'not-requested'
+            Reason = 'Evidence packaging was not requested.'
+            Path   = $null
+        }
         if ($IncludeEvidence) {
             $bundle = New-LVEvidenceBundle -Result $Result -OutputDir $OutputDir `
                 -ReportFile @($written.ToArray()) -Redact:$Redact -AllowRawEvidence:$AllowRawEvidence `
                 -ProviderTemplatePath $ProviderTemplatePath `
-                -OriginalMachineName $folderMachine -OriginalUserName $env:USERNAME -Audit ([ref]$privacyAudit)
+                -OriginalMachineName $folderMachine -OriginalUserName $env:USERNAME -Audit ([ref]$privacyAudit) `
+                -Status ([ref]$bundleStatus)
         }
 
         return [pscustomobject]@{
             OutputDir      = $OutputDir
             Files          = @($written.ToArray())
             EvidenceBundle = $bundle
+            EvidenceBundleStatus = $bundleStatus
             PrivacyAudit   = $privacyAudit
         }
     }

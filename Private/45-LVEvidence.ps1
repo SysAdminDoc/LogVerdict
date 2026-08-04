@@ -271,11 +271,28 @@ function New-LVEvidenceBundle {
         [AllowNull()][string]$ProviderTemplatePath,
         [AllowNull()][string]$OriginalMachineName,
         [AllowNull()][string]$OriginalUserName,
-        [AllowNull()][ref]$Audit
+        [AllowNull()][ref]$Audit,
+        [AllowNull()][ref]$Status
     )
 
-    if (-not $PSCmdlet.ShouldProcess($OutputDir, 'Write an evidence bundle')) { return $null }
+    $hasStatus = $null -ne $Status
+    $setStatus = {
+        param([string]$State, [string]$Reason, [AllowNull()][string]$Path)
+        if ($hasStatus) {
+            $Status.Value = [pscustomobject][ordered]@{
+                State  = $State
+                Reason = $Reason
+                Path   = $Path
+            }
+        }
+    }
+
+    if (-not $PSCmdlet.ShouldProcess($OutputDir, 'Write an evidence bundle')) {
+        $null = & $setStatus 'declined' 'Evidence packaging was declined by the operator or WhatIf policy.' $null
+        return $null
+    }
     if (-not $Redact -and -not $AllowRawEvidence) {
+        $null = & $setStatus 'rejected' 'Raw evidence packaging requires the explicit -AllowRawEvidence override.' $null
         throw 'Raw evidence packaging requires the explicit -AllowRawEvidence override.'
     }
 
@@ -349,8 +366,10 @@ function New-LVEvidenceBundle {
     $content.Add($manifestPath) | Out-Null
 
     if ($Redact -and -not $privacyAudit.Sanitized) {
-        Write-LVLog -Level error -Message ('Privacy audit blocked the redacted bundle: {0} finding(s). Staging was retained at {1} for review.' -f `
-            $privacyAudit.FindingCount, $staging)
+        $reason = 'Privacy audit blocked the redacted bundle: {0} finding(s). Staging was retained at {1} for review.' -f `
+            $privacyAudit.FindingCount, $staging
+        $null = & $setStatus 'privacy-blocked' $reason $staging
+        Write-LVLog -Level error -Message $reason
         return $null
     }
 
@@ -362,7 +381,9 @@ function New-LVEvidenceBundle {
         Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
         [System.IO.Compression.ZipFile]::CreateFromDirectory($staging, $zip)
     } catch {
-        Write-LVLog -Level error -Message ('Could not write the evidence bundle: {0}' -f $_.Exception.Message)
+        $reason = 'Could not write the evidence bundle: {0}' -f $_.Exception.Message
+        $null = & $setStatus 'write-failed' $reason $staging
+        Write-LVLog -Level error -Message $reason
         return $null
     }
 
@@ -400,7 +421,9 @@ function New-LVEvidenceBundle {
                 $content.Add($manifestPath) | Out-Null
                 Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
                 try { [System.IO.Compression.ZipFile]::CreateFromDirectory($staging, $zip) } catch {
-                    Write-LVLog -Level error -Message ('Could not write the size-bounded evidence bundle: {0}' -f $_.Exception.Message)
+                    $reason = 'Could not write the size-bounded evidence bundle: {0}' -f $_.Exception.Message
+                    $null = & $setStatus 'write-failed' $reason $staging
+                    Write-LVLog -Level error -Message $reason
                     return $null
                 }
             }
@@ -408,7 +431,9 @@ function New-LVEvidenceBundle {
             $zipBytes = [int64](Get-Item -LiteralPath $zip).Length
             if ($zipBytes -gt $budget) {
                 Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
-                Write-LVLog -Level error -Message ('Redacted evidence bundle remains {0:N0} bytes after raw-evidence reduction; the {1:N0}-byte pre-base64 budget is a hard limit. Staging was retained at {2}.' -f $zipBytes, $budget, $staging)
+                $reason = 'Redacted evidence bundle remains {0:N0} bytes after raw-evidence reduction; the {1:N0}-byte pre-base64 budget is a hard limit. Staging was retained at {2}.' -f $zipBytes, $budget, $staging
+                $null = & $setStatus 'budget-exceeded' $reason $staging
+                Write-LVLog -Level error -Message $reason
                 return $null
             }
         }
@@ -424,13 +449,17 @@ function New-LVEvidenceBundle {
         $content.Add($manifestPath) | Out-Null
         Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
         try { [System.IO.Compression.ZipFile]::CreateFromDirectory($staging, $zip) } catch {
-            Write-LVLog -Level error -Message ('Could not finalize the size-bounded evidence bundle: {0}' -f $_.Exception.Message)
+            $reason = 'Could not finalize the size-bounded evidence bundle: {0}' -f $_.Exception.Message
+            $null = & $setStatus 'write-failed' $reason $staging
+            Write-LVLog -Level error -Message $reason
             return $null
         }
         $zipBytes = [int64](Get-Item -LiteralPath $zip).Length
         if ($zipBytes -gt $budget) {
             Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
-            Write-LVLog -Level error -Message ('Final redacted evidence bundle is {0:N0} bytes, over the {1:N0}-byte pre-base64 budget; staging was retained at {2}.' -f $zipBytes, $budget, $staging)
+            $reason = 'Final redacted evidence bundle is {0:N0} bytes, over the {1:N0}-byte pre-base64 budget; staging was retained at {2}.' -f $zipBytes, $budget, $staging
+            $null = & $setStatus 'budget-exceeded' $reason $staging
+            Write-LVLog -Level error -Message $reason
             return $null
         }
     }
@@ -441,5 +470,6 @@ function New-LVEvidenceBundle {
 
     $size = [math]::Round((Get-Item -LiteralPath $zip).Length / 1MB, 1)
     Write-LVLog -Level ok -Message ('Evidence bundle: {0} ({1} MB)' -f $zip, $size)
+    $null = & $setStatus 'created' 'Evidence bundle created.' $zip
     return $zip
 }

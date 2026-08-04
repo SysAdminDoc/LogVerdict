@@ -1420,7 +1420,46 @@ Describe 'Bundled Microsoft error catalog' {
               $source.revision | Should -Match '^[0-9a-f]{40}$'
               $source.licence | Should -BeExactly 'CC-BY-4.0'
               $source.licenceHash | Should -Match '^[0-9a-f]{64}$'
-          }
+        }
+    }
+
+    It 'warns once and carries a coverage note when the catalog is unavailable' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $catalogPath = Join-Path $Root 'error-codes.json'
+            '{"schemaVersion":3,"entries":' | Set-Content -LiteralPath $catalogPath -Encoding UTF8
+            $oldDataDir = $script:LVDataDir
+            $oldCache = $script:LVErrorCatalogCache
+            $oldFailureLog = $script:LVErrorCatalogFailureLog
+            $oldLogLines = $script:LVLogLines
+            $oldLogLinesTruncated = $script:LVLogLinesTruncated
+            try {
+                $script:LVDataDir = $Root
+                $script:LVErrorCatalogCache = @{}
+                $script:LVErrorCatalogFailureLog = @{}
+                $script:LVLogLines = New-Object System.Collections.Generic.List[string]
+                $script:LVLogLinesTruncated = $false
+                $signature = [pscustomobject]@{ SampleMessage = 'error code 0xC1900101' }
+
+                $first = Get-LVErrorCatalogMatch -Signature $signature
+                $second = Get-LVErrorCatalogMatch -Signature $signature
+                $first.ErrorCatalogStatus | Should -BeExactly 'unavailable'
+                $second.ErrorCatalogStatus | Should -BeExactly 'unavailable'
+                @($script:LVLogLines | Where-Object { $_ -match 'Error catalog unavailable' }).Count | Should -Be 1
+
+                Add-LVErrorCatalogContext -Signature $signature -Match $first
+                $signature.ErrorCatalogStatus | Should -BeExactly 'unavailable'
+                $signature.ErrorCatalogReason | Should -Not -BeNullOrEmpty
+                Get-LVErrorCatalogCoverageNote -Finding @($signature) |
+                    Should -BeExactly 'The Microsoft error catalog could not be validated, so error-code names and explanations were unavailable for this scan. Repair the catalog before relying on unknown-signature context.'
+            } finally {
+                $script:LVDataDir = $oldDataDir
+                $script:LVErrorCatalogCache = $oldCache
+                $script:LVErrorCatalogFailureLog = $oldFailureLog
+                $script:LVLogLines = $oldLogLines
+                $script:LVLogLinesTruncated = $oldLogLinesTruncated
+            }
+        }
     }
 
     It 'continues to load legacy schema v2 catalogs' {
@@ -5447,8 +5486,12 @@ Describe 'GUI settings persistence' {
                 '{"schemaVersion":1,"daysBack":30,"allChannels":false,"skipTextLogs":false,"includeBenign":false,"diagnosticChannels":"false","windowWidth":1440,"windowHeight":800}'
             )) {
                 Set-Content -LiteralPath $path -Value $content -Encoding UTF8
-                { Get-LVGuiSetting -Path $path } | Should -Not -Throw
-                $null -eq (Get-LVGuiSetting -Path $path) | Should -BeTrue
+                $status = $null
+                { Get-LVGuiSetting -Path $path -Status ([ref]$status) } | Should -Not -Throw
+                $read = Get-LVGuiSetting -Path $path -Status ([ref]$status)
+                $read | Should -BeNullOrEmpty
+                $status.State | Should -BeIn @('invalid', 'unreadable')
+                $status.Reason | Should -Not -BeNullOrEmpty
             }
         }
     }
@@ -5548,6 +5591,44 @@ Describe 'GUI pure presentation logic' {
             $projection.VerdictCounts.investigate | Should -Be 1
             @($projection.VerdictCounts.Keys).Count | Should -Be 6
             @($projection.CorrelationIdsByKey['event|System|7']) | Should -BeExactly @('C-1')
+        }
+    }
+
+    It 'reveals a priority finding hidden by the active findings filters' {
+        InModuleScope LogVerdict {
+            $row = [pscustomobject]@{
+                Verdict='actionable'; Title='Priority failure'; Source='event'; Channel='System'; Provider='Disk'; EventId='7'
+                RuleStatus='stable'; CorrelationIds=@(); Haystack='priority failure on disk'
+            }
+            $ui = [pscustomobject]@{
+                TxtStatus=[pscustomobject]@{ Text='' }
+                TxtSearch=[pscustomobject]@{ Text='disk' }
+                TxtSearchHint=[pscustomobject]@{ Visibility='Collapsed' }
+            }
+            $state = @{
+                View=$null; Rows=@($row); FindingStore=@($row); Search='disk'
+                Chips=@{ critical=$true; actionable=$false; investigate=$true; unknown=$true; informational=$true; benign=$true }
+                StructuredFilters=@{ Source='event'; Channel=''; Provider='Disk'; EventId=''; Correlation=''; RuleStatus='' }
+            }
+            $chips = @{}
+            foreach ($verdict in $script:LVVerdictDisplayOrder) {
+                $chips[$verdict] = [pscustomobject]@{ IsChecked=$false }
+            }
+            $filters = @{}
+            foreach ($kind in $state.StructuredFilters.Keys) {
+                $filters[$kind] = [pscustomobject]@{ SelectedIndex=4 }
+            }
+            $context = [pscustomobject]@{
+                Ui=$ui; State=$state; Window=[pscustomobject]@{}; StructuredFilterControl=$filters; ChipControl=$chips
+                PageControl=@{}; NavControl=@{}; ActivityMaxLines=100; ActivityMaxCharacters=1000
+            }
+
+            $actions = New-LVGuiActions -Context $context
+            (& $actions.RevealPriorityFinding $row) | Should -BeTrue
+            $state.Search | Should -BeExactly ''
+            @($state.Chips.Values | Where-Object { -not $_ }).Count | Should -Be 0
+            @($state.StructuredFilters.Values | Where-Object { $_ }).Count | Should -Be 0
+            $ui.TxtStatus.Text | Should -Match 'hidden by active filters; filters were cleared'
         }
     }
 
@@ -6795,11 +6876,14 @@ Describe 'Evidence bundle' {
                 Findings=@(); Correlations=@(); Coverage=@(); HealthProfiles=@(); CoverageNotes=@()
             }
             $audit = $null
+            $status = $null
             $zip = New-LVEvidenceBundle -Result $result -OutputDir $dir -ReportFile @($report) -Redact `
-                -OriginalMachineName 'HOST-9' -OriginalUserName 'jsmith' -Audit ([ref]$audit)
+                -OriginalMachineName 'HOST-9' -OriginalUserName 'jsmith' -Audit ([ref]$audit) -Status ([ref]$status)
             $zip | Should -BeNullOrEmpty
             $audit.Status | Should -BeExactly 'blocked'
             $audit.FindingCount | Should -BeGreaterThan 0
+            $status.State | Should -BeExactly 'privacy-blocked'
+            $status.Reason | Should -Match 'Privacy audit blocked'
             Test-Path -LiteralPath (Join-Path $dir 'evidence') | Should -BeTrue
             (Get-Content -LiteralPath (Join-Path $dir 'evidence\PRIVACY-AUDIT.json') -Raw) | Should -Not -Match 'not-safe-to-share'
         }
@@ -6823,7 +6907,21 @@ Describe 'Evidence bundle' {
         $dir = Join-Path $TestDrive 'bundle-none'
         $out = Export-LogVerdictReport -Result $script:Scan -OutputDir $dir 6>$null
         $out.EvidenceBundle | Should -BeNullOrEmpty
+        $out.EvidenceBundleStatus.State | Should -BeExactly 'not-requested'
+        $out.EvidenceBundleStatus.Reason | Should -Match 'not requested'
         @(Get-ChildItem -LiteralPath $dir -Filter '*.zip').Count | Should -Be 0
+    }
+
+    It 'reports when evidence packaging is declined by WhatIf policy' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive; Scan = $script:Scan } {
+            param($Root, $Scan)
+            $status = $null
+            $zip = New-LVEvidenceBundle -Result $Scan -OutputDir (Join-Path $Root 'bundle-declined') `
+                -ReportFile @() -Redact -WhatIf -Status ([ref]$status) 6>$null
+            $zip | Should -BeNullOrEmpty
+            $status.State | Should -BeExactly 'declined'
+            $status.Reason | Should -Match 'declined'
+        }
     }
 
     It 'removes the staging directory once the zip exists' {

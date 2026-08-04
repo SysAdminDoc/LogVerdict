@@ -7,10 +7,13 @@ function New-LVGuiActions {
     $ui = $Context.Ui
     $state = $Context.State
     $window = $Context.Window
+    $structuredFilterControl = $Context.StructuredFilterControl
+    $chipControl = $Context.ChipControl
     $pageControl = $Context.PageControl
     $navControl = $Context.NavControl
     $activityMaxLines = $Context.ActivityMaxLines
     $activityMaxCharacters = $Context.ActivityMaxCharacters
+    $testFindingVisible = ${function:Test-LVGuiFindingVisible}
 
     $setStatus = {
         param([string]$Message)
@@ -65,6 +68,30 @@ function New-LVGuiActions {
         } else {
             $ui.PnlEmpty.Visibility = 'Collapsed'
         }
+    }.GetNewClosure()
+
+    $revealPriorityFinding = {
+        param($Row)
+        if ($null -eq $Row) { return $false }
+        $visible = & $testFindingVisible -Row $Row -EnabledVerdict $state.Chips `
+            -Search $state.Search -StructuredFilter $state.StructuredFilters
+        if ($visible) { return $false }
+
+        $state.Search = ''
+        $ui.TxtSearch.Text = ''
+        $ui.TxtSearchHint.Visibility = 'Visible'
+        foreach ($verdict in @($state.Chips.Keys)) {
+            $state.Chips[$verdict] = $true
+            if ($chipControl.ContainsKey($verdict)) { $chipControl[$verdict].IsChecked = $true }
+        }
+        foreach ($kind in @($state.StructuredFilters.Keys)) {
+            $state.StructuredFilters[$kind] = ''
+            if ($structuredFilterControl.ContainsKey($kind)) { $structuredFilterControl[$kind].SelectedIndex = 0 }
+        }
+        & $applyFilter
+        $title = if ($Row.PSObject.Properties['Title'] -and $Row.Title) { [string]$Row.Title } else { 'This finding' }
+        & $setStatus ('{0} was hidden by active filters; filters were cleared so it can be selected.' -f $title)
+        return $true
     }.GetNewClosure()
 
     $resolveFinding = {
@@ -267,6 +294,7 @@ function New-LVGuiActions {
         ApplyFilter = $applyFilter
         ResolveFinding = $resolveFinding
         ShowDetail = $showDetail
+        RevealPriorityFinding = $revealPriorityFinding
         RenderActivity = $renderActivity
         AppendLog = $appendLog
         DrainLog = $drainLog

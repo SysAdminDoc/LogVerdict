@@ -4,6 +4,7 @@
 $script:LVErrorCatalogSchemaVersionMin = 2
 $script:LVErrorCatalogSchemaVersionMax = 3
 $script:LVErrorCatalogKinds = @('win32', 'hresult', 'bugcheck', 'ntstatus', 'setup', 'windowsupdate')
+$script:LVErrorCatalogFailureLog = @{}
 
 function Get-LVErrorCatalogSha256 {
     param([Parameter(Mandatory)][string]$Text)
@@ -427,8 +428,18 @@ function Get-LVErrorCatalogMatch {
     try {
         $catalog = Get-LVErrorCatalog
     } catch {
-        Write-Verbose ('Error catalog unavailable; leaving the signature unexplained: {0}' -f $_.Exception.Message)
-        return $null
+        $reason = [string]$_.Exception.Message
+        $failureKey = '{0}|{1}' -f ($script:LVDataDir -as [string]), $reason
+        if (-not $script:LVErrorCatalogFailureLog.ContainsKey($failureKey)) {
+            Write-LVLog -Level warn -Message ('Error catalog unavailable; error-code explanations are disabled for this scan: {0}' -f $reason)
+            $script:LVErrorCatalogFailureLog[$failureKey] = $true
+        }
+        return [pscustomobject]@{
+            Entry              = $null
+            RawCode            = $null
+            ErrorCatalogStatus = 'unavailable'
+            Error              = $reason
+        }
     }
     $sample = ''
     foreach ($property in @('SampleMessage', 'Message', 'Key')) {
@@ -484,6 +495,10 @@ function Add-LVErrorCatalogContext {
         [AllowNull()]$Match
     )
 
+    if ($Match -and $Match.ErrorCatalogStatus) {
+        $Signature | Add-Member -NotePropertyName 'ErrorCatalogStatus' -NotePropertyValue ([string]$Match.ErrorCatalogStatus) -Force
+        $Signature | Add-Member -NotePropertyName 'ErrorCatalogReason' -NotePropertyValue ([string]$Match.Error) -Force
+    }
     if ($null -eq $Match -or $null -eq $Match.Entry) { return }
     $entry = $Match.Entry
     $Signature | Add-Member -NotePropertyName 'ErrorCode' -NotePropertyValue $Match.RawCode -Force
@@ -496,4 +511,12 @@ function Add-LVErrorCatalogContext {
     $Signature | Add-Member -NotePropertyName 'ErrorApplicability' -NotePropertyValue $entry.applicability -Force
     $Signature | Add-Member -NotePropertyName 'ErrorPhase' -NotePropertyValue $entry.phase -Force
     $Signature | Add-Member -NotePropertyName 'ErrorOperation' -NotePropertyValue $entry.operation -Force
+}
+
+function Get-LVErrorCatalogCoverageNote {
+    [CmdletBinding()]
+    param([AllowEmptyCollection()][object[]]$Finding)
+
+    if (@($Finding | Where-Object { $_.ErrorCatalogStatus -eq 'unavailable' }).Count -eq 0) { return $null }
+    return 'The Microsoft error catalog could not be validated, so error-code names and explanations were unavailable for this scan. Repair the catalog before relying on unknown-signature context.'
 }

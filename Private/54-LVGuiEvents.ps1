@@ -166,6 +166,7 @@ function Register-LVGuiInteractionHandlers {
     $showPage = $Context.Actions.ShowPage
     $showDetail = $Context.Actions.ShowDetail
     $applyFilter = $Context.Actions.ApplyFilter
+    $revealPriorityFinding = $Context.Actions.RevealPriorityFinding
     $setStatus = $Context.Actions.SetStatus
     $renderActivity = $Context.Actions.RenderActivity
 
@@ -238,10 +239,12 @@ function Register-LVGuiInteractionHandlers {
     }.GetNewClosure())
 
     $ui.LvPriority.Add_SelectionChanged({
-        if ($null -eq $ui.LvPriority.SelectedItem) { return }
+        $priorityRow = $ui.LvPriority.SelectedItem
+        if ($null -eq $priorityRow) { return }
         & $showPage 'Findings'
-        $ui.LvFindings.SelectedItem = $ui.LvPriority.SelectedItem
-        $ui.LvFindings.ScrollIntoView($ui.LvPriority.SelectedItem)
+        $null = & $revealPriorityFinding $priorityRow
+        $ui.LvFindings.SelectedItem = $priorityRow
+        $ui.LvFindings.ScrollIntoView($priorityRow)
     }.GetNewClosure())
 
     $ui.LvFindings.AddHandler(

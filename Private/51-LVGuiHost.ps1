@@ -62,43 +62,82 @@ function Get-LVGuiSetting {
         reaches WPF.
     #>
     [CmdletBinding()]
-    param([AllowEmptyString()][string]$Path = (Get-LVGuiSettingsPath))
+    param(
+        [AllowEmptyString()][string]$Path = (Get-LVGuiSettingsPath),
+        [AllowNull()][ref]$Status
+    )
 
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    $hasStatus = $null -ne $Status
+    $setStatus = {
+        param([string]$State, [string]$Reason)
+        if ($hasStatus) {
+            $Status.Value = [pscustomobject][ordered]@{
+                State  = $State
+                Reason = $Reason
+                Path   = $Path
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        $null = & $setStatus 'unavailable' 'The per-user application-data location is unavailable; saved GUI settings were not loaded.'
+        return $null
+    }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        $null = & $setStatus 'missing' 'No saved GUI settings were found; safe first-launch defaults are active.'
         return $null
     }
 
     try {
         $data = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($data.schemaVersion -ne 1) { return $null }
+        if ($data.schemaVersion -ne 1) {
+            $null = & $setStatus 'invalid' 'Saved GUI settings use an unsupported schema version; safe defaults are active.'
+            return $null
+        }
 
         $days = 0
         if (-not [int]::TryParse([string]$data.daysBack, [ref]$days) -or $days -lt 1 -or $days -gt 3650) {
+            $null = & $setStatus 'invalid' 'Saved GUI settings contain an invalid daysBack value; safe defaults are active.'
             return $null
         }
         foreach ($name in @('allChannels', 'skipTextLogs', 'includeBenign')) {
-            if ($null -eq $data.PSObject.Properties[$name] -or $data.$name -isnot [bool]) { return $null }
+            if ($null -eq $data.PSObject.Properties[$name] -or $data.$name -isnot [bool]) {
+                $null = & $setStatus 'invalid' ("Saved GUI settings are missing a valid '{0}' option; safe defaults are active." -f $name)
+                return $null
+            }
         }
         foreach ($name in @('diagnosticChannels', 'skipReliability', 'redact', 'includeEvidence', 'includeLowConfidence')) {
-            if ($null -ne $data.PSObject.Properties[$name] -and $data.$name -isnot [bool]) { return $null }
+            if ($null -ne $data.PSObject.Properties[$name] -and $data.$name -isnot [bool]) {
+                $null = & $setStatus 'invalid' ("Saved GUI settings contain a non-boolean '{0}' option; safe defaults are active." -f $name)
+                return $null
+            }
         }
         foreach ($name in @('namedChannels', 'databasePath', 'suppressionPath', 'outputDirectory')) {
             if ($null -ne $data.PSObject.Properties[$name] -and
-                $null -ne $data.$name -and $data.$name -isnot [string]) { return $null }
+                $null -ne $data.$name -and $data.$name -isnot [string]) {
+                $null = & $setStatus 'invalid' ("Saved GUI settings contain a non-text '{0}' option; safe defaults are active." -f $name)
+                return $null
+            }
         }
         foreach ($name in @('windowWidth', 'windowHeight')) {
-            if ($null -eq $data.PSObject.Properties[$name] -or $data.$name -is [string]) { return $null }
+            if ($null -eq $data.PSObject.Properties[$name] -or $data.$name -is [string]) {
+                $null = & $setStatus 'invalid' ("Saved GUI settings are missing a numeric '{0}' bound; safe defaults are active." -f $name)
+                return $null
+            }
         }
 
         $width = [double]$data.windowWidth
         $height = [double]$data.windowHeight
         if ([double]::IsNaN($width) -or [double]::IsInfinity($width) -or $width -lt 1120 -or $width -gt 10000) {
+            $null = & $setStatus 'invalid' 'Saved GUI settings contain an out-of-range window width; safe defaults are active.'
             return $null
         }
         if ([double]::IsNaN($height) -or [double]::IsInfinity($height) -or $height -lt 650 -or $height -gt 10000) {
+            $null = & $setStatus 'invalid' 'Saved GUI settings contain an out-of-range window height; safe defaults are active.'
             return $null
         }
 
+        $null = & $setStatus 'loaded' 'Saved GUI settings loaded.'
         return [pscustomobject]@{
             DaysBack      = $days
             AllChannels   = [bool]$data.allChannels
@@ -117,6 +156,7 @@ function Get-LVGuiSetting {
             WindowHeight  = $height
         }
     } catch {
+        $null = & $setStatus 'unreadable' ("Saved GUI settings could not be read; safe defaults are active. {0}" -f $_.Exception.Message)
         Write-Verbose ("Ignoring unreadable GUI settings at {0}: {1}" -f $Path, $_.Exception.Message)
         return $null
     }

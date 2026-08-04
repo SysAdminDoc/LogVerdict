@@ -613,6 +613,8 @@ function Complete-LVScanCoverage {
     # Everything the scan could NOT see, stated plainly. A finding list is only as
     # trustworthy as the coverage behind it, so the gaps travel with the results.
     $coverageNotes = New-Object System.Collections.Generic.List[string]
+    $errorCatalogNote = Get-LVErrorCatalogCoverageNote -Finding @($findings)
+    if ($errorCatalogNote) { $coverageNotes.Add($errorCatalogNote) | Out-Null }
     if (@($script:LVDeniedChannel).Count -gt 0) {
         $coverageNotes.Add(('Access was denied to {0} channel(s) and they were not scanned: {1}. Re-run elevated.' -f @($script:LVDeniedChannel).Count, (@($script:LVDeniedChannel) -join ', '))) | Out-Null
     }
