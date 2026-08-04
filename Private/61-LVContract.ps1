@@ -237,6 +237,19 @@ function Get-LVContractFileHash {
     }
 }
 
+function Get-LVContractTextHash {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [Text.Encoding]::UTF8.GetBytes($Text)
+        return (($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join '')
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 function New-LVEvidenceContract {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '',
         Justification = 'This function constructs an in-memory contract object and changes no external state.')]
@@ -272,6 +285,13 @@ function New-LVEvidenceContract {
             compatibility = [pscustomobject][ordered]@{ readerMajor = $script:LVEvidenceContractVersion; migration = $null }
         }
         ReportContract = $reportContract
+        RuleDatabase = [pscustomobject][ordered]@{
+            name      = if ($Result.PSObject.Properties['DatabaseName']) { [string]$Result.DatabaseName } else { $null }
+            version   = if ($Result.PSObject.Properties['DatabaseVersion']) { [int]$Result.DatabaseVersion } else { $null }
+            updated   = if ($Result.PSObject.Properties['DatabaseDate']) { [string]$Result.DatabaseDate } else { $null }
+            hash      = if ($Result.PSObject.Properties['DatabaseHash']) { [string]$Result.DatabaseHash } else { $null }
+            ruleCount = if ($Result.PSObject.Properties['RuleCount']) { [int]$Result.RuleCount } else { 0 }
+        }
         Privacy = [pscustomobject][ordered]@{
             redacted    = [bool]$Redacted
             rawEvidence = $raw

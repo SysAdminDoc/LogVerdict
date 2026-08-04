@@ -66,7 +66,7 @@ Windows Setup and Windows Update records also retain invariant result and extend
 Presentation labels are loaded from the versioned [`Data/localization.json`](Data/localization.json) resource. The GUI and text, HTML, and CSV reports resolve the Windows UI culture, or an explicit `LOGVERDICT_LOCALE` such as `de-DE` or `ja-JP`, and fall back deterministically through the language, `en-US`, and the call-site English default. Localized provider prose is never used as a rule dependency: matching continues to use invariant event fields, codes, and structured data. Packaged executables embed the same resource and still allow a beside-the-executable `Data\localization.json` override.
 
 JSON reports include the versioned `Contract` envelope (`LogVerdict.Report`, schema version 1) with live/offline mode, generation time, redaction state, and reader compatibility metadata. Readers should reject a newer schema rather than guessing at fields; unversioned legacy objects are explicitly marked when normalized.
-Evidence bundles add `EVIDENCE-CONTRACT.json`, which records the report contract, source coverage, performance metadata, privacy/raw-evidence state, omissions, and SHA-256 hashes for the included files. A redacted bundle omits raw event channels and declares that state explicitly. Its zip has a hard 4,500,000-byte pre-base64 attachment budget; oversized raw text excerpts are dropped while report signatures are retained, and the bundle fails closed if the retained projection still exceeds the budget.
+Evidence bundles add `EVIDENCE-CONTRACT.json`, which records the report contract, rule-database provenance, source coverage, performance metadata, privacy/raw-evidence state, omissions, and SHA-256 hashes for the included files. A sibling `.manifest.txt` is readable without extracting the zip and names the tool version, database version/hash, scan window, redaction level, host pseudonym, and an itemised data inventory. The console and GUI print the same inventory before capture begins. A redacted bundle omits raw event channels and declares that state explicitly. Its zip has a hard 4,500,000-byte pre-base64 attachment budget; oversized raw text excerpts are dropped while report signatures are retained, and the bundle fails closed if the retained projection still exceeds the budget.
 
 **No language model is involved by default.** Every ruling and remediation is a curated rule written by a human. A signature with no matching rule is reported as `unknown` with its raw evidence and no guess at a cause. An explicit `-ExplainUnknown` opt-in can ask a local Ollama model for a separately labelled candidate explanation; it never changes the verdict and output containing remediation language is discarded.
 
@@ -386,7 +386,7 @@ powershell -ExecutionPolicy Bypass -File .\Invoke-LogVerdict.ps1
 .\Invoke-LogVerdict.ps1 -NoReport
 
 # Re-evaluate a bundle collected on another PC with the current rule database
-.\Invoke-LogVerdict.ps1 -EvidencePath .\LogVerdict-Evidence_HOST_20260801-120000.zip
+.\Invoke-LogVerdict.ps1 -EvidencePath .\LogVerdict-Evidence_HOST-<pseudonym>_20260801-120000.zip
 
 # Re-evaluate one exported event log or every bounded .evtx file under a directory
 .\Invoke-LogVerdict.ps1 -EvidencePath .\System.evtx

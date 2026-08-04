@@ -131,6 +131,76 @@ function Export-LVTextLogEvidence {
     return ConvertTo-LVArrayOutput -Value @($written.ToArray())
 }
 
+function Get-LVEvidenceHostPseudonym {
+    [CmdletBinding()]
+    param([AllowNull()][string]$MachineName)
+
+    if ([string]::IsNullOrWhiteSpace($MachineName) -or $MachineName -match '^<[^>]+>$') {
+        return 'HOST-UNKNOWN'
+    }
+    try { return 'HOST-{0}' -f (Get-LVShortHash -Text $MachineName.ToUpperInvariant()) }
+    catch { return 'HOST-UNKNOWN' }
+}
+
+function Get-LVEvidenceDataInventory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Result,
+        [switch]$Redact,
+        [switch]$AllowRawEvidence,
+        [AllowNull()][string]$ProviderTemplatePath,
+        [switch]$ConstrainedLanguage
+    )
+
+    # Keep this deliberately simple. The inventory is also emitted by the
+    # ConstrainedLanguage fallback, where constructing generic collection types can
+    # be denied even though ordinary arrays and strings remain usable.
+    $items = @(
+        'Report projections: text, JSON, CSV, HTML, ticket summaries, and the run transcript.'
+        'Scan provenance: bounded channel/source coverage, rule matches, timings, database metadata, and privacy-audit metadata.'
+        'Text-log evidence: matching signature excerpts and samples only; complete text logs are not copied.'
+    )
+    if ($Redact) {
+        $items += 'Event channels: raw .evtx exports are omitted because binary channels can retain identifiers.'
+    } elseif ($ConstrainedLanguage) {
+        $items += 'Event channels: omitted by the ConstrainedLanguage fallback; the fallback does not re-export raw channels.'
+    } elseif ($AllowRawEvidence) {
+        $items += 'Event channels: bounded raw .evtx exports from readable channels, authorized for forensic use.'
+    } else {
+        $items += 'Event channels: not captured because raw-evidence authorization was not supplied.'
+    }
+    if ($ProviderTemplatePath) {
+        $items += 'Provider templates: validated message-template cache, when the supplied file exists.'
+    } else {
+        $items += 'Provider templates: not supplied.'
+    }
+    if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {
+        $items += 'Case profile: bounded handoff profile with source hashes and collection choices.'
+    } else {
+        $items += 'Case profile: not attached.'
+    }
+    $items += 'Privacy boundary: no complete logs, credentials, or unredacted identifiers are intentionally added to this manifest.'
+    return ConvertTo-LVArrayOutput -Value $items
+}
+
+function Write-LVEvidenceDataInventory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Result,
+        [switch]$Redact,
+        [switch]$AllowRawEvidence,
+        [AllowNull()][string]$ProviderTemplatePath,
+        [switch]$ConstrainedLanguage
+    )
+
+    Write-LVLog -Level info -Message 'Evidence inventory (before capture):'
+    foreach ($item in @(Get-LVEvidenceDataInventory -Result $Result -Redact:$Redact `
+            -AllowRawEvidence:$AllowRawEvidence -ProviderTemplatePath $ProviderTemplatePath `
+            -ConstrainedLanguage:$ConstrainedLanguage)) {
+        Write-LVLog -Level info -Message ('  - ' + [string]$item)
+    }
+}
+
 function Format-LVEvidenceManifest {
     <#
         .SYNOPSIS
@@ -148,19 +218,36 @@ function Format-LVEvidenceManifest {
         [switch]$Redact,
         [AllowNull()]$PrivacyAudit,
         [switch]$AllowRawEvidence,
+        [AllowNull()][string]$ProviderTemplatePath,
+        [AllowNull()][string]$OriginalMachineName,
+        [AllowNull()][string]$OriginalUserName,
         [long]$SizeBudgetBytes = 0,
         [string]$BudgetStatus = 'not-applicable'
     )
 
     $sb = New-Object System.Text.StringBuilder
+    $manifestMachine = if ($OriginalMachineName) { $OriginalMachineName } else { [string]$Result.MachineName }
+    $hostPseudonym = Get-LVEvidenceHostPseudonym -MachineName $manifestMachine
+    $databaseHash = if ($Result.PSObject.Properties['DatabaseHash'] -and $Result.DatabaseHash -match '^[0-9a-fA-F]{64}$') {
+        [string]$Result.DatabaseHash
+    } else { 'unavailable' }
+    $databaseVersion = if ($Result.PSObject.Properties['DatabaseVersion'] -and $null -ne $Result.DatabaseVersion) {
+        [string]$Result.DatabaseVersion
+    } else { 'unavailable' }
+    $databaseDate = if ($Result.PSObject.Properties['DatabaseDate'] -and $null -ne $Result.DatabaseDate) {
+        [string]$Result.DatabaseDate
+    } else { 'unavailable' }
     Add-LVLine $sb ('LogVerdict {0} evidence bundle' -f $Result.Version)
     Add-LVLine $sb ('=' * 78)
-    Add-LVLine $sb ('Machine   : {0}' -f $Result.MachineName)
+    Add-LVLine $sb ('Host pseudonym : {0}' -f $hostPseudonym)
     Add-LVLine $sb ('Scanned   : {0:yyyy-MM-dd HH:mm:ss}' -f $Result.ScanTime)
-    Add-LVLine $sb ('Window    : last {0} day(s)' -f $Result.DaysBack)
+    Add-LVLine $sb ('Scan window : last {0} day(s)' -f $Result.DaysBack)
     Add-LVLine $sb ('Elevated  : {0}' -f $Result.Elevated)
     Add-LVLine $sb ('Redacted  : {0}' -f $(if ($Redact) { 'yes' } else { 'no' }))
+    Add-LVLine $sb ('Redaction level : {0}' -f $(if ($Redact) { 'redacted/shareable' } else { 'raw/forensic' }))
     Add-LVLine $sb ('Sanitized : {0}' -f $(if ($PrivacyAudit -and $PrivacyAudit.Sanitized) { 'yes' } else { 'no' }))
+    Add-LVLine $sb ('Rule database : {0}; version {1}; updated {2}; {3} rule(s); SHA-256 {4}' -f `
+        $Result.DatabaseName, $databaseVersion, $databaseDate, $Result.RuleCount, $databaseHash)
     if ($SizeBudgetBytes -gt 0) {
         Add-LVLine $sb ('Attachment budget: {0:N0} bytes pre-base64; {1}' -f $SizeBudgetBytes, $BudgetStatus)
     }
@@ -184,6 +271,12 @@ function Format-LVEvidenceManifest {
                     $finding.Category, $finding.Artifact, $line, $finding.Fingerprint, $finding.Disposition)
             }
         }
+    }
+    Add-LVLine $sb
+    Add-LVLine $sb 'DATA INVENTORY (captured before writing)'
+    foreach ($item in @(Get-LVEvidenceDataInventory -Result $Result -Redact:$Redact `
+            -AllowRawEvidence:$AllowRawEvidence -ProviderTemplatePath $ProviderTemplatePath)) {
+        Add-LVLine $sb ('  - ' + [string]$item)
     }
     Add-LVLine $sb
     Add-LVLine $sb 'CONTENTS'
@@ -227,10 +320,9 @@ function Format-LVEvidenceManifest {
     }
     if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {
         Add-LVLine $sb 'CASE PROFILE / HANDOFF'
-        Add-LVLine $sb ('  Profile ID: {0}; name: {1}; source count: {2}; redacted: {3}' -f `
-            $Result.CaseProfile.profileId, $Result.CaseProfile.name, @($Result.CaseProfile.sources).Count, $Result.CaseProfile.redaction.requested)
-        Add-LVLine $sb '  The profile records collection bounds, source hashes, notes, and operator choices; it is not a verdict.'
-        foreach ($note in @($Result.CaseProfile.notes | Where-Object { $_ })) { Add-LVLine $sb ('  Note: ' + [string]$note) }
+        Add-LVLine $sb ('  Attached profile: yes; source count: {0}; redacted: {1}' -f `
+            @($Result.CaseProfile.sources).Count, $Result.CaseProfile.redaction.requested)
+        Add-LVLine $sb '  The profile records collection bounds, source hashes, notes, and operator choices; identifiers and free-form notes are intentionally not repeated here.'
         Add-LVLine $sb
     }
 
@@ -251,7 +343,14 @@ function Format-LVEvidenceManifest {
         foreach ($note in @($Result.CoverageNotes)) { Add-LVLine $sb ('  - {0}' -f $note) }
     }
 
-    return $sb.ToString()
+    $manifestText = $sb.ToString()
+    # The sibling manifest is a sharing aid even for a raw forensic bundle. Never let
+    # known host/account values or a recognizable secret enter it through a free-form
+    # coverage, omission, or audit field. The archive itself retains the raw contract
+    # only when the caller explicitly authorizes it; the sidecar is always safe to read.
+    $manifestUser = if ($OriginalUserName) { $OriginalUserName } else { $env:USERNAME }
+    $manifestText = ConvertTo-LVRedactedText -Text $manifestText -MachineName $manifestMachine -UserName $manifestUser
+    return $manifestText
 }
 
 function New-LVEvidenceArchive {
@@ -292,13 +391,26 @@ function New-LVConstrainedEvidenceBundle {
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ReportFile,
         [switch]$Redact,
         [switch]$AllowRawEvidence,
+        [AllowNull()][string]$OriginalMachineName,
+        [AllowNull()][string]$ProviderTemplatePath,
         [AllowNull()]$Status
     )
 
     if (-not $Redact -and -not $AllowRawEvidence) {
-        if ($Status) { $Status.Value = @{ State = 'rejected'; Reason = 'Raw evidence packaging requires the explicit -AllowRawEvidence override.'; Path = $null } }
+        if ($Status) { $Status.Value = [pscustomobject][ordered]@{ State = 'rejected'; Reason = 'Raw evidence packaging requires the explicit -AllowRawEvidence override.'; Path = $null; ManifestPath = $null } }
         throw 'Raw evidence packaging requires the explicit -AllowRawEvidence override.'
     }
+
+    Write-LVEvidenceDataInventory -Result $Result -Redact:$Redact -AllowRawEvidence:$AllowRawEvidence `
+        -ProviderTemplatePath $ProviderTemplatePath -ConstrainedLanguage
+
+    $clmMachineName = if ($OriginalMachineName) { $OriginalMachineName } else { [string]$Result.MachineName }
+    $clmDatabaseVersion = if ($Result.PSObject.Properties['DatabaseVersion'] -and $null -ne $Result.DatabaseVersion) {
+        [string]$Result.DatabaseVersion
+    } else { 'unavailable' }
+    $clmDatabaseDate = if ($Result.PSObject.Properties['DatabaseDate'] -and $null -ne $Result.DatabaseDate) {
+        [string]$Result.DatabaseDate
+    } else { 'unavailable' }
 
     $staging = Join-Path $OutputDir 'evidence-clm'
     if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
@@ -311,22 +423,39 @@ function New-LVConstrainedEvidenceBundle {
         'LogVerdict evidence bundle'
         'LanguageMode: ConstrainedLanguage'
         'GUI: unavailable (LogVerdict.GuiConstrainedLanguage, exit code 5)'
-        'Raw event channels: omitted from the constrained-language fallback'
-        ('Redacted: {0}' -f [bool]$Redact)
+        ('Host pseudonym: {0}' -f (Get-LVEvidenceHostPseudonym -MachineName $clmMachineName))
         ('ToolVersion: {0}' -f [string]$Result.Version)
+        ('Rule database: {0}; version {1}; updated {2}; {3} rule(s); SHA-256 {4}' -f `
+            $Result.DatabaseName, $clmDatabaseVersion, $clmDatabaseDate, $Result.RuleCount, `
+            $(if ($Result.PSObject.Properties['DatabaseHash'] -and $Result.DatabaseHash -match '^[0-9a-fA-F]{64}$') { $Result.DatabaseHash } else { 'unavailable' }))
+        ('Scan window: last {0} day(s)' -f $Result.DaysBack)
+        ('Redacted: {0}; redaction level: {1}' -f [bool]$Redact, $(if ($Redact) { 'redacted/shareable' } else { 'raw/forensic' }))
+        'Raw event channels: omitted from the constrained-language fallback'
+        'DATA INVENTORY (captured before writing)'
+        @(Get-LVEvidenceDataInventory -Result $Result -Redact:$Redact -AllowRawEvidence:$AllowRawEvidence `
+            -ProviderTemplatePath $ProviderTemplatePath -ConstrainedLanguage | ForEach-Object { '  - ' + $_ })
     ) -join [Environment]::NewLine
+    try {
+        $manifest = ConvertTo-LVRedactedText -Text $manifest -MachineName $clmMachineName -UserName $env:USERNAME
+    } catch {
+        if ($clmMachineName) { $manifest = $manifest.Replace($clmMachineName, '<REDACTED>') }
+    }
     Set-Content -LiteralPath (Join-Path $staging 'MANIFEST.txt') -Value $manifest -Encoding UTF8
 
-    $zip = Join-Path $OutputDir ('LogVerdict-Evidence_CLM_{0}.zip' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $zip = Join-Path $OutputDir ('LogVerdict-Evidence_{0}_{1}.zip' -f `
+        (Get-LVEvidenceHostPseudonym -MachineName $clmMachineName), (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $manifestSidecar = [IO.Path]::ChangeExtension($zip, '.manifest.txt')
     if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+    if (Test-Path -LiteralPath $manifestSidecar) { Remove-Item -LiteralPath $manifestSidecar -Force }
     try {
         New-LVEvidenceArchive -Staging $staging -Destination $zip
     } catch {
-        if ($Status) { $Status.Value = @{ State = 'write-failed'; Reason = $_.Exception.Message; Path = $staging } }
+        if ($Status) { $Status.Value = [pscustomobject][ordered]@{ State = 'write-failed'; Reason = $_.Exception.Message; Path = $staging; ManifestPath = $null } }
         return $null
     }
+    Set-Content -LiteralPath $manifestSidecar -Value $manifest -Encoding UTF8
     Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
-    if ($Status) { $Status.Value = @{ State = 'created'; Reason = 'Evidence bundle created with the ConstrainedLanguage archive fallback.'; Path = $zip } }
+    if ($Status) { $Status.Value = [pscustomobject][ordered]@{ State = 'created'; Reason = 'Evidence bundle created with the ConstrainedLanguage archive fallback.'; Path = $zip; ManifestPath = $manifestSidecar } }
     return $zip
 }
 
@@ -353,12 +482,13 @@ function New-LVEvidenceBundle {
 
     $hasStatus = $null -ne $Status
     $setStatus = {
-        param([string]$State, [string]$Reason, [AllowNull()][string]$Path)
+        param([string]$State, [string]$Reason, [AllowNull()][string]$Path, [AllowNull()][string]$ManifestPath = $null)
         if ($hasStatus) {
             $Status.Value = [pscustomobject][ordered]@{
-                State  = $State
-                Reason = $Reason
-                Path   = $Path
+                State        = $State
+                Reason       = $Reason
+                Path         = $Path
+                ManifestPath = $ManifestPath
             }
         }
     }
@@ -369,12 +499,17 @@ function New-LVEvidenceBundle {
     }
     if ($script:LVConstrainedLanguage) {
         return New-LVConstrainedEvidenceBundle -Result $Result -OutputDir $OutputDir `
-            -ReportFile $ReportFile -Redact:$Redact -AllowRawEvidence:$AllowRawEvidence -Status $Status
+            -ReportFile $ReportFile -Redact:$Redact -AllowRawEvidence:$AllowRawEvidence `
+            -OriginalMachineName $OriginalMachineName `
+            -ProviderTemplatePath $ProviderTemplatePath -Status $Status
     }
     if (-not $Redact -and -not $AllowRawEvidence) {
         $null = & $setStatus 'rejected' 'Raw evidence packaging requires the explicit -AllowRawEvidence override.' $null
         throw 'Raw evidence packaging requires the explicit -AllowRawEvidence override.'
     }
+
+    Write-LVEvidenceDataInventory -Result $Result -Redact:$Redact -AllowRawEvidence:$AllowRawEvidence `
+        -ProviderTemplatePath $ProviderTemplatePath
 
     $staging = Join-Path $OutputDir 'evidence'
     if (-not (Test-Path -LiteralPath $staging)) {
@@ -439,10 +574,11 @@ function New-LVEvidenceBundle {
     $content.Add($contractPath) | Out-Null
 
     $manifestPath = Join-Path $staging 'MANIFEST.txt'
-    Write-LVTextFile -Path $manifestPath `
-        -Content (Format-LVEvidenceManifest -Result $Result -Content @($content.ToArray()) `
-            -Omission @($omission.ToArray()) -Redact:$Redact -PrivacyAudit $privacyAudit -AllowRawEvidence:$AllowRawEvidence `
-            -SizeBudgetBytes $(if ($Redact) { $script:LVRedactedEvidenceMaxBytes } else { 0 }) -BudgetStatus $(if ($Redact) { 'checking' } else { 'not-applicable' }))
+    $manifestText = Format-LVEvidenceManifest -Result $Result -Content @($content.ToArray()) `
+        -Omission @($omission.ToArray()) -Redact:$Redact -PrivacyAudit $privacyAudit -AllowRawEvidence:$AllowRawEvidence `
+        -ProviderTemplatePath $ProviderTemplatePath -OriginalMachineName $OriginalMachineName -OriginalUserName $OriginalUserName `
+        -SizeBudgetBytes $(if ($Redact) { $script:LVRedactedEvidenceMaxBytes } else { 0 }) -BudgetStatus $(if ($Redact) { 'checking' } else { 'not-applicable' })
+    Write-LVTextFile -Path $manifestPath -Content $manifestText
     $content.Add($manifestPath) | Out-Null
 
     if ($Redact -and -not $privacyAudit.Sanitized) {
@@ -454,8 +590,10 @@ function New-LVEvidenceBundle {
     }
 
     $zip = Join-Path $OutputDir ('LogVerdict-Evidence_{0}_{1:yyyyMMdd-HHmmss}.zip' -f `
-        (ConvertTo-LVSafeName -Text $Result.MachineName), $Result.ScanTime)
+        (ConvertTo-LVSafeName -Text (Get-LVEvidenceHostPseudonym -MachineName $(if ($OriginalMachineName) { $OriginalMachineName } else { $Result.MachineName }))), $Result.ScanTime)
+    $manifestSidecar = [IO.Path]::ChangeExtension($zip, '.manifest.txt')
     if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+    if (Test-Path -LiteralPath $manifestSidecar) { Remove-Item -LiteralPath $manifestSidecar -Force }
 
     try {
         New-LVEvidenceArchive -Staging $staging -Destination $zip
@@ -493,10 +631,11 @@ function New-LVEvidenceBundle {
                     -Omission @($omission.ToArray()) -Redacted:$Redact -AllowRawEvidence:$AllowRawEvidence -PrivacyAudit $privacyAudit
                 Write-LVTextFile -Path $contractPath -Content ($evidenceContract | ConvertTo-Json -Depth 12)
                 $content.Add($contractPath) | Out-Null
-                Write-LVTextFile -Path $manifestPath `
-                    -Content (Format-LVEvidenceManifest -Result $Result -Content @($content.ToArray()) `
-                        -Omission @($omission.ToArray()) -Redact:$Redact -PrivacyAudit $privacyAudit -AllowRawEvidence:$AllowRawEvidence `
-                        -SizeBudgetBytes $budget -BudgetStatus $budgetStatus)
+                $manifestText = Format-LVEvidenceManifest -Result $Result -Content @($content.ToArray()) `
+                    -Omission @($omission.ToArray()) -Redact:$Redact -PrivacyAudit $privacyAudit -AllowRawEvidence:$AllowRawEvidence `
+                    -ProviderTemplatePath $ProviderTemplatePath -OriginalMachineName $OriginalMachineName -OriginalUserName $OriginalUserName `
+                    -SizeBudgetBytes $budget -BudgetStatus $budgetStatus
+                Write-LVTextFile -Path $manifestPath -Content $manifestText
                 $content.Add($manifestPath) | Out-Null
                 Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
                 try { New-LVEvidenceArchive -Staging $staging -Destination $zip } catch {
@@ -521,10 +660,11 @@ function New-LVEvidenceBundle {
         # true for the zip the recipient actually receives.
         [void]$content.Remove($manifestPath)
         Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
-        Write-LVTextFile -Path $manifestPath `
-            -Content (Format-LVEvidenceManifest -Result $Result -Content @($content.ToArray()) `
-                -Omission @($omission.ToArray()) -Redact:$Redact -PrivacyAudit $privacyAudit -AllowRawEvidence:$AllowRawEvidence `
-                -SizeBudgetBytes $budget -BudgetStatus $budgetStatus)
+        $manifestText = Format-LVEvidenceManifest -Result $Result -Content @($content.ToArray()) `
+            -Omission @($omission.ToArray()) -Redact:$Redact -PrivacyAudit $privacyAudit -AllowRawEvidence:$AllowRawEvidence `
+            -ProviderTemplatePath $ProviderTemplatePath -OriginalMachineName $OriginalMachineName -OriginalUserName $OriginalUserName `
+            -SizeBudgetBytes $budget -BudgetStatus $budgetStatus
+        Write-LVTextFile -Path $manifestPath -Content $manifestText
         $content.Add($manifestPath) | Out-Null
         Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
         try { New-LVEvidenceArchive -Staging $staging -Destination $zip } catch {
@@ -543,12 +683,18 @@ function New-LVEvidenceBundle {
         }
     }
 
+    if (-not $manifestText) {
+        $manifestText = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop
+    }
+    Write-LVTextFile -Path $manifestSidecar -Content $manifestText
+
     # The staging directory is removed only after the zip exists, so a failure leaves
     # the gathered evidence on disk rather than destroying it.
     Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
 
     $size = [math]::Round((Get-Item -LiteralPath $zip).Length / 1MB, 1)
     Write-LVLog -Level ok -Message ('Evidence bundle: {0} ({1} MB)' -f $zip, $size)
-    $null = & $setStatus 'created' 'Evidence bundle created.' $zip
+    Write-LVLog -Level ok -Message ('Evidence manifest: {0}' -f $manifestSidecar)
+    $null = & $setStatus 'created' 'Evidence bundle created.' $zip $manifestSidecar
     return $zip
 }

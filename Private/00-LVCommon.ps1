@@ -1192,7 +1192,7 @@ function Assert-LVRedactedResultShape {
         'ProviderProjections', 'Reduction', 'Findings', 'Incidents', 'IncidentSummary', 'LowConfidenceSuppressedCount', 'Correlations', 'CrashArtifacts',
         'SuppressionStatus',
         'SetupDiag', 'Horizon', 'HorizonWarning', 'Stability', 'ReliabilityAvailable',
-        'DatabaseName', 'DatabaseDate', 'RuleCount', 'DatabaseFreshness', 'ScanOptions',
+        'DatabaseName', 'DatabaseVersion', 'DatabaseDate', 'DatabaseHash', 'RuleCount', 'DatabaseFreshness', 'ScanOptions',
         'InstalledKbs',
         'CollectionBudget', 'CaseProfile', 'ModelExplanationsEnabled', 'ModelExplanationCount',
         'PromotedDraftRules', 'History', 'AdvisoryStatus', 'AdvisoryCache', 'Advisories',

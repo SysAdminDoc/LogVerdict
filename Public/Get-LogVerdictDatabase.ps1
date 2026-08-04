@@ -39,6 +39,21 @@ function Get-LogVerdictDatabase {
         throw ("Verdict database not found at '{0}'." -f $basePath)
     }
 
+    # Keep provenance tied to the exact source that supplied the base rules. The
+    # embedded single-file fallback is hashed from its UTF-8 JSON payload; under
+    # ConstrainedLanguage the cryptography call may be unavailable, so the field is
+    # deliberately null rather than a guessed or partial digest.
+    $sourceSha256 = $null
+    try {
+        if (Test-Path -LiteralPath $basePath -PathType Leaf) {
+            $sourceSha256 = Get-LVContractFileHash -Path $basePath
+        } elseif (-not $Path -and $script:LVEmbeddedVerdictsJson) {
+            $sourceSha256 = Get-LVContractTextHash -Text ([string]$script:LVEmbeddedVerdictsJson)
+        }
+    } catch {
+        Write-Verbose ("Could not hash verdict database source '{0}': {1}" -f $sourceLabel, $_.Exception.Message)
+    }
+
     Assert-LVSchemaVersion -Database $db -Path $sourceLabel
     $rules = New-Object System.Collections.Generic.List[object]
 
@@ -96,6 +111,7 @@ function Get-LogVerdictDatabase {
         schemaVersion = $db.schemaVersion
         name          = $db.name
         updated       = $db.updated
+        sourceSha256  = $sourceSha256
         freshness     = if ($db.PSObject.Properties['freshness']) { $db.freshness } else { Get-LVDatabaseFreshnessPolicy -Database $db }
         rules         = @($rules.ToArray())
         correlations  = @($correlations.ToArray())

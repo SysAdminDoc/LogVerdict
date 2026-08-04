@@ -477,7 +477,8 @@ function Register-LVGuiScanHandlers {
             $ui.BtnFindingsOpen.IsEnabled = $true
             $ui.BtnActivityOpen.IsEnabled = $true
             $ui.TxtActivityReportState.Text = 'Saved to {0}' -f $out.OutputDir
-            & $setStatus ('Report written to {0}' -f $out.OutputDir)
+            $manifestNote = if ($out.EvidenceBundleManifest) { '; evidence manifest: {0}' -f $out.EvidenceBundleManifest } else { '' }
+            & $setStatus ('Report written to {0}{1}' -f $out.OutputDir, $manifestNote)
         } catch {
             & $setStatus ('Could not write the report: {0}' -f $_.Exception.Message)
         }

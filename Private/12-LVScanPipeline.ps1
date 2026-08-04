@@ -877,7 +877,9 @@ function ConvertTo-LVScanResult {
         Stability      = $stability
         ReliabilityAvailable = [bool]$script:LVReliabilityAvailable
         DatabaseName   = $db.name
+        DatabaseVersion = $db.schemaVersion
         DatabaseDate   = $db.updated
+        DatabaseHash   = if ($db.PSObject.Properties['sourceSha256']) { $db.sourceSha256 } else { $null }
         RuleCount      = @($db.rules).Count
         DatabaseFreshness = $databaseFreshness
         InstalledKbs   = @($installedKbs)

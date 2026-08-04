@@ -6908,6 +6908,51 @@ Describe 'Evidence bundle' {
         $names | Should -Contain 'PRIVACY-AUDIT.json'
     }
 
+    It 'writes a redacted sibling manifest and sends the same inventory to the GUI log sink' {
+        InModuleScope LogVerdict -Parameters @{ Drive = $TestDrive } {
+            param($Drive)
+            $dir = Join-Path $Drive 'bundle-sidecar'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $report = Join-Path $dir 'raw-report.json'
+            '{"captured":"RAW-HOST","operator":"manifest-user"}' | Set-Content -LiteralPath $report -Encoding UTF8
+            $result = [pscustomobject]@{
+                Version='0.8.2'; MachineName='RAW-HOST'; ScanTime=(Get-Date '2026-08-03T12:00:00Z'); DaysBack=3; Elevated=$false
+                Reduction=[pscustomobject]@{ RecordCount=0; SignatureCount=0; Ratio=0 }
+                DatabaseName='fixture'; DatabaseVersion=7; DatabaseDate='2026-08-03'; DatabaseHash=('a' * 64); RuleCount=7; WorstVerdict='unknown'
+                Findings=@(); Correlations=@(); Coverage=@(); HealthProfiles=@(); CoverageNotes=@(); Performance=@(); EvidenceManifest=@(); Channels=@()
+            }
+            $queue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
+            $previousSink = $script:LVLogSink
+            $script:LVLogSink = $queue
+            try {
+                $status = $null
+                $zip = New-LVEvidenceBundle -Result $result -OutputDir $dir -ReportFile @($report) `
+                    -AllowRawEvidence -OriginalMachineName 'RAW-HOST' -OriginalUserName 'manifest-user' -Status ([ref]$status)
+                $zip | Should -Not -BeNullOrEmpty
+                $status.State | Should -BeExactly 'created'
+                $status.ManifestPath | Should -BeExactly ([IO.Path]::ChangeExtension($zip, '.manifest.txt'))
+                Test-Path -LiteralPath $status.ManifestPath -PathType Leaf | Should -BeTrue
+
+                $manifest = Get-Content -LiteralPath $status.ManifestPath -Raw
+                $manifest | Should -Match 'LogVerdict 0\.8\.2 evidence bundle'
+                $manifest | Should -Match ('Host pseudonym\s*: ' + [regex]::Escape((Get-LVEvidenceHostPseudonym -MachineName 'RAW-HOST')))
+                $manifest | Should -Match 'Rule database\s*: fixture; version 7; updated 2026-08-03; 7 rule\(s\); SHA-256 a{64}'
+                $manifest | Should -Match 'Scan window\s*: last 3 day\(s\)'
+                $manifest | Should -Match 'Redaction level\s*: raw/forensic'
+                $manifest | Should -Match 'DATA INVENTORY \(captured before writing\)'
+                $manifest | Should -Match 'Event channels: bounded raw \.evtx exports'
+                $manifest | Should -Not -Match 'RAW-HOST|manifest-user'
+
+                $sinkText = @($queue.ToArray()) -join [Environment]::NewLine
+                $sinkText | Should -Match 'Evidence inventory \(before capture\):'
+                $sinkText | Should -Match 'Report projections: text, JSON, CSV, HTML'
+                $sinkText | Should -Match 'Event channels: bounded raw \.evtx exports'
+            } finally {
+                $script:LVLogSink = $previousSink
+            }
+        }
+    }
+
     It 'drops oversized redacted raw excerpts before the hard attachment ceiling' {
         InModuleScope LogVerdict -Parameters @{ Drive = $TestDrive } {
             param($Drive)
