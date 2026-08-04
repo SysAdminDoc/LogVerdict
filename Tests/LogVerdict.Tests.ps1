@@ -554,6 +554,15 @@ Describe 'Dependency advisory knowledge' {
         { Get-LogVerdictAdvisory -Path $path } | Should -Throw '*sourceHash*'
     }
 
+    It 'refuses advisory prose tampering even when normalized metadata is unchanged' {
+        $path = Join-Path $TestDrive 'tampered-advisory-description.json'
+        $cache = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Data\advisories.json') -Raw | ConvertFrom-Json
+        $cache.advisories[0].title = 'substituted title'
+        $cache | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path -Encoding UTF8
+        Test-LogVerdictAdvisoryDatabase -Path $path -Quiet | Should -BeFalse
+        { Get-LogVerdictAdvisory -Path $path } | Should -Throw '*sourceHash*'
+    }
+
     It 'installs a hash-verified offline cache and can roll it back' {
         $root = Split-Path $PSScriptRoot -Parent
         $source = Join-Path $root 'Data\advisories.json'
@@ -1110,6 +1119,20 @@ Describe 'Bundled Microsoft error catalog' {
             param($tamperedPath)
             $catalogPath = $tamperedPath
             { Get-LVErrorCatalog -Path $catalogPath } | Should -Throw '*sourceHash*'
+        }
+    }
+
+    It 'refuses catalog prose tampering even when provenance is unchanged' {
+        $repoRoot = Split-Path $PSScriptRoot -Parent
+        $document = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/error-codes.json') -Raw | ConvertFrom-Json
+        $document.entries = @($document.entries | Select-Object -First 2)
+        $document.entries[0].description = 'substituted catalog explanation'
+        $tamperedPath = Join-Path $TestDrive 'error-codes-description-tampered.json'
+        $document | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $tamperedPath -Encoding UTF8
+
+        InModuleScope LogVerdict -Parameters @{ tamperedPath = $tamperedPath } {
+            param($tamperedPath)
+            { Get-LVErrorCatalog -Path $tamperedPath } | Should -Throw '*sourceHash*'
         }
     }
 

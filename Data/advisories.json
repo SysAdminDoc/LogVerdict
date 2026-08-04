@@ -7,7 +7,7 @@
     "uri": "https://services.nvd.nist.gov/rest/json/cves/2.0",
     "retrieved": "2026-08-03"
   },
-  "sourceHash": "6703080aac93980cbe8ad208ceec65a2e514df4e7714d11ff666852daad25601",
+  "sourceHash": "baa44c3c32edad0666331f41aa32b92448fb6b042afb4e5d010b4ea625db0eaa",
   "freshness": {
     "maxCacheAgeDays": 60,
     "maxSourceAgeDays": 60,
@@ -78,7 +78,7 @@
       "sourceUri": "https://nvd.nist.gov/vuln/detail/CVE-2026-26143",
       "title": "PowerShell improper input validation",
       "description": "Improper input validation in Microsoft PowerShell allows an unauthorized attacker to bypass a security feature locally. This advisory is dependency context, not a Windows event verdict.",
-      "sourceHash": "9573ae4bd7384cd11553ca18c213686259a275c95807192b8073cdebda8605e9"
+      "sourceHash": "579e64ec5056acf693e03009af48394dc5186a0701108af71cc29abc5f90cb31"
     },
     {
       "id": "CVE-2025-25004",
@@ -96,7 +96,7 @@
       "sourceUri": "https://nvd.nist.gov/vuln/detail/CVE-2025-25004",
       "title": "PowerShell improper access control",
       "description": "Improper access control in Microsoft PowerShell allows an authorized attacker to elevate privileges locally. This advisory is dependency context, not a Windows event verdict.",
-      "sourceHash": "9a44d137b6dfce0d2232ba4b1a5b5418e2a47ca12f7e4462e5b15f8a0b5ff8c9"
+      "sourceHash": "1ec542ca362e350d8ba01dbac9850c3a4d536f66fe3bb860639cbb88d32dcfbe"
     }
   ]
 }

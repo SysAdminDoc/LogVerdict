@@ -7,6 +7,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [0.8.2] - 2026-08-02
 
 - Made result redaction deny-by-default, recursively masked live-watch records and model errors, and made `Invoke-LogVerdictScan -Redact` return a redacted contract.
+- Extended catalog and advisory integrity hashes across user-visible descriptions, explanations, titles, and licensed provenance; regenerated both bundled data files and added prose-tamper tests.
 - Made all-channel enumeration return an explicit failure state, retain restricted probes and unknown-count channels, and force incomplete sweeps to an unknown verdict with a non-zero exit.
 - Added bounded VSS point-in-time, SRUM, and shadow-copy diagnostic coverage plus narrow Group Policy Preferences 4117 and SRUM rulings; preserved offline shadow-copy provenance is explicit.
 - Redacted the prompt-specific finding copy sent to the local model when `-Redact` is combined with unknown-signature explanations, while retaining the raw finding for local report/export handling.

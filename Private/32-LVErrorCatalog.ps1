@@ -25,6 +25,45 @@ function ConvertTo-LVErrorCatalogSourceManifest {
     return (ConvertTo-Json -InputObject $items -Depth 8 -Compress)
 }
 
+function Get-LVErrorCatalogEntryCanonicalText {
+    param(
+        [Parameter(Mandatory)]$Entry,
+        [Parameter(Mandatory)][string]$Hex,
+        [Parameter(Mandatory)][int]$SchemaVersion
+    )
+
+    if ($SchemaVersion -lt 3) {
+        # Preserve the schema-v2 reader contract for old, URL-sourced catalogs.
+        return '{0}|{1}|{2}|{3}|{4}' -f $Entry.reference, $Entry.source,
+            $Entry.retrieved, $Entry.kind, $Hex
+    }
+
+    # Every catalog field rendered as user-facing knowledge is covered here. The
+    # normalized object is deliberately omitted because it is re-derived below and
+    # compared to the file, rather than trusted as input to the resolver.
+    $parts = @(
+        [string]$Entry.id
+        [string]$Entry.kind
+        [string]$Entry.code
+        [string]$Hex
+        [string]$Entry.name
+        [string]$Entry.description
+        [string]$Entry.explanation
+        [string]$Entry.reference
+        [string]$Entry.source
+        [string]$Entry.retrieved
+        [string]$Entry.applicability
+        [string]$Entry.phase
+        [string]$Entry.operation
+        [string]$Entry.sourceRepository
+        [string]$Entry.sourcePath
+        [string]$Entry.sourceRevision
+        [string]$Entry.licence
+        [string]$Entry.sourceDocumentHash
+    )
+    return ($parts -join '|')
+}
+
 function ConvertTo-LVErrorHex {
     param([AllowNull()][string]$Value)
 
@@ -345,11 +384,7 @@ function Get-LVErrorCatalog {
         }
         $hex = ConvertTo-LVErrorHex -Value ([string]$entry.hex)
         if (-not $hex) { throw ("Error catalog '{0}' entry '{1}' has an invalid hexadecimal value." -f $source, $entry.id) }
-        $sourceHashText = '{0}|{1}|{2}|{3}|{4}' -f $entry.reference, $entry.source, $entry.retrieved, $entry.kind, $hex
-        if ($version -ge 3) {
-            $sourceHashText += '|{0}|{1}|{2}|{3}|{4}' -f $entry.sourceRepository, $entry.sourcePath,
-                $entry.sourceRevision, $entry.licence, $entry.sourceDocumentHash
-        }
+        $sourceHashText = Get-LVErrorCatalogEntryCanonicalText -Entry $entry -Hex $hex -SchemaVersion $version
         $expectedSourceHash = Get-LVErrorCatalogSha256 -Text $sourceHashText
         if ([string]$entry.sourceHash -ine $expectedSourceHash) {
             throw ("Error catalog '{0}' entry '{1}' has a sourceHash that does not match its source metadata." -f $source, $entry.id)

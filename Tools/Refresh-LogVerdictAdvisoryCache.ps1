@@ -61,6 +61,8 @@ function Get-LVRefreshAdvisoryHash {
         [string]$Advisory.kevDate
         [string]$Advisory.publishedDate
         [string]$Advisory.modifiedDate
+        [string]$Advisory.title
+        [string]$Advisory.description
         [string]$Advisory.source
         [string]$Advisory.sourceUri
     ) -join '|'

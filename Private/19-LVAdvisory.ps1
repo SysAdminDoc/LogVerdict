@@ -20,6 +20,8 @@ function Get-LVAdvisoryCanonicalText {
         [string]$Advisory.KEVDate
         [string]$Advisory.PublishedDate
         [string]$Advisory.ModifiedDate
+        [string]$Advisory.Title
+        [string]$Advisory.Description
         [string]$Advisory.Source
         [string]$Advisory.SourceUri
     ) -join '|'

@@ -484,9 +484,27 @@ foreach ($entry in $unique) {
             throw ("Catalog entry '{0}' has no licensed source metadata field '{1}'." -f $entry.id, $field)
         }
     }
-    $sourceHashText = '{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}' -f $entry.reference, $entry.source,
-        $entry.retrieved, $entry.kind, $entry.hex, $entry.sourceRepository, $entry.sourcePath,
-        $entry.sourceRevision, $entry.licence, $entry.sourceDocumentHash
+    $sourceHashParts = @(
+        [string]$entry.id
+        [string]$entry.kind
+        [string]$entry.code
+        [string]$entry.hex
+        [string]$entry.name
+        [string]$entry.description
+        [string]$entry.explanation
+        [string]$entry.reference
+        [string]$entry.source
+        [string]$entry.retrieved
+        [string]$entry.applicability
+        [string]$entry.phase
+        [string]$entry.operation
+        [string]$entry.sourceRepository
+        [string]$entry.sourcePath
+        [string]$entry.sourceRevision
+        [string]$entry.licence
+        [string]$entry.sourceDocumentHash
+    )
+    $sourceHashText = $sourceHashParts -join '|'
     $entry | Add-Member -NotePropertyName sourceHash -NotePropertyValue (Get-LVTextSha256 -Text $sourceHashText) -Force
     $entry | Add-Member -NotePropertyName normalized -NotePropertyValue (ConvertTo-LVNormalizedCode -Kind $entry.kind -Hex $entry.hex) -Force
 }
