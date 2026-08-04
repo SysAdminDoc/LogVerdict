@@ -39,6 +39,11 @@ function Invoke-LogVerdictScan {
         Keep signatures ruled benign in the result. Off by default - the entire point
         is to remove them.
 
+        .PARAMETER Redact
+        Return a redacted result with account, machine, profile-path, SID, address,
+        token, and secret identifiers masked. This applies to the result object itself;
+        it also keeps any optional model prompt redaction enabled.
+
         .PARAMETER EvidencePath
         Analyze a LogVerdict evidence zip, extracted evidence directory, JSON report,
         one .evtx file, or a directory of .evtx files without reading any source on the
@@ -152,7 +157,9 @@ function Invoke-LogVerdictScan {
         $offlineResult = Invoke-LVOfflineScan @offlineArgs
         $offlineResult = Add-LVCaseProfileToResult -Result $offlineResult -Profile $caseProfile
         $offlineAdvisory = Get-LVAdvisoryScanContext -Path $AdvisoryPath -Package $AdvisoryPackage -Version $AdvisoryVersion
-        return (Add-LVAdvisoryContextToResult -Result $offlineResult -Context $offlineAdvisory)
+        $offlineResult = Add-LVAdvisoryContextToResult -Result $offlineResult -Context $offlineAdvisory
+        if ($Redact) { $offlineResult = ConvertTo-LVRedactedResult -Result $offlineResult }
+        return $offlineResult
     }
 
     $started = Get-Date
@@ -609,7 +616,7 @@ function Invoke-LogVerdictScan {
         -Status $(if ($all.Count -eq 0) { 'empty' } else { 'completed' }) -ObservedRecords $all.Count -SkippedRecords 0 -Cap $null `
         -ElapsedMilliseconds ([int64][Math]::Round($scanTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
 
-    return [pscustomobject]@{
+    $result = [pscustomobject]@{
         Tool           = 'LogVerdict'
         Version        = $script:LVVersion
         Contract       = New-LVReportContract -Result ([pscustomobject]@{ ScanTime = $started; Offline = $false })
@@ -671,4 +678,6 @@ function Invoke-LogVerdictScan {
         WorstVerdict   = $worst
         ExitCode       = $exitCode
     }
+    if ($Redact) { return (ConvertTo-LVRedactedResult -Result $result) }
+    return $result
 }

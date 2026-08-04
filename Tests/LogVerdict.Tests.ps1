@@ -2636,6 +2636,73 @@ Describe 'Provider and configuration health profiles' {
             ($profiles | Where-Object Profile -eq 'defender-configuration').Advice | Should -Match 'not a malicious verdict'
         }
     }
+
+    It 'records VSS restore-point state as advisory coverage with eviction context' {
+        InModuleScope LogVerdict {
+            $copy = [pscustomobject]@{
+                DeviceObject = '\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy9'
+                InstallDate = '20260802120000.000000-240'
+                State = 12
+            }
+            $inventory = Get-LVShadowCopyInventory -ShadowCopy @($copy)
+            $storage = Get-LVShadowCopyStorageSummary -CommandResult ([pscustomobject]@{
+                ExitCode = 0
+                Output = @('Used Shadow Copy Storage space: 1 GB', 'Maximum Shadow Copy Storage space: 5 GB')
+                Error = $null
+            })
+            $profile = Get-LVPointInTimeRestoreHealthProfile -Inventory $inventory -StorageSummary $storage
+
+            $inventory.Status | Should -BeExactly 'readable'
+            $profile.Status | Should -BeExactly 'readable'
+            $profile.ShadowCopyCount | Should -Be 1
+            $profile.RequiredConfiguration | Should -Match '72-hour|VSS limit|low-free-space'
+            $profile.ObservedConfiguration | Should -Match 'Maximum Shadow Copy Storage space'
+            $profile.Advice | Should -Match 'not.*tampering'
+        }
+    }
+
+    It 'marks a damaged SRUM header and routes the narrow rule through the resolver' {
+        InModuleScope LogVerdict {
+            $database = Join-Path $TestDrive 'SRUDB.dat'
+            Set-Content -LiteralPath $database -Value 'fixture' -Encoding ASCII
+            $profile = Get-LVSRUMHealthProfile -DatabasePath $database -SoftwarePath (Join-Path $TestDrive 'SOFTWARE') `
+                -EsentutilPath (Join-Path $TestDrive 'esentutl.exe') -HeaderResult ([pscustomobject]@{
+                    ExitCode = 0; Output = @('State: Dirty Shutdown'); Error = $null
+                })
+            $record = ConvertTo-LVSRUMDiagnosticRecord -HealthProfile $profile
+            $grouped = Get-LVSignatureReduction -Record @($record) -WindowDays 1
+            $finding = @(Resolve-LVVerdict -Signature @($grouped.Signatures) -Database (Get-LogVerdictDatabase))[0]
+
+            $profile.Status | Should -BeExactly 'readable'
+            $profile.DatabaseState | Should -BeExactly 'Dirty Shutdown'
+            $profile.ApplicationUsageStatus | Should -BeExactly 'not-parsed'
+            $record.Message | Should -Match '^SRUM database state: Dirty Shutdown'
+            $finding.RuleId | Should -BeExactly 'LV-0329'
+            $finding.Verdict | Should -BeExactly 'investigate'
+        }
+    }
+
+    It 'reads only shadow-copy events older than the live channel horizon' {
+        InModuleScope LogVerdict {
+            $copy = [pscustomobject]@{ DeviceObject = '\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy9' }
+            $old = [pscustomobject]@{
+                Source='event'; Channel='System'; Provider='VSS'; Id=8193; Level=2; LevelName='Error'
+                TimeCreated=(Get-Date).AddDays(-5); RecordId=12; Message='old shadow event'
+            }
+            Mock Test-Path { $true }
+            Mock Read-LVArchivedEventFile {
+                [pscustomobject]@{ Channel='System'; Oldest=(Get-Date).AddDays(-5); Records=@($old); Truncated=$false; BudgetStop=$null; Error=$null; ParseMilliseconds=2 }
+            }
+            $coverage = @{ System = [pscustomobject]@{ Oldest=(Get-Date).AddDays(-2) } }
+            $evidence = Get-LVShadowCopyEventEvidence -Inventory ([pscustomobject]@{ Status='readable'; ShadowCopies=@($copy); Error=$null }) `
+                -Channel @('System') -ChannelStatus $coverage -DaysBack 10
+
+            $evidence.Records.Count | Should -Be 1
+            $evidence.Records[0].Origin | Should -BeExactly 'shadow-copy'
+            $evidence.Coverage[0].Status | Should -BeExactly 'readable'
+            Assert-MockCalled Read-LVArchivedEventFile -Times 1 -Exactly
+        }
+    }
 }
 
 Describe 'Live event watch and WEF intake' {
@@ -6069,6 +6136,56 @@ Describe 'Report redaction' {
         }
     }
 
+    It 'fails closed when a result grows an unrecognised top-level property' {
+        InModuleScope LogVerdict {
+            $result = [pscustomobject]@{
+                MachineName = 'HOST-9'; Findings = @(); CrashArtifacts = @(); CoverageNotes = @()
+                FutureEvidence = 'SECRET-HOST and C:\Users\jsmith\secret.log'
+            }
+            { ConvertTo-LVRedactedResult -Result $result } | Should -Throw '*unknown result property*'
+        }
+    }
+
+    It 'redacts live-watch records and model explanation errors' {
+        InModuleScope LogVerdict {
+            $account = [string]$env:USERNAME
+            $result = [pscustomobject]@{
+                MachineName = 'SECRET-HOST'; Findings = @([pscustomobject]@{
+                    SampleMessage = ('SECRET-HOST failed for {0}' -f $account)
+                    ModelExplanationError = ('model failed while reading C:\Users\{0}\token.txt on SECRET-HOST' -f $account)
+                }); CrashArtifacts = @(); CoverageNotes = @()
+                Records = @([pscustomobject]@{
+                    Source = 'event'; Channel = 'System'; Provider = 'Acme'; ProviderId = 'id'
+                    Id = 7; TimeCreated = (Get-Date); MachineName = 'SECRET-HOST'; RecordId = 9
+                    Message = ('S-1-5-21-1-2-3-1000 from {0}@contoso.test' -f $account)
+                    StructuredData = [pscustomobject]@{ EventData = [pscustomobject]@{ Data0 = ('C:\Users\{0}\secret.txt' -f $account) } }
+                })
+            }
+            $redacted = ConvertTo-LVRedactedResult -Result $result
+            $json = $redacted | ConvertTo-Json -Depth 20
+            $json | Should -Not -Match ('SECRET-HOST|{0}|S-1-5-21-1-2-3-1000|contoso\.test' -f [regex]::Escape($account))
+            $redacted.Records[0].Message | Should -Match '<USER>|<SID>|<UPN>'
+            $redacted.Findings[0].ModelExplanationError | Should -Not -Match ('SECRET-HOST|{0}' -f [regex]::Escape($account))
+        }
+    }
+
+    It 'redacts the result returned by Invoke-LogVerdictScan when requested' {
+        InModuleScope LogVerdict {
+            $account = [string]$env:USERNAME
+            Mock Invoke-LVOfflineScan {
+                [pscustomobject]@{
+                    Tool = 'LogVerdict'; Version = '0.8.2'; MachineName = 'SECRET-HOST'
+                    Findings = @(); Records = @([pscustomobject]@{ Message = ('SECRET-HOST; {0}' -f $account); MachineName = 'SECRET-HOST' })
+                    CoverageNotes = @(); CrashArtifacts = @(); Reduction = [pscustomobject]@{ RecordCount = 1; SignatureCount = 1; Ratio = 1 }
+                }
+            }
+            $redacted = Invoke-LogVerdictScan -EvidencePath 'mock.evidence' -Redact
+            $redacted.Redacted | Should -BeTrue
+            $redacted.MachineName | Should -BeExactly '<MACHINE>'
+            ($redacted | ConvertTo-Json -Depth 20) | Should -Not -Match ('SECRET-HOST|{0}' -f [regex]::Escape($account))
+        }
+    }
+
     It 'redacts the sample list, not only the single sample message' {
         InModuleScope LogVerdict {
             $result = [pscustomobject]@{
@@ -6985,6 +7102,11 @@ Describe 'Rule regression fixtures' {
                 if ($f.signature.Channel -eq 'SetupDiag') {
                     $f.signature.Provider | Should -BeExactly 'Microsoft SetupDiag' -Because "$($f.ruleId)'s sample must retain SetupDiag attribution"
                     $f.signature.SampleMessage | Should -Match '^Microsoft SetupDiag .* matched profile ' -Because "$($f.ruleId)'s sample must be a record the SetupDiag projection produces"
+                    continue
+                }
+                if ($f.signature.Channel -eq 'SRUM') {
+                    $f.signature.Provider | Should -BeExactly 'Microsoft SRUM ESE' -Because "$($f.ruleId)'s sample must retain SRUM attribution"
+                    $f.signature.SampleMessage | Should -Match '^SRUM database state: ' -Because "$($f.ruleId)'s sample must be a line the SRUM collector produces"
                     continue
                 }
                 $target = $script:LVTextLogTarget | Where-Object { $_.Name -eq $f.signature.Channel }

@@ -1038,6 +1038,80 @@ function ConvertTo-LVRedactedStructuredData {
     return $copy
 }
 
+function ConvertTo-LVRedactedValue {
+    <#
+        Redact every string in a known report field, including fields added by a
+        bounded producer such as the live watch or an advisory cache. The report
+        contract is deliberately allowlisted at the top level; this helper makes
+        the values inside that allowlist fail-safe without having to predict every
+        future diagnostic leaf.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$Value,
+        [AllowNull()][string]$MachineName,
+        [int]$Depth = 0
+    )
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string]) { return ConvertTo-LVRedactedText -Text ([string]$Value) -MachineName $MachineName }
+    if ($Value -is [datetime] -or $Value -is [datetimeoffset] -or $Value -is [timespan] -or
+        $Value -is [guid] -or $Value -is [ValueType]) { return $Value }
+    if ($Depth -ge 12) {
+        # A bounded report value should never be this deep. Returning a masked text
+        # representation is safer than serializing a recursive or substituted object.
+        return ConvertTo-LVRedactedText -Text ([string]$Value) -MachineName $MachineName
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $map = [ordered]@{}
+        foreach ($key in @($Value.Keys)) {
+            $map[[string]$key] = ConvertTo-LVRedactedValue -Value $Value[$key] -MachineName $MachineName -Depth ($Depth + 1)
+        }
+        return [pscustomobject]$map
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        return @($Value | ForEach-Object {
+            ConvertTo-LVRedactedValue -Value $_ -MachineName $MachineName -Depth ($Depth + 1)
+        })
+    }
+
+    $properties = @($Value.PSObject.Properties)
+    if ($properties.Count -eq 0) { return $Value }
+    $copy = [pscustomobject][ordered]@{}
+    foreach ($property in $properties) {
+        $copy | Add-Member -NotePropertyName $property.Name -NotePropertyValue (
+            ConvertTo-LVRedactedValue -Value $property.Value -MachineName $MachineName -Depth ($Depth + 1)) -Force
+    }
+    return $copy
+}
+
+function Assert-LVRedactedResultShape {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Result)
+
+    # This is the result contract's complete top-level vocabulary across live scans,
+    # offline scans, and live watch. A new producer must add its field here before a
+    # redacted artifact can be written; otherwise it could silently publish evidence.
+    $allowed = @(
+        'Tool', 'Version', 'Mode', 'Contract', 'MachineName', 'ScanTime', 'Duration',
+        'DaysBack', 'Elevated', 'Offline', 'Channels', 'ChannelStatus', 'DeniedChannels',
+        'TruncatedChannels', 'MetadataUnreadableCount', 'CoverageNotes', 'Coverage',
+        'PerformanceTelemetry', 'Performance', 'HealthProfiles', 'ProviderExtensions',
+        'ProviderProjections', 'Reduction', 'Findings', 'Correlations', 'CrashArtifacts',
+        'SetupDiag', 'Horizon', 'HorizonWarning', 'Stability', 'ReliabilityAvailable',
+        'DatabaseName', 'DatabaseDate', 'RuleCount', 'DatabaseFreshness', 'ScanOptions',
+        'CollectionBudget', 'CaseProfile', 'ModelExplanationsEnabled', 'ModelExplanationCount',
+        'PromotedDraftRules', 'History', 'AdvisoryStatus', 'AdvisoryCache', 'Advisories',
+        'WorstVerdict', 'ExitCode', 'EvidencePath', 'EvidenceManifest', 'Records',
+        'BookmarkPath', 'Bookmark', 'StopReason', 'PollCount', 'RecordCount', 'Redacted'
+    )
+    $unknown = @($Result.PSObject.Properties.Name | Where-Object { $allowed -notcontains $_ } | Sort-Object -Unique)
+    if ($unknown.Count -gt 0) {
+        throw ('Redaction refused unknown result property(s): {0}' -f ($unknown -join ', '))
+    }
+}
+
 function ConvertTo-LVRedactedResult {
     <#
         .SYNOPSIS
@@ -1054,10 +1128,23 @@ function ConvertTo-LVRedactedResult {
     #>
     param([Parameter(Mandatory)]$Result)
 
+    Assert-LVRedactedResultShape -Result $Result
     $machine = $Result.MachineName
     $copy = [pscustomobject]@{}
     foreach ($prop in $Result.PSObject.Properties) {
-        $copy | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+        # These fields have shape-specific handling below. Every other known field
+        # is still recursively redacted so a newly-added nested string cannot leak.
+        $value = if ($prop.Name -in @('Findings', 'CrashArtifacts', 'SetupDiag', 'EvidencePath',
+                'EvidenceManifest', 'Coverage', 'HealthProfiles', 'CaseProfile', 'CoverageNotes')) {
+            $prop.Value
+        } elseif ($prop.Value -is [Array]) {
+            @($prop.Value | ForEach-Object {
+                ConvertTo-LVRedactedValue -Value $_ -MachineName $machine
+            })
+        } else {
+            ConvertTo-LVRedactedValue -Value $prop.Value -MachineName $machine
+        }
+        $copy | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $value -Force
     }
 
     $findings = foreach ($f in @($Result.Findings)) {
@@ -1106,6 +1193,9 @@ function ConvertTo-LVRedactedResult {
                 $draft.Evidence = @(@($draft.Evidence) | ForEach-Object { ConvertTo-LVRedactedText -Text $_ -MachineName $machine })
             }
             $c.ModelExplanation = $draft
+        }
+        if ($c.PSObject.Properties['ModelExplanationError'] -and $c.ModelExplanationError) {
+            $c.ModelExplanationError = ConvertTo-LVRedactedText -Text ([string]$c.ModelExplanationError) -MachineName $machine
         }
         $c
     }
