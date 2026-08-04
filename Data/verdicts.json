@@ -69,6 +69,12 @@
       "references": [
         "https://learn.microsoft.com/en-us/answers/questions/4338635/distributed-com-errors-10005"
       ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/4338635/distributed-com-errors-10005",
+          "retrieved": "2026-08-01"
+        }
+      ],
       "falsepositives": [
         "A service deliberately disabled, or a per-user service absent by design, produces this every time something asks for it."
       ]
@@ -140,6 +146,12 @@
       "confidence": "high",
       "references": [
         "https://learn.microsoft.com/en-us/answers/questions/3300056/whea-logger-event-19-a-corrected-hardware-error-ha"
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/3300056/whea-logger-event-19-a-corrected-hardware-error-ha",
+          "retrieved": "2026-08-01"
+        }
       ],
       "falsepositives": [
         "Some platforms report a low steady trickle of corrected cache errors for their whole service life without ever failing.",
@@ -828,11 +840,37 @@
       "id": "LV-0084",
       "status": "stable",
       "verified": "2026-08-01",
-      "locale": "en",
       "match": {
         "source": "event",
         "provider": "ESENT",
-        "messagePattern": "(?i)(-1032|0xfffffbf8|access is denied)"
+        "eventData": {
+          "any": [
+            {
+              "field": "EventData.Data3",
+              "contains": "-1032"
+            },
+            {
+              "field": "EventData.Data4",
+              "contains": "-1032"
+            },
+            {
+              "field": "EventData.Data5",
+              "contains": "-1032"
+            },
+            {
+              "field": "EventData.Data6",
+              "contains": "-1032"
+            },
+            {
+              "field": "EventData.Data7",
+              "contains": "-1032"
+            },
+            {
+              "field": "EventData.Data8",
+              "contains": "-1032"
+            }
+          ]
+        }
       },
       "verdict": "investigate",
       "title": "A component could not write to its own database",
@@ -842,6 +880,12 @@
       "confidence": "medium",
       "references": [
         "https://learn.microsoft.com/en-us/answers/questions/4074544/a-fix-for-esent-error-1032-event-id-413-486"
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/4074544/a-fix-for-esent-error-1032-event-id-413-486",
+          "retrieved": "2026-08-01"
+        }
       ],
       "falsepositives": [
         "Transient during a backup or a shadow copy, when the file is briefly locked and the component retries successfully.",
@@ -885,6 +929,12 @@
       "confidence": "high",
       "references": [
         "https://learn.microsoft.com/en-us/answers/questions/1035945/how-to-use-lodctr-to-resolve-event-id-1008-or-3009"
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/1035945/how-to-use-lodctr-to-resolve-event-id-1008-or-3009",
+          "retrieved": "2026-08-01"
+        }
       ],
       "falsepositives": [
         "Left behind by software that was uninstalled without removing its counter registration; the named service may no longer exist at all."
@@ -1630,6 +1680,12 @@
       "references": [
         "https://learn.microsoft.com/en-us/answers/questions/2574568/event-id-200-201-202-source-devicesetupmanager"
       ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/2574568/event-id-200-201-202-source-devicesetupmanager",
+          "retrieved": "2026-08-01"
+        }
+      ],
       "falsepositives": [
         "Expected on every boot on a machine with no internet access, or one behind a proxy that blocks Windows Update."
       ]
@@ -1652,6 +1708,12 @@
       "references": [
         "https://learn.microsoft.com/en-us/answers/questions/2574568/event-id-200-201-202-source-devicesetupmanager"
       ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/2574568/event-id-200-201-202-source-devicesetupmanager",
+          "retrieved": "2026-08-01"
+        }
+      ],
       "falsepositives": [
         "Expected on any machine without internet access."
       ]
@@ -1673,6 +1735,12 @@
       "confidence": "high",
       "references": [
         "https://learn.microsoft.com/en-us/answers/questions/2574568/event-id-200-201-202-source-devicesetupmanager"
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/answers/questions/2574568/event-id-200-201-202-source-devicesetupmanager",
+          "retrieved": "2026-08-01"
+        }
       ],
       "falsepositives": [
         "Normal at boot, and normal on a laptop that wakes before its wireless associates."
@@ -2458,7 +2526,11 @@
         "source": "event",
         "channel": "Application",
         "provider": "Microsoft-Windows-Security-SPP",
-        "eventId": 8233
+        "eventId": 8233,
+        "eventData": {
+          "field": "EventData.Data0",
+          "equals": "0xC004F074"
+        }
       },
       "verdict": "investigate",
       "title": "Volume activation could not reach or accept a KMS service",
@@ -2881,7 +2953,11 @@
         "source": "event",
         "channel": "Application",
         "provider": ".NET Runtime",
-        "eventId": 1023
+        "eventId": 1023,
+        "eventData": {
+          "field": "EventData.Data0",
+          "contains": "https://aka.ms/dotnet/app-launch-failed"
+        }
       },
       "verdict": "actionable",
       "title": "A .NET application is missing its required runtime",

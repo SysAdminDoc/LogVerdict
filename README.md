@@ -414,13 +414,15 @@ Put site-specific rules in `Data/verdicts.local.json` - it is merged automatical
 Test-LogVerdictDatabase
 ```
 
-Active rules and correlations must carry a reference, source record, or explicit
-`provenance: "internal-observation"`. Database loading also rejects duplicate IDs, missing or
+Active rules and correlations must carry a checkable attribution: a reference, source record, or
+explicit `provenance: "internal-observation"`. The shipped rules record that attribution as a
+`sources[]` entry or explicit provenance; `references[]` remains the reader-facing link and is
+also accepted for local databases. Database loading also rejects duplicate IDs, missing or
 inactive correlation references, unsupported correlation fields, unreadable timespans, and
 correlation types the resolver does not implement; malformed local additions fail before a scan
 can produce a verdict.
 
-Every shipped rule also carries a regression fixture in [`Data/fixtures.json`](Data/fixtures.json): a minimal signature the rule must still claim, resolved through the real resolver. A rule that quietly stops matching is otherwise invisible - it produces no error, just an `unknown` signature that looks like a gap in coverage rather than a broken rule. The fixtures also catch the opposite mistake, a new rule that is broader than it looks and shadows an existing one, and the failure names which rule stole the match. Local databases need no fixtures; the checks are skipped when there is no fixture file.
+Every shipped rule also carries a regression fixture in [`Data/fixtures.json`](Data/fixtures.json): a minimal signature the rule must still claim, resolved through the real resolver. A rule that quietly stops matching is otherwise invisible - it produces no error, just an `unknown` signature that looks like a gap in coverage rather than a broken rule. Rules with `eventData` conditions additionally carry a `nearMiss: true` fixture that the rule must reject, preventing a structured predicate from silently widening. The fixtures also catch the opposite mistake, a new rule that is broader than it looks and shadows an existing one, and the failure names which rule stole the match. Local databases need no fixtures; the checks are skipped when there is no fixture file.
 
 The Microsoft support corpus has a guarded import path. `Tools\Import-MsDocsEvent.ps1` reads a local `MicrosoftDocs/SupportArticles-docs` checkout, verifies its CC-BY-4.0 licence, discovers event-ID articles, and turns only reviewed, paraphrased prose into attributed rule objects. It refuses copied prose and never edits the database on discovery alone.
 
@@ -442,7 +444,7 @@ removed candidates between imports. The importer is offline and never edits `Dat
 redacted artifact. `Tools\Import-LogVerdictReviewArtifact.ps1` validates that contract and emits a diff only; it
 does not promote accepted material automatically.
 
-`match` accepts `source`, `channel`, `provider` (trailing `*` wildcard allowed), `eventId`, `messagePattern` (regex), and `eventData`. A structured condition looks like `{"all":[{"field":"EventData.Image","endswith":"\\\\powershell.exe"}]}`; unsupported Sigma modifiers remain inactive importer candidates. More match keys means higher specificity, and the most specific matching rule wins.
+`match` accepts `source`, `channel`, `provider` (trailing `*` wildcard allowed), `eventId`, `messagePattern` (regex), and `eventData`. Prefer `eventData` whenever the ruling depends on a payload field: rendered Windows messages can be localized while XML values such as HRESULTs remain stable. A structured condition looks like `{"all":[{"field":"EventData.Image","endswith":"\\\\powershell.exe"}]}`; supported modifiers are `equals`, `contains`, `startswith`, `endswith`, and `regex`, combined through bounded `all`, `any`, and `not` conditions. Unsupported Sigma modifiers remain inactive importer candidates. More match keys means higher specificity, and the most specific matching rule wins.
 
 ## Provider extensions
 

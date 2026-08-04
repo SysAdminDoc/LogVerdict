@@ -4544,6 +4544,18 @@ Describe 'Rule provenance' {
         Test-LogVerdictDatabase -Path $observedPath -Quiet | Should -BeTrue
     }
 
+    It 'gives every active shipped rule source metadata or explicit provenance' {
+        InModuleScope LogVerdict {
+            $database = Get-LogVerdictDatabase
+            $missing = @($database.rules | Where-Object {
+                (Test-LVRuleActive -Rule $_) -and
+                @($_.sources | Where-Object { $_ }).Count -eq 0 -and
+                [string]$_.provenance -ne 'internal-observation'
+            })
+            $missing.Count | Should -Be 0 -Because ("unattributed active rules: {0}" -f (@($missing.id) -join ', '))
+        }
+    }
+
     It 'does not invent a phantom source for a rule that has none' {
         # @($null) is a one-element array holding null, so an unfiltered wrap reported
         # every sourceless rule as having a source with no uri.
@@ -6305,6 +6317,29 @@ Describe 'Rule regression fixtures' {
 
     It 'resolves every fixture to its own rule with the expected verdict' {
         @(Test-LogVerdictDatabase).Count | Should -Be 0
+    }
+
+    It 'pairs every structured rule with a positive and rejecting near-miss fixture' {
+        InModuleScope LogVerdict {
+            $db = Get-LogVerdictDatabase
+            $fixtures = Get-LVFixtureSet
+            foreach ($rule in @($db.rules | Where-Object { $_.match.eventData })) {
+                @($fixtures.fixtures | Where-Object { $_.ruleId -eq $rule.id -and $_.nearMiss -ne $true }).Count |
+                    Should -BeGreaterThan 0 -Because "$($rule.id) must prove a positive structured match"
+                @($fixtures.fixtures | Where-Object { $_.ruleId -eq $rule.id -and $_.nearMiss -eq $true }).Count |
+                    Should -BeGreaterThan 0 -Because "$($rule.id) must prove its structured near miss is rejected"
+            }
+        }
+    }
+
+    It 'catches a structured rule broadened past its near miss' {
+        $path = Export-BrokenPair -MutateDatabase {
+            param($db)
+            $rule = @($db.rules | Where-Object id -eq 'LV-0170')[0]
+            $rule.match.PSObject.Properties.Remove('eventData')
+        }
+        $problems = @(Test-LogVerdictDatabase -Path $path -IncludeWarnings | Where-Object RuleId -eq 'LV-0170')
+        @($problems | Where-Object { $_.Problem -like '*near-miss fixture*' }).Count | Should -Be 1
     }
 
     It 'drives the real resolver rather than a reimplementation of the matcher' {

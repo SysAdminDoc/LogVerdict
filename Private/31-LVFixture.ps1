@@ -5,7 +5,9 @@
 # no longer fires produces no error, it produces an "unknown" signature that looks
 # exactly like a gap in coverage. Every rule therefore carries a minimal signature it
 # must still claim, resolved through the real Resolve-LVVerdict rather than through a
-# reimplementation of the matcher.
+# reimplementation of the matcher. Rules with structured conditions also carry a
+# near-miss signature they must reject, so an accidentally broad EventData predicate is
+# visible too.
 #
 # This catches three regressions that no other test does:
 #   - a masking or collector change that alters the shape a rule matches against
@@ -105,8 +107,11 @@ function Test-LVFixtureResolution {
         A fixture resolving to the right rule with the wrong verdict means the ruling
         changed without the fixture being updated to agree.
 
-        A rule carrying no fixture at all is a warning: the database is still sound, it
-        is merely unprotected. The test suite holds the shipped database to zero.
+        A fixture marked nearMiss proves that its named rule does not claim a closely
+        related signature. Structured rules without a near-miss fixture are warnings.
+
+        A rule carrying no positive fixture at all is a warning: the database is still
+        sound, it is merely unprotected. The test suite holds the shipped database to zero.
     #>
     [CmdletBinding()]
     param(
@@ -122,6 +127,7 @@ function Test-LVFixtureResolution {
     foreach ($r in $Database.rules) { $ruleById[$r.id] = $r }
 
     $covered = @{}
+    $nearMissCovered = @{}
 
     foreach ($fixture in $fixtures) {
         $ruleId = $fixture.ruleId
@@ -135,10 +141,25 @@ function Test-LVFixtureResolution {
             }) | Out-Null
             continue
         }
-        $covered[$ruleId] = $true
+        $isNearMiss = ($fixture.PSObject.Properties['nearMiss'] -and $fixture.nearMiss -eq $true)
+        if ($isNearMiss) {
+            $nearMissCovered[$ruleId] = $true
+        } else {
+            $covered[$ruleId] = $true
+        }
 
         $signature = ConvertTo-LVFixtureSignature -Fixture $fixture
         $resolved = @(Resolve-LVVerdict -Signature @($signature) -Database $Database) | Select-Object -First 1
+
+        if ($isNearMiss) {
+            if ($resolved -and $resolved.RuleId -eq $ruleId) {
+                $problems.Add([pscustomobject]@{
+                    RuleId  = $ruleId
+                    Problem = ("near-miss fixture '{0}' was still claimed by its named rule" -f $label)
+                }) | Out-Null
+            }
+            continue
+        }
 
         if ($null -eq $resolved) {
             $problems.Add([pscustomobject]@{ RuleId = $ruleId; Problem = ("fixture '{0}' resolved to nothing" -f $label) }) | Out-Null
@@ -165,12 +186,20 @@ function Test-LVFixtureResolution {
 
     foreach ($rule in $Database.rules) {
         if (-not (Test-LVRuleActive -Rule $rule)) { continue }
-        if ($covered.ContainsKey($rule.id)) { continue }
-        $problems.Add([pscustomobject]@{
-            RuleId   = $rule.id
-            Severity = 'warning'
-            Problem  = 'no regression fixture; nothing would notice if this rule stopped matching'
-        }) | Out-Null
+        if (-not $covered.ContainsKey($rule.id)) {
+            $problems.Add([pscustomobject]@{
+                RuleId   = $rule.id
+                Severity = 'warning'
+                Problem  = 'no regression fixture; nothing would notice if this rule stopped matching'
+            }) | Out-Null
+        }
+        if ($rule.match -and $rule.match.eventData -and -not $nearMissCovered.ContainsKey($rule.id)) {
+            $problems.Add([pscustomobject]@{
+                RuleId   = $rule.id
+                Severity = 'warning'
+                Problem  = 'structured rule has no near-miss fixture; nothing proves its EventData condition rejects adjacent events'
+            }) | Out-Null
+        }
     }
 
     return ConvertTo-LVArrayOutput -Value @($problems.ToArray())

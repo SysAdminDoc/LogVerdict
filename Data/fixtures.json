@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "LogVerdict rule regression fixtures",
   "updated": "2026-08-01",
-  "notes": "One minimal signature per rule, resolved against the shipped database by the test suite. origin=observed means the signature was captured from a real machine; origin=constructed means it was built from the rule match keys because nothing on the authoring machine exercised the rule.",
+  "notes": "One positive minimal signature per rule, resolved against the shipped database by the test suite. Rules with structured EventData conditions also have nearMiss=true fixtures that the named rule must reject. origin=observed means the signature was captured from a real machine; origin=constructed means it was built from the rule match keys because nothing on the authoring machine exercised the rule.",
   "fixtures": [
     {
       "ruleId": "LV-0001",
@@ -484,8 +484,43 @@
         "Source": "event",
         "Channel": "Application",
         "Provider": "ESENT",
-        "Id": 486,
-        "SampleMessage": "svchost (1948) SRUJet: An attempt to move the file \"C:\\Windows\\system32\\SRU\\SRU.log\" to \"C:\\Windows\\system32\\SRU\\SRU00597.log\" failed with system error 5 (0x00000005): \"Access is denied. \". The move file operation will fail with error -1032 (0xfffffbf8)."
+        "Id": 490,
+        "SampleMessage": "svchost (1948) SRUJet: An attempt to open the file \"C:\\Windows\\system32\\SRU\\SRUDB.dat\" for read / write access failed with system error 5 (0x00000005): \"Access is denied. \". The open file operation will fail with error -1032 (0xfffffbf8).",
+        "StructuredData": {
+          "EventData": {
+            "Data0": "svchost",
+            "Data1": "1948,D,50",
+            "Data2": "SRUJet: ",
+            "Data3": "C:\\Windows\\system32\\SRU\\SRUDB.dat",
+            "Data4": "-1032 (0xfffffbf8)",
+            "Data5": "5 (0x00000005)",
+            "Data6": "Access is denied. "
+          }
+        }
+      }
+    },
+    {
+      "ruleId": "LV-0084",
+      "name": "different ESENT write error",
+      "origin": "observed",
+      "nearMiss": true,
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "ESENT",
+        "Id": 482,
+        "SampleMessage": "svchost (4840) SRUJet: A write failed with system error 112 because there is not enough space on the disk; the operation will fail with error -1808.",
+        "StructuredData": {
+          "EventData": {
+            "Data0": "svchost",
+            "Data1": "4840,D,0,0",
+            "Data2": "SRUJet: ",
+            "Data3": "C:\\Windows\\system32\\SRU\\SRUres00002.jrs",
+            "Data6": "-1808 (0xfffff8f0)",
+            "Data7": "112 (0x00000070)",
+            "Data8": "There is not enough space on the disk. "
+          }
+        }
       }
     },
     {
@@ -1301,7 +1336,36 @@
         "Channel": "Application",
         "Provider": "Microsoft-Windows-Security-SPP",
         "Id": 8233,
-        "SampleMessage": "The rules engine reported a failed VL activation attempt. Reason: 0xC004F074."
+        "SampleMessage": "The rules engine reported a failed VL activation attempt. Reason: 0xC004F074.",
+        "StructuredData": {
+          "EventData": {
+            "Data0": "0xC004F074",
+            "Data1": "0ff1ce15-a989-479d-af46-f275c6370663",
+            "Data2": "9caabccb-61b1-4b4b-8bec-d10a3c3ac2ce",
+            "Data3": "TimerEvent"
+          }
+        }
+      }
+    },
+    {
+      "ruleId": "LV-0170",
+      "name": "different volume-activation failure",
+      "origin": "constructed",
+      "nearMiss": true,
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": "Microsoft-Windows-Security-SPP",
+        "Id": 8233,
+        "SampleMessage": "The rules engine reported a failed VL activation attempt. Reason: 0xC004C004.",
+        "StructuredData": {
+          "EventData": {
+            "Data0": "0xC004C004",
+            "Data1": "0ff1ce15-a989-479d-af46-f275c6370663",
+            "Data2": "9caabccb-61b1-4b4b-8bec-d10a3c3ac2ce",
+            "Data3": "TimerEvent"
+          }
+        }
       }
     },
     {
@@ -1481,7 +1545,30 @@
         "Channel": "Application",
         "Provider": ".NET Runtime",
         "Id": 1023,
-        "SampleMessage": "A .NET application failed. You must install or update .NET to run this application. Framework: Microsoft.NETCore.App, version 3.0.0, x64."
+        "SampleMessage": "A .NET application failed. You must install or update .NET to run this application. Framework: Microsoft.NETCore.App, version 3.0.0, x64. Learn more: https://aka.ms/dotnet/app-launch-failed",
+        "StructuredData": {
+          "EventData": {
+            "Data0": "Description: A .NET application failed. Application: Example.exe Message: You must install or update .NET to run this application. Framework: Microsoft.NETCore.App, version 3.0.0, x64. Learn more: https://aka.ms/dotnet/app-launch-failed"
+          }
+        }
+      }
+    },
+    {
+      "ruleId": "LV-0185",
+      "name": "different runtime failure under event 1023",
+      "origin": "constructed",
+      "nearMiss": true,
+      "signature": {
+        "Source": "event",
+        "Channel": "Application",
+        "Provider": ".NET Runtime",
+        "Id": 1023,
+        "SampleMessage": "The process was terminated due to an internal error in the .NET Runtime.",
+        "StructuredData": {
+          "EventData": {
+            "Data0": "The process was terminated due to an internal error in the .NET Runtime."
+          }
+        }
       }
     },
     {
