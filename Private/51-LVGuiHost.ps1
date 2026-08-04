@@ -402,7 +402,7 @@ function Sync-LVGuiTheme {
 $script:LVGuiElement = @(
     'NavOverview', 'NavFindings', 'NavCoverage', 'NavActivity',
     'PageOverview', 'PageFindings', 'PageCoverage', 'PageActivity',
-    'TxtSideMachine', 'TxtSideElevation', 'BtnSideElevate',
+    'TxtSideMachine', 'TxtSideElevation', 'BtnSideElevate', 'TxtVersion',
     'TxtSideDbTitle', 'TxtSideDbMeta', 'TxtSideDbUpdated',
     'TxtOverviewDays', 'ChkOverviewAllChannels', 'ChkOverviewDiagnosticChannels',
     'ChkOverviewIncludeText', 'ChkOverviewIncludeBenign', 'TxtOverviewChannels',
@@ -430,13 +430,7 @@ $script:LVGuiElement = @(
     'TxtActivityLog', 'TxtActivitySearch', 'TxtActivitySearchHint', 'TxtActivityDuration',
     'TxtActivityRecords', 'TxtActivitySignatures', 'TxtActivityRules',
     'TxtActivityReportState', 'BtnActivitySave', 'BtnActivityOpen',
-    'TxtVersion', 'TxtMachine', 'ChipElevation', 'TxtElevation', 'PnlElevate', 'BtnElevate',
-    'TxtDays', 'ChkAllChannels', 'ChkSkipText', 'ChkIncludeBenign', 'BtnScan', 'BtnCancel',
-    'PnlSummary', 'ChipCritical', 'ChipActionable', 'ChipInvestigate', 'ChipUnknown',
-    'ChipInformational', 'ChipBenign',
-    'TxtRecords', 'TxtSignatures', 'TxtReduction', 'TxtRules',
-    'PnlCoverage', 'LstCoverage', 'PnlCrash', 'LstCrash',
-    'PnlCorrelation', 'LstCorrelation',
+    'PnlElevate', 'BtnElevate',
     'TxtSearch', 'TxtSearchHint', 'TxtShown', 'FltSource', 'FltChannel', 'FltProvider',
     'FltEventId', 'FltCorrelation', 'FltRuleStatus', 'LvFindings',
     'PnlEmpty', 'TxtEmptyTitle', 'TxtEmptyBody',
@@ -445,7 +439,6 @@ $script:LVGuiElement = @(
     'PnlFalsePositives', 'LstFalsePositives', 'PnlRefs', 'LstRefs', 'LstUnsafeRefs',
     'TxtSample', 'TxtProvenance',
     'BtnCopy', 'BtnCopySummary', 'BtnSaveReport', 'BtnOpenReport',
-    'RowLog', 'BtnToggleLog', 'TxtLastLine', 'TxtLog',
     'PbScan', 'TxtStatus', 'TxtFooter'
 )
 
@@ -458,7 +451,6 @@ $script:LVGuiSortKey = @{
     'TIMES'          = 'Count'
     'PER DAY'        = 'PerDay'
     'LAST SEEN'      = 'LastSeenSort'
-    'WHERE FROM'     = 'Origin'
 }
 
 function Get-LVVerdictStyle {

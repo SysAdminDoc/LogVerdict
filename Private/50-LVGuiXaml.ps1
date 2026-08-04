@@ -505,14 +505,12 @@ function Get-LVGuiXaml {
     </Grid.ColumnDefinitions>
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
-      <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
-      <RowDefinition Height="Auto"/>
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
     <!-- ============ Navigation rail ============ -->
-    <Border Grid.Column="0" Grid.RowSpan="5" Background="{DynamicResource Mantle}"
+    <Border Grid.Column="0" Grid.RowSpan="3" Background="{DynamicResource Mantle}"
             BorderBrush="{DynamicResource Surface1}" BorderThickness="0,0,1,0" Padding="16,20,16,16">
       <Grid>
         <Grid.RowDefinitions>
@@ -532,6 +530,8 @@ function Get-LVGuiXaml {
                        FontWeight="SemiBold"/>
             <TextBlock Text="Clarity from Windows logs" Foreground="{DynamicResource TextMuted}"
                        FontSize="10.5" Margin="0,2,0,0"/>
+            <TextBlock x:Name="TxtVersion" Text="" Foreground="{DynamicResource TextMuted}"
+                       FontSize="9.5" Margin="0,2,0,0"/>
           </StackPanel>
         </StackPanel>
 
@@ -604,47 +604,8 @@ function Get-LVGuiXaml {
       </Grid>
     </Border>
 
-    <!-- ============ Header ============ -->
-    <Border Grid.Column="1" Grid.Row="0" Background="{DynamicResource Mantle}" BorderBrush="{DynamicResource Surface0}"
-            Visibility="Collapsed"
-            BorderThickness="0,0,0,1" Padding="20,14">
-      <Grid>
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="Auto"/>
-          <ColumnDefinition Width="*"/>
-          <ColumnDefinition Width="Auto"/>
-        </Grid.ColumnDefinitions>
-
-        <StackPanel Grid.Column="0" Orientation="Horizontal">
-          <Border Width="34" Height="34" CornerRadius="8" Background="{DynamicResource Blue}"
-                  VerticalAlignment="Center">
-            <TextBlock Text="LV" Foreground="{DynamicResource AccentInk}" FontWeight="Bold" FontSize="14"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
-          </Border>
-          <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Text="LogVerdict" Foreground="{DynamicResource Text}" FontSize="17"
-                         FontWeight="SemiBold"/>
-              <TextBlock x:Name="TxtVersion" Foreground="{DynamicResource TextMuted}" FontSize="11"
-                         Margin="8,0,0,0" VerticalAlignment="Bottom" Text="v"/>
-            </StackPanel>
-            <TextBlock Text="What your logs actually say, in plain English"
-                       Foreground="{DynamicResource TextMuted}" FontSize="11.5" Margin="0,1,0,0"/>
-          </StackPanel>
-        </StackPanel>
-
-        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-          <TextBlock x:Name="TxtMachine" Foreground="{DynamicResource Subtext0}" FontSize="12"
-                     VerticalAlignment="Center" Margin="0,0,14,0" Text=""/>
-          <Border x:Name="ChipElevation" CornerRadius="5" Padding="9,4" Background="{DynamicResource Surface0}">
-            <TextBlock x:Name="TxtElevation" Foreground="{DynamicResource Subtext0}" FontSize="11" Text=""/>
-          </Border>
-        </StackPanel>
-      </Grid>
-    </Border>
-
     <!-- ============ Elevation notice ============ -->
-    <Border x:Name="PnlElevate" Grid.Column="1" Grid.Row="1" Background="{DynamicResource ElevationPanel}" BorderBrush="{DynamicResource Surface2}"
+    <Border x:Name="PnlElevate" Grid.Column="1" Grid.Row="0" Background="{DynamicResource ElevationPanel}" BorderBrush="{DynamicResource Surface2}"
             BorderThickness="0,0,0,1" Padding="20,10" Visibility="Collapsed">
       <Grid>
         <Grid.ColumnDefinitions>
@@ -660,7 +621,7 @@ function Get-LVGuiXaml {
     </Border>
 
     <!-- ============ Overview page ============ -->
-    <Grid x:Name="PageOverview" Grid.Column="1" Grid.Row="2" Margin="22,18,22,16">
+    <Grid x:Name="PageOverview" Grid.Column="1" Grid.Row="1" Margin="22,18,22,16">
       <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <Grid Margin="2,0,2,18">
@@ -904,145 +865,15 @@ function Get-LVGuiXaml {
     </Grid>
 
     <!-- ============ Body ============ -->
-    <Grid x:Name="PageFindings" Grid.Column="1" Grid.Row="2" Visibility="Collapsed">
+    <Grid x:Name="PageFindings" Grid.Column="1" Grid.Row="1" Visibility="Collapsed">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="0"/>
         <ColumnDefinition Width="*" MinWidth="380"/>
         <ColumnDefinition Width="5"/>
         <ColumnDefinition Width="450" MinWidth="330"/>
       </Grid.ColumnDefinitions>
 
-      <!-- ==== Left: controls ==== -->
-      <Border Grid.Column="0" Background="{DynamicResource Mantle}" BorderBrush="{DynamicResource Surface0}"
-              BorderThickness="0,0,1,0">
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
-          <StackPanel Margin="18,18,18,18">
-
-            <TextBlock Text="SCAN" Style="{StaticResource PanelLabel}"/>
-
-            <TextBlock x:Name="LblDays" Text="Look back this many days" Foreground="{DynamicResource Subtext0}"
-                       FontSize="12" Margin="0,0,0,6"/>
-            <!-- Both, deliberately. LabeledBy records the relationship to the visible
-                 caption; Name guarantees the announcement, because the LabeledBy
-                 fallback only fires when the peer is reached through a connected tree
-                 and returns nothing for a peer created directly against the element. -->
-            <TextBox x:Name="TxtDays" Text="30" Margin="0,0,0,12"
-                     AutomationProperties.LabeledBy="{Binding ElementName=LblDays}"
-                     AutomationProperties.Name="Look back this many days"/>
-
-            <CheckBox x:Name="ChkAllChannels" Content="Sweep every event channel"/>
-            <CheckBox x:Name="ChkSkipText" Content="Skip CBS / DISM / setup logs"/>
-            <CheckBox x:Name="ChkIncludeBenign" Content="Show signatures ruled harmless"/>
-
-            <Button x:Name="BtnScan" Style="{StaticResource AccentButton}" Margin="0,10,0,0"
-                    Content="Run scan"/>
-            <Button x:Name="BtnCancel" Style="{StaticResource BaseButton}" Margin="0,8,0,0"
-                    Content="Cancel" Visibility="Collapsed"/>
-
-            <!-- ==== Summary ==== -->
-            <StackPanel x:Name="PnlSummary" Visibility="Collapsed">
-              <TextBlock Text="VERDICTS" Style="{StaticResource PanelLabel}" Margin="0,26,0,9"/>
-              <TextBlock Foreground="{DynamicResource TextMuted}" FontSize="11" TextWrapping="Wrap"
-                         Margin="0,-4,0,9" Text="Click to show or hide a verdict."/>
-
-              <ToggleButton x:Name="ChipCritical"    Style="{StaticResource ChipToggle}" Tag="{DynamicResource Red}" IsChecked="True"/>
-              <ToggleButton x:Name="ChipActionable"  Style="{StaticResource ChipToggle}" Tag="{DynamicResource Peach}" IsChecked="True"/>
-              <ToggleButton x:Name="ChipInvestigate" Style="{StaticResource ChipToggle}" Tag="{DynamicResource Yellow}" IsChecked="True"/>
-              <ToggleButton x:Name="ChipUnknown"     Style="{StaticResource ChipToggle}" Tag="{DynamicResource Lavender}" IsChecked="True"/>
-              <ToggleButton x:Name="ChipInformational" Style="{StaticResource ChipToggle}" Tag="{DynamicResource Sky}" IsChecked="True"/>
-              <ToggleButton x:Name="ChipBenign"      Style="{StaticResource ChipToggle}" Tag="{DynamicResource Green}" IsChecked="True"/>
-
-              <TextBlock Text="CORPUS" Style="{StaticResource PanelLabel}" Margin="0,22,0,9"/>
-              <Border Background="{DynamicResource Base}" CornerRadius="6" Padding="12,10">
-                <StackPanel>
-                  <Grid Margin="0,0,0,5">
-                    <TextBlock Text="Records read" Foreground="{DynamicResource TextMuted}" FontSize="11.5"/>
-                    <TextBlock x:Name="TxtRecords" HorizontalAlignment="Right"
-                               Foreground="{DynamicResource Text}" FontSize="11.5" Text="-"/>
-                  </Grid>
-                  <Grid Margin="0,0,0,5">
-                    <TextBlock Text="Distinct signatures" Foreground="{DynamicResource TextMuted}" FontSize="11.5"/>
-                    <TextBlock x:Name="TxtSignatures" HorizontalAlignment="Right"
-                               Foreground="{DynamicResource Text}" FontSize="11.5" Text="-"/>
-                  </Grid>
-                  <Grid Margin="0,0,0,5">
-                    <TextBlock Text="Noise removed" Foreground="{DynamicResource TextMuted}" FontSize="11.5"/>
-                    <TextBlock x:Name="TxtReduction" HorizontalAlignment="Right"
-                               Foreground="{DynamicResource Green}" FontSize="11.5" Text="-"/>
-                  </Grid>
-                  <Grid>
-                    <TextBlock Text="Rules applied" Foreground="{DynamicResource TextMuted}" FontSize="11.5"/>
-                    <TextBlock x:Name="TxtRules" HorizontalAlignment="Right"
-                               Foreground="{DynamicResource Text}" FontSize="11.5" Text="-"/>
-                  </Grid>
-                </StackPanel>
-              </Border>
-            </StackPanel>
-
-            <!-- ==== Correlated findings ==== -->
-            <StackPanel x:Name="PnlCorrelation" Visibility="Collapsed"
-                        AutomationProperties.Name="Signatures that happened together">
-              <TextBlock Text="HAPPENED TOGETHER" Style="{StaticResource PanelLabel}"
-                         Margin="0,22,0,9" TextWrapping="Wrap"/>
-              <TextBlock Text="These also appear in the list. Apart they are symptoms; together they name a cause."
-                         Foreground="{DynamicResource TextMuted}" FontSize="11" TextWrapping="Wrap"
-                         Margin="0,-4,0,9"/>
-              <Border Background="{DynamicResource CoveragePanel}" CornerRadius="6" Padding="12,10"
-                      BorderBrush="{DynamicResource Surface0}" BorderThickness="1">
-                <ItemsControl x:Name="LstCorrelation">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                      <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,7"
-                                 Foreground="{DynamicResource Subtext0}" FontSize="11.5" LineHeight="17"/>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-              </Border>
-            </StackPanel>
-
-            <!-- ==== Crash evidence ==== -->
-            <StackPanel x:Name="PnlCrash" Visibility="Collapsed">
-              <TextBlock Text="CRASH EVIDENCE ON DISK" Style="{StaticResource PanelLabel}"
-                         Margin="0,22,0,9" TextWrapping="Wrap"/>
-              <TextBlock Text="Collected, not decoded. Reading a dump needs a debugger."
-                         Foreground="{DynamicResource TextMuted}" FontSize="11" TextWrapping="Wrap"
-                         Margin="0,-4,0,9"/>
-              <Border Background="{DynamicResource Base}" CornerRadius="6" Padding="12,10"
-                      BorderBrush="{DynamicResource Surface0}" BorderThickness="1">
-                <ItemsControl x:Name="LstCrash">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                      <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,6"
-                                 Foreground="{DynamicResource TextMuted}" FontSize="11.5"
-                                 FontFamily="Consolas" LineHeight="16"/>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-              </Border>
-            </StackPanel>
-
-            <!-- ==== Coverage gaps ==== -->
-            <StackPanel x:Name="PnlCoverage" Visibility="Collapsed">
-              <TextBlock Text="WHAT THIS SCAN COULD NOT SEE" Style="{StaticResource PanelLabel}"
-                         Margin="0,22,0,9" TextWrapping="Wrap"/>
-              <Border Background="{DynamicResource CoveragePanel}" CornerRadius="6" Padding="12,10">
-                <ItemsControl x:Name="LstCoverage">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                      <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,7"
-                                 Foreground="{DynamicResource Subtext0}" FontSize="11.5" LineHeight="17"/>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-              </Border>
-            </StackPanel>
-
-          </StackPanel>
-        </ScrollViewer>
-      </Border>
-
       <!-- ==== Centre: findings ==== -->
-      <Grid Grid.Column="1">
+      <Grid Grid.Column="0">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto"/>
           <RowDefinition Height="Auto"/>
@@ -1195,10 +1026,10 @@ function Get-LVGuiXaml {
         </StackPanel>
       </Grid>
 
-      <GridSplitter Grid.Column="2" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+      <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
 
       <!-- ==== Right: detail ==== -->
-      <Border Grid.Column="3" Background="{DynamicResource Mantle}" BorderBrush="{DynamicResource Surface0}"
+      <Border Grid.Column="2" Background="{DynamicResource Mantle}" BorderBrush="{DynamicResource Surface0}"
               BorderThickness="1,0,0,0">
         <Grid>
           <Grid.RowDefinitions>
@@ -1307,7 +1138,7 @@ function Get-LVGuiXaml {
     </Grid>
 
     <!-- ============ Coverage page ============ -->
-    <Grid x:Name="PageCoverage" Grid.Column="1" Grid.Row="2" Visibility="Collapsed" Margin="22,18,22,16">
+    <Grid x:Name="PageCoverage" Grid.Column="1" Grid.Row="1" Visibility="Collapsed" Margin="22,18,22,16">
       <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <Grid Margin="2,0,2,16">
@@ -1431,7 +1262,7 @@ function Get-LVGuiXaml {
     </Grid>
 
     <!-- ============ Activity page ============ -->
-    <Grid x:Name="PageActivity" Grid.Column="1" Grid.Row="2" Visibility="Collapsed" Margin="22,18,22,16">
+    <Grid x:Name="PageActivity" Grid.Column="1" Grid.Row="1" Visibility="Collapsed" Margin="22,18,22,16">
       <Grid>
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
         <Grid Grid.Row="0" Margin="2,0,2,16">
@@ -1531,41 +1362,8 @@ function Get-LVGuiXaml {
       </Grid>
     </Grid>
 
-    <!-- ============ Log panel ============ -->
-    <Border Grid.Column="1" Grid.Row="3" Background="{DynamicResource Crust}" BorderBrush="{DynamicResource Surface0}"
-            Visibility="Collapsed"
-            BorderThickness="0,1,0,0">
-      <Grid>
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto"/>
-          <RowDefinition x:Name="RowLog" Height="0"/>
-        </Grid.RowDefinitions>
-
-        <Grid Grid.Row="0" Margin="20,0,20,0" Height="34">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto"/>
-            <ColumnDefinition Width="*"/>
-          </Grid.ColumnDefinitions>
-          <Button x:Name="BtnToggleLog" Grid.Column="0" Style="{StaticResource BaseButton}"
-                  Background="Transparent" BorderBrush="Transparent" Padding="0"
-                  HorizontalAlignment="Left" VerticalAlignment="Center" Content="Show activity log"
-                  Foreground="{DynamicResource TextMuted}" FontSize="11.5"/>
-          <TextBlock x:Name="TxtLastLine" Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center"
-                     TextTrimming="CharacterEllipsis" FontFamily="Consolas" FontSize="11"
-                     Foreground="{DynamicResource TextMuted}" Text=""/>
-        </Grid>
-
-        <TextBox x:Name="TxtLog" Grid.Row="1" Margin="20,0,20,12" IsReadOnly="True"
-                 AutomationProperties.Name="Scan activity log"
-                 Background="Transparent" BorderThickness="0" Padding="0"
-                 FontFamily="Consolas" FontSize="11.5" Foreground="{DynamicResource Subtext0}"
-                 VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"
-                 HorizontalScrollBarVisibility="Auto" Text=""/>
-      </Grid>
-    </Border>
-
     <!-- ============ Status bar ============ -->
-    <Border Grid.Column="1" Grid.Row="4" Background="{DynamicResource Mantle}" BorderBrush="{DynamicResource Surface0}"
+    <Border Grid.Column="1" Grid.Row="2" Background="{DynamicResource Mantle}" BorderBrush="{DynamicResource Surface0}"
             BorderThickness="0,1,0,0">
       <StackPanel>
         <ProgressBar x:Name="PbScan" IsIndeterminate="False" Visibility="Collapsed"/>

@@ -3966,6 +3966,28 @@ Describe 'GUI markup' {
         }
     }
 
+    It 'does not retain unreachable controls or a hidden log sink' {
+        InModuleScope LogVerdict {
+            $xaml = Get-LVGuiXaml
+            $dead = @(
+                'TxtMachine', 'ChipElevation', 'TxtElevation',
+                'TxtDays', 'ChkAllChannels', 'ChkSkipText', 'ChkIncludeBenign', 'BtnScan', 'BtnCancel',
+                'PnlSummary', 'ChipCritical', 'ChipActionable', 'ChipInvestigate', 'ChipUnknown',
+                'ChipInformational', 'ChipBenign', 'TxtRecords', 'TxtSignatures', 'TxtReduction', 'TxtRules',
+                'PnlCoverage', 'LstCoverage', 'PnlCrash', 'LstCrash', 'PnlCorrelation', 'LstCorrelation',
+                'RowLog', 'BtnToggleLog', 'TxtLastLine', 'TxtLog'
+            )
+            foreach ($name in $dead) {
+                $xaml | Should -Not -Match ('x:Name="{0}"' -f [regex]::Escape($name))
+                $script:LVGuiElement | Should -Not -Contain $name
+            }
+            $script:LVGuiSortKey.Keys | Should -Not -Contain 'WHERE FROM'
+            $xaml | Should -Not -Match 'Width="0"'
+            $gui = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1') -Raw
+            $gui | Should -Not -Match '\$ui\.(TxtLog|BtnToggleLog|RowLog|TxtLastLine)'
+        }
+    }
+
     It 'keeps unsafe references as inert GUI text and guards navigation' {
         InModuleScope LogVerdict {
             $buckets = Get-LVGuiReferenceBucket -Reference @(
@@ -4808,7 +4830,7 @@ Describe 'GUI accessibility' {
             $window.Arrange((New-Object System.Windows.Rect(0, 0, 1340, 760)))
             $window.UpdateLayout()
 
-            foreach ($name in @('TxtDays', 'TxtSearch', 'LvFindings', 'TxtSample', 'TxtLog')) {
+            foreach ($name in @('TxtOverviewDays', 'TxtSearch', 'LvFindings', 'TxtSample', 'TxtActivityLog')) {
                 $element = $window.FindName($name)
                 $element | Should -Not -BeNullOrEmpty -Because "$name must exist"
                 $peer = [System.Windows.Automation.Peers.UIElementAutomationPeer]::CreatePeerForElement($element)
@@ -5174,9 +5196,9 @@ Describe 'GUI coverage surfacing' {
         # ends up telling you different things depending on how you ran it.
         $gui = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Public\Show-LogVerdictGui.ps1') -Raw
         $gui | Should -Match 'Format-LVCorrelation'
-        $gui | Should -Match 'PnlCorrelation'
+        $gui | Should -Match 'LstCorrelationPage'
         $xaml = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Private\50-LVGuiXaml.ps1') -Raw
-        $xaml | Should -Match 'x:Name="LstCorrelation"'
+        $xaml | Should -Match 'x:Name="LstCorrelationPage"'
     }
 
     It 'counts rulings whose guidance has gone stale' {

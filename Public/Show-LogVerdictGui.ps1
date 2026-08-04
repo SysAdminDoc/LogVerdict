@@ -295,8 +295,6 @@ function Show-LogVerdictGui {
         if ($Stamp.Length -ge 19) { $clock = $Stamp.Substring(11, 8) }
         $panelLine = '{0}  {1} {2}{3}' -f $clock, $mark, $Message, [Environment]::NewLine
 
-        $ui.TxtLog.AppendText($panelLine)
-        $ui.TxtLog.ScrollToEnd()
         $state.ActivityLines.Add($panelLine.TrimEnd()) | Out-Null
         $activityFilter = $ui.TxtActivitySearch.Text.Trim()
         if (-not $activityFilter -or $panelLine -like ('*{0}*' -f $activityFilter)) {
@@ -304,7 +302,6 @@ function Show-LogVerdictGui {
             $ui.TxtActivityLog.ScrollToEnd()
         }
         $ui.TxtActivityLastLine.Text = $Message
-        $ui.TxtLastLine.Text = $Message
         $ui.TxtStatus.Text = $Message
     }
 
@@ -325,8 +322,6 @@ function Show-LogVerdictGui {
     $setScanning = {
         param([bool]$On)
         $state.Scanning = $On
-        $ui.BtnScan.IsEnabled = -not $On
-        $ui.BtnCancel.Visibility = $(if ($On) { 'Visible' } else { 'Collapsed' })
         $ui.BtnOverviewScan.IsEnabled = -not $On
         $ui.BtnOverviewCancel.Visibility = $(if ($On) { 'Visible' } else { 'Collapsed' })
         $ui.BtnActivityRunAgain.IsEnabled = -not $On
@@ -337,7 +332,7 @@ function Show-LogVerdictGui {
         } elseif ($state.Result) {
             $ui.BtnCopySummary.IsEnabled = $true
         }
-        foreach ($n in @('TxtDays', 'ChkAllChannels', 'ChkSkipText', 'ChkIncludeBenign', 'BtnElevate')) {
+        foreach ($n in @('BtnElevate')) {
             $ui[$n].IsEnabled = -not $On
         }
         foreach ($n in @('TxtOverviewDays', 'ChkOverviewAllChannels', 'ChkOverviewIncludeText',
@@ -347,7 +342,6 @@ function Show-LogVerdictGui {
                 'ChkOverviewEvidence', 'BtnResetSettings', 'BtnCoverageElevate', 'BtnSideElevate')) {
             $ui[$n].IsEnabled = -not $On
         }
-        if ($On) { $ui.BtnScan.Content = 'Scanning...' } else { $ui.BtnScan.Content = 'Run scan' }
         if ($On) {
             $ui.BtnOverviewScan.Content = 'Scanning...'
             $ui.TxtActivityState.Text = 'Scanning...'
@@ -428,12 +422,6 @@ function Show-LogVerdictGui {
         $ui.TxtOverviewInfo.Text        = [string]$counts['informational']
         $ui.TxtOverviewBenign.Text      = [string]$counts['benign']
 
-        $ui.TxtRecords.Text    = '{0:N0}' -f $Result.Reduction.RecordCount
-        $ui.TxtSignatures.Text = '{0:N0}' -f $Result.Reduction.SignatureCount
-        $ui.TxtReduction.Text  = '{0}:1' -f $Result.Reduction.Ratio
-        $ui.TxtRules.Text      = '{0:N0}' -f $Result.RuleCount
-        $ui.PnlSummary.Visibility = 'Visible'
-
         $ui.TxtOverviewRecords.Text    = '{0:N0}' -f $Result.Reduction.RecordCount
         $ui.TxtOverviewSignatures.Text = '{0:N0}' -f $Result.Reduction.SignatureCount
         $ui.TxtOverviewReduction.Text  = '{0}x' -f $Result.Reduction.Ratio
@@ -457,12 +445,6 @@ function Show-LogVerdictGui {
         $coverageNotes = @($Result.CoverageNotes | Where-Object { $_ })
         $notes = @($coverageNotes)
         if ($Result.HorizonWarning) { $notes = @($notes) + @($Result.HorizonWarning) }
-        if ($notes.Count -gt 0) {
-            $ui.LstCoverage.ItemsSource = [string[]]$notes
-            $ui.PnlCoverage.Visibility = 'Visible'
-        } else {
-            $ui.PnlCoverage.Visibility = 'Collapsed'
-        }
         if ($coverageNotes.Count -gt 0) {
             $ui.LstCoveragePage.ItemsSource = [string[]]$coverageNotes
             $ui.TxtCoverageNone.Visibility = 'Collapsed'
@@ -565,17 +547,14 @@ function Show-LogVerdictGui {
         $ui.TxtHorizonPage.Text = $(if ($Result.HorizonWarning) { [string]$Result.HorizonWarning } else { 'The requested event history window was available for the channels that reported an oldest record.' })
 
         $ui.TxtEmptyTitle.Text = 'Nothing to report'
-        $ui.TxtEmptyBody.Text = 'The scan completed and found no signature worth raising in the last ' + $Result.DaysBack + ' day(s). Check the panel on the left for anything the scan was not allowed to read.'
+        $ui.TxtEmptyBody.Text = 'The scan completed and found no signature worth raising in the last ' + $Result.DaysBack + ' day(s). Review Coverage for anything the scan was not allowed to read.'
 
         # Crash evidence the console report has always shown and the window used to drop.
         $crash = Format-LVCrashArtifact -Artifact @($Result.CrashArtifacts)
         if ($crash.Count -gt 0) {
-            $ui.LstCrash.ItemsSource = [string[]]$crash
             $ui.LstCrashPage.ItemsSource = [string[]]$crash
             $ui.TxtCrashNone.Visibility = 'Collapsed'
-            $ui.PnlCrash.Visibility = 'Visible'
         } else {
-            $ui.PnlCrash.Visibility = 'Collapsed'
             $ui.LstCrashPage.ItemsSource = [string[]]@()
             $ui.TxtCrashNone.Visibility = 'Visible'
         }
@@ -584,12 +563,9 @@ function Show-LogVerdictGui {
         # Correlations property yields a one-element array holding null.
         $together = Format-LVCorrelation -Correlation @($Result.Correlations | Where-Object { $_ })
         if ($together.Count -gt 0) {
-            $ui.LstCorrelation.ItemsSource = [string[]]$together
             $ui.LstCorrelationPage.ItemsSource = [string[]]$together
             $ui.TxtCorrelationNone.Visibility = 'Collapsed'
-            $ui.PnlCorrelation.Visibility = 'Visible'
         } else {
-            $ui.PnlCorrelation.Visibility = 'Collapsed'
             $ui.LstCorrelationPage.ItemsSource = [string[]]@()
             $ui.TxtCorrelationNone.Visibility = 'Visible'
         }
@@ -648,11 +624,6 @@ function Show-LogVerdictGui {
     # ----------------------------------------------------------------- events ----
 
     $ui.TxtVersion.Text = 'v{0}' -f $script:LVVersion
-    $ui.TxtMachine.Text = $env:COMPUTERNAME
-    $ui.TxtDays.Text = [string]$initialDays
-    $ui.ChkAllChannels.IsChecked = $initialAllChannels
-    $ui.ChkSkipText.IsChecked = $initialSkipText
-    $ui.ChkIncludeBenign.IsChecked = $initialIncludeBenign
     $ui.TxtSideMachine.Text = $env:COMPUTERNAME
     $ui.TxtOverviewDays.Text = [string]$initialDays
     $ui.TxtOverviewTimingHint.Text = Get-LVGuiScanTimingHint -DaysBack $initialDays
@@ -673,13 +644,10 @@ function Show-LogVerdictGui {
     $ui.BtnActivityOpen.IsEnabled = $false
 
     if (Test-LVElevated) {
-        $ui.TxtElevation.Text = 'Administrator'
-        $ui.TxtElevation.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'Green')
         $ui.TxtSideElevation.Text = 'Administrator access'
         $ui.TxtSideElevation.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'Green')
         $ui.BtnCoverageElevate.Visibility = 'Collapsed'
     } else {
-        $ui.TxtElevation.Text = 'Standard user'
         $ui.TxtSideElevation.Text = 'Standard access'
         $ui.PnlElevate.Visibility = 'Visible'
         $ui.BtnSideElevate.Visibility = 'Visible'
@@ -708,14 +676,10 @@ function Show-LogVerdictGui {
     $ui.NavActivity.Add_Checked({ & $showPage 'Activity' })
 
     $syncOverviewOptions = {
-        $ui.TxtDays.Text = $ui.TxtOverviewDays.Text
         $hintDays = 30
         if ([int]::TryParse($ui.TxtOverviewDays.Text.Trim(), [ref]$hintDays) -and $hintDays -ge 1 -and $hintDays -le 3650) {
             $ui.TxtOverviewTimingHint.Text = Get-LVGuiScanTimingHint -DaysBack $hintDays
         }
-        $ui.ChkAllChannels.IsChecked = [bool]$ui.ChkOverviewAllChannels.IsChecked
-        $ui.ChkSkipText.IsChecked = -not [bool]$ui.ChkOverviewIncludeText.IsChecked
-        $ui.ChkIncludeBenign.IsChecked = [bool]$ui.ChkOverviewIncludeBenign.IsChecked
     }
 
     $resetOverviewOptions = {
@@ -737,15 +701,8 @@ function Show-LogVerdictGui {
         $window.Height = 800
     }
 
-    $ui.BtnOverviewScan.Add_Click({
-        & $syncOverviewOptions
-        & $showPage 'Activity'
-        $ui.BtnScan.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
-    })
     $ui.BtnActivityRunAgain.Add_Click({
-        & $syncOverviewOptions
-        & $showPage 'Activity'
-        $ui.BtnScan.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
+        $ui.BtnOverviewScan.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
     })
 
     $ui.ChkOverviewAllChannels.Add_Checked({
@@ -787,9 +744,6 @@ function Show-LogVerdictGui {
             $ui.TxtSettingsStatus.Text = 'Defaults are active for this session; the saved file could not be updated.'
             $ui.TxtSettingsStatus.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'Yellow')
         }
-    })
-    $ui.BtnOverviewCancel.Add_Click({
-        $ui.BtnCancel.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
     })
     $ui.BtnViewFindings.Add_Click({ & $showPage 'Findings' })
     $ui.BtnViewCoverage.Add_Click({ & $showPage 'Coverage' })
@@ -918,19 +872,6 @@ function Show-LogVerdictGui {
         }
     )
 
-    $ui.BtnToggleLog.Add_Click({
-        if ($ui.RowLog.Height.Value -gt 0) {
-            $ui.RowLog.Height = New-Object System.Windows.GridLength(0)
-            $ui.BtnToggleLog.Content = 'Show activity log'
-            $ui.TxtLastLine.Visibility = 'Visible'
-        } else {
-            $ui.RowLog.Height = New-Object System.Windows.GridLength(170)
-            $ui.BtnToggleLog.Content = 'Hide activity log'
-            $ui.TxtLastLine.Visibility = 'Collapsed'
-            $ui.TxtLog.ScrollToEnd()
-        }
-    })
-
     $ui.BtnElevate.Add_Click({
         $target = Get-LVGuiRelaunchTarget
         if ($null -eq $target) {
@@ -951,18 +892,19 @@ function Show-LogVerdictGui {
         }
     })
 
-    $ui.BtnScan.Add_Click({
+    $ui.BtnOverviewScan.Add_Click({
         if ($state.Scanning) { return }
+
+        & $syncOverviewOptions
+        & $showPage 'Activity'
 
         $days = 0
         if (-not [int]::TryParse($ui.TxtOverviewDays.Text.Trim(), [ref]$days) -or $days -lt 1 -or $days -gt 3650) {
             $days = 30
-            $ui.TxtDays.Text = '30'
             $ui.TxtOverviewDays.Text = '30'
             & $setStatus 'Look-back must be a whole number of days between 1 and 3650. Reset to 30.'
         }
 
-        $ui.TxtLog.Clear()
         $ui.TxtActivityLog.Clear()
         $state.ActivityLines.Clear()
         $ui.TxtActivitySearch.Clear()
@@ -1037,7 +979,7 @@ function Show-LogVerdictGui {
         $state.Timer.Start()
     })
 
-    $ui.BtnCancel.Add_Click({
+    $ui.BtnOverviewCancel.Add_Click({
         if (-not $state.Scanning) { return }
         $elapsed = if ($state.ScanStartedAt) { ((Get-Date) - $state.ScanStartedAt).TotalSeconds } else { 0 }
         $state.Timer.Stop()
@@ -1203,7 +1145,7 @@ function Show-LogVerdictGui {
     })
 
     if ($AutoScan) {
-        $window.Add_ContentRendered({ $ui.BtnScan.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent))) })
+        $window.Add_ContentRendered({ $ui.BtnOverviewScan.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent))) })
     }
 
     # Release QA can request a deterministic screenshot from WPF's own visual tree.
