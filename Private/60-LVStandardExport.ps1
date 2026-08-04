@@ -3,6 +3,359 @@
 
 $script:LVStandardExportVersion = '1.0.0'
 
+function Get-LVStandardTemplate {
+    <#
+        Resolve a built-in or user-supplied export template. Built-in templates are
+        data so adding a format name, media type, or projection policy does not
+        require changing the public command's validation list.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Format,
+        [AllowNull()][string]$Path
+    )
+
+    $templatePath = $Path
+    if (-not $templatePath -and $script:LVDataDir) {
+        $candidate = Join-Path $script:LVDataDir 'export-templates.json'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { $templatePath = $candidate }
+    }
+
+    $document = $null
+    if ($templatePath) {
+        if (-not (Test-Path -LiteralPath $templatePath -PathType Leaf)) {
+            throw ("Export template was not found: {0}" -f $templatePath)
+        }
+        try {
+            $document = Get-Content -LiteralPath $templatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        } catch {
+            throw ("Export template '{0}' is not valid JSON: {1}" -f $templatePath, $_.Exception.Message)
+        }
+        if ([int]$document.schemaVersion -ne 1) {
+            throw 'Export template document must declare schemaVersion 1.'
+        }
+    } else {
+        # A flattened executable may not carry the Data directory. Keep the
+        # built-ins available in that shape while the module uses the checked-in
+        # JSON registry below.
+        $document = [pscustomobject]@{
+            schemaVersion = 1
+            name = 'LogVerdict.ExportTemplates'
+            templates = @(
+                [pscustomobject]@{ id = 'Ecs'; kind = 'single'; projection = 'builtin:ecs' }
+                [pscustomobject]@{ id = 'Ocsf'; kind = 'single'; projection = 'builtin:ocsf' }
+                [pscustomobject]@{ id = 'Sarif'; kind = 'single'; projection = 'builtin:sarif' }
+                [pscustomobject]@{ id = 'OpenTelemetry'; kind = 'single'; projection = 'builtin:opentelemetry' }
+                [pscustomobject]@{ id = 'Stix'; kind = 'single'; projection = 'builtin:stix' }
+                [pscustomobject]@{ id = 'Jsonl'; kind = 'line'; projection = 'builtin:timeline'; source = 'timeline' }
+            )
+        }
+    }
+
+    $templateDocuments = @()
+    if ($document.PSObject.Properties['templates']) {
+        if ([string]$document.name -ne 'LogVerdict.ExportTemplates') {
+            throw "Export template registry must declare name 'LogVerdict.ExportTemplates'."
+        }
+        $templateDocuments = @($document.templates)
+    } elseif ($document.PSObject.Properties['id']) {
+        # A standalone template is the contribution path: a user can ship one
+        # JSON file and select it with -TemplatePath without editing this module.
+        $templateDocuments = @($document)
+    } else {
+        throw "Export template document must contain either a 'templates' registry or one standalone 'id' template."
+    }
+
+    $template = @($templateDocuments | Where-Object { [string]$_.id -ieq $Format } | Select-Object -First 1)
+    if ($template.Count -eq 0 -and $templateDocuments.Count -eq 1 -and $Path) {
+        # With a standalone file the file itself is authoritative; the default
+        # Ecs format remains convenient for callers that omit -Format.
+        $template = @($templateDocuments[0])
+    }
+    if ($template.Count -eq 0) {
+        throw ("No export template named '{0}' was found." -f $Format)
+    }
+    $kind = [string]$template[0].kind
+    if ($kind -notin @('single', 'line')) { throw ("Export template '{0}' has unsupported kind '{1}'." -f $Format, $kind) }
+    if (-not $template[0].PSObject.Properties['projection']) { throw ("Export template '{0}' has no projection." -f $Format) }
+    if ($template[0].PSObject.Properties['source'] -and [string]$template[0].source -eq 'timeline' -and [string]$template[0].projection -notlike 'builtin:timeline') {
+        throw "Template source 'timeline' is reserved for the built-in Jsonl adapter."
+    }
+    return $template[0]
+}
+
+function Get-LVTemplatePathValue {
+    param(
+        [AllowNull()]$Scope,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $current = $Scope
+    foreach ($segment in @($Path -split '\.' | Where-Object { $_ })) {
+        if ($null -eq $current) { return $null }
+        if ($segment -eq 'Count' -and $current -is [System.Collections.IEnumerable] -and $current -isnot [string]) {
+            $current = @($current).Count
+            continue
+        }
+        $property = $current.PSObject.Properties[$segment]
+        if ($property) {
+            $current = $property.Value
+        } elseif ($current -is [System.Collections.IDictionary] -and $current.Contains($segment)) {
+            $current = $current[$segment]
+        } else {
+            return $null
+        }
+    }
+    return $current
+}
+
+function Test-LVTemplateTruthy {
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return $false }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        return (@($Value).Count -gt 0)
+    }
+    return [bool]$Value
+}
+
+function Get-LVTemplateChildScope {
+    param(
+        [Parameter(Mandatory)]$Parent,
+        [AllowNull()]$Item,
+        [int]$Index = 0
+    )
+
+    $child = [ordered]@{}
+    foreach ($property in @($Parent.PSObject.Properties)) {
+        $child[$property.Name] = $property.Value
+    }
+    $child['item'] = $Item
+    $child['record'] = $Item
+    $child['index'] = $Index
+    if ($Item -and $Item.PSObject.Properties) {
+        foreach ($property in @($Item.PSObject.Properties)) {
+            if (-not $child.Contains($property.Name)) { $child[$property.Name] = $property.Value }
+        }
+    }
+    return [pscustomobject]$child
+}
+
+function ConvertTo-LVTemplateValue {
+    <#
+        Evaluate the deliberately small, data-only template language. Templates
+        can select report-contract paths, map a collection, concatenate arrays,
+        select a conditional value, and format a scalar. They cannot execute
+        PowerShell or read anything outside the supplied normalized model.
+    #>
+    param(
+        [AllowNull()]$Value,
+        [Parameter(Mandatory)]$Scope
+    )
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string]) {
+        if ($Value.StartsWith('$$', [StringComparison]::Ordinal)) { return $Value.Substring(1) }
+        if ($Value -match '^\$([A-Za-z_][A-Za-z0-9_.]*)$') {
+            return Get-LVTemplatePathValue -Scope $Scope -Path $Matches[1]
+        }
+        return $Value
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $out = [ordered]@{}
+        foreach ($key in @($Value.Keys)) { $out[[string]$key] = ConvertTo-LVTemplateValue -Value $Value[$key] -Scope $Scope }
+        return [pscustomobject]$out
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        return @($Value | ForEach-Object { ConvertTo-LVTemplateValue -Value $_ -Scope $Scope })
+    }
+
+    $operatorProperties = @($Value.PSObject.Properties | Where-Object { $_.Name -like '$*' })
+    if ($operatorProperties.Count -gt 1) {
+        throw 'Export template expression objects may contain only one operator.'
+    }
+    if ($operatorProperties.Count -eq 1 -and @($Value.PSObject.Properties).Count -eq 1) {
+        $operator = $operatorProperties[0].Name
+        $spec = $operatorProperties[0].Value
+        switch ($operator) {
+            '$path' {
+                if ($spec -isnot [string]) { throw 'The $path template operator requires a string path.' }
+                return Get-LVTemplatePathValue -Scope $Scope -Path ([string]$spec)
+            }
+            '$rootPath' {
+                if ($spec -isnot [string]) { throw 'The $rootPath template operator requires a string path.' }
+                $root = if ($Scope.PSObject.Properties['root']) { $Scope.root } else { $Scope }
+                return Get-LVTemplatePathValue -Scope $root -Path ([string]$spec)
+            }
+            '$map' {
+                if (-not $spec.PSObject.Properties['path'] -or -not $spec.PSObject.Properties['projection']) {
+                    throw 'The $map template operator requires path and projection.'
+                }
+                $source = Get-LVTemplatePathValue -Scope $Scope -Path ([string]$spec.path)
+                $mapped = New-Object System.Collections.Generic.List[object]
+                $index = 0
+                foreach ($item in @($source)) {
+                    $child = Get-LVTemplateChildScope -Parent $Scope -Item $item -Index $index
+                    $mapped.Add((ConvertTo-LVTemplateValue -Value $spec.projection -Scope $child)) | Out-Null
+                    $index++
+                }
+                return @($mapped.ToArray())
+            }
+            '$filter' {
+                if (-not $spec.PSObject.Properties['path'] -or -not $spec.PSObject.Properties['where']) {
+                    throw 'The $filter template operator requires path and where.'
+                }
+                $source = Get-LVTemplatePathValue -Scope $Scope -Path ([string]$spec.path)
+                $filtered = New-Object System.Collections.Generic.List[object]
+                $index = 0
+                foreach ($item in @($source)) {
+                    $child = Get-LVTemplateChildScope -Parent $Scope -Item $item -Index $index
+                    if (Test-LVTemplateTruthy (ConvertTo-LVTemplateValue -Value $spec.where -Scope $child)) {
+                        $filtered.Add($item) | Out-Null
+                    }
+                    $index++
+                }
+                return @($filtered.ToArray())
+            }
+            '$concat' {
+                $joined = New-Object System.Collections.Generic.List[object]
+                foreach ($part in @($spec)) {
+                    $evaluated = ConvertTo-LVTemplateValue -Value $part -Scope $Scope
+                    foreach ($item in @($evaluated)) { $joined.Add($item) | Out-Null }
+                }
+                return @($joined.ToArray())
+            }
+            '$array' {
+                return @(ConvertTo-LVTemplateValue -Value $spec -Scope $Scope)
+            }
+            '$if' {
+                if (-not $spec.PSObject.Properties['condition'] -or -not $spec.PSObject.Properties['then']) {
+                    throw 'The $if template operator requires condition and then.'
+                }
+                $condition = Test-LVTemplateTruthy (ConvertTo-LVTemplateValue -Value $spec.condition -Scope $Scope)
+                if ($condition) { return ConvertTo-LVTemplateValue -Value $spec.then -Scope $Scope }
+                if ($spec.PSObject.Properties['else']) { return ConvertTo-LVTemplateValue -Value $spec.else -Scope $Scope }
+                return $null
+            }
+            '$equals' {
+                $operands = @($spec)
+                if ($operands.Count -ne 2) { throw 'The $equals template operator requires exactly two operands.' }
+                $left = ConvertTo-LVTemplateValue -Value $operands[0] -Scope $Scope
+                $right = ConvertTo-LVTemplateValue -Value $operands[1] -Scope $Scope
+                return ($left -eq $right)
+            }
+            '$contains' {
+                $operands = @($spec)
+                if ($operands.Count -ne 2) { throw 'The $contains template operator requires exactly two operands.' }
+                $haystack = ConvertTo-LVTemplateValue -Value $operands[0] -Scope $Scope
+                $needle = ConvertTo-LVTemplateValue -Value $operands[1] -Scope $Scope
+                return (@($haystack) -contains $needle)
+            }
+            '$coalesce' {
+                foreach ($candidate in @($spec)) {
+                    $evaluated = ConvertTo-LVTemplateValue -Value $candidate -Scope $Scope
+                    if ($null -ne $evaluated -and ([string]$evaluated).Length -gt 0) { return $evaluated }
+                }
+                return $null
+            }
+            '$count' {
+                $evaluated = ConvertTo-LVTemplateValue -Value $spec -Scope $Scope
+                return @($evaluated).Count
+            }
+            '$format' {
+                if (-not $spec.PSObject.Properties['format']) { throw 'The $format template operator requires a format string.' }
+                $arguments = @()
+                if ($spec.PSObject.Properties['args']) {
+                    $arguments = @($spec.args | ForEach-Object { ConvertTo-LVTemplateValue -Value $_ -Scope $Scope })
+                }
+                return [string]::Format([Globalization.CultureInfo]::InvariantCulture, [string]$spec.format, [object[]]$arguments)
+            }
+            '$literal' {
+                return $spec
+            }
+            default { throw ("Unsupported export template operator '{0}'." -f $operator) }
+        }
+    }
+    if ($Value.PSObject.Properties.Count -gt 0) {
+        $out = [ordered]@{}
+        foreach ($property in @($Value.PSObject.Properties)) {
+            $out[$property.Name] = ConvertTo-LVTemplateValue -Value $property.Value -Scope $Scope
+        }
+        return [pscustomobject]$out
+    }
+    return $Value
+}
+
+function ConvertTo-LVTemplateRecord {
+    param(
+        [Parameter(Mandatory)]$Model,
+        [Parameter(Mandatory)]$Template
+    )
+
+    $context = [ordered]@{
+        context = $Model.Context
+        model = $Model
+        findings = @($Model.Findings)
+        advisories = @($Model.Advisories)
+        correlations = @($Model.Correlations)
+        root = $Model
+    }
+    $sourceName = if ($Template.source) { [string]$Template.source } else { 'findings' }
+    $source = Get-LVTemplatePathValue -Scope ([pscustomobject]$context) -Path $sourceName
+    if ($sourceName -eq 'timeline') {
+        throw "Template source 'timeline' is reserved for the built-in Jsonl adapter."
+    }
+    $records = New-Object System.Collections.Generic.List[object]
+    foreach ($item in @($source)) {
+        $scope = [ordered]@{
+            context = $Model.Context
+            model = $Model
+            record = $item
+            item = $item
+            root = $Model
+        }
+        if ($item -and $item.PSObject.Properties) {
+            foreach ($property in @($item.PSObject.Properties)) {
+                if (-not $scope.Contains($property.Name)) { $scope[$property.Name] = $property.Value }
+            }
+        }
+        $value = ConvertTo-LVTemplateValue -Value $Template.projection -Scope ([pscustomobject]$scope)
+        if ($Template.recordType -and $value -is [pscustomobject] -and -not $value.PSObject.Properties['recordType']) {
+            $value | Add-Member -NotePropertyName recordType -NotePropertyValue ([string]$Template.recordType) -Force
+        }
+        $records.Add($value) | Out-Null
+    }
+    return @($records.ToArray())
+}
+
+function ConvertTo-LVTemplateDocument {
+    param(
+        [Parameter(Mandatory)]$Model,
+        [Parameter(Mandatory)]$Template
+    )
+
+    if ([string]$Template.projection -like 'builtin:*') {
+        switch ([string]$Template.projection) {
+            'builtin:ecs' { return ConvertTo-LVEcsExport -Model $Model }
+            'builtin:ocsf' { return ConvertTo-LVOcsfExport -Model $Model }
+            'builtin:sarif' { return ConvertTo-LVSarifExport -Model $Model }
+            'builtin:opentelemetry' { return ConvertTo-LVOtelExport -Model $Model }
+            'builtin:stix' { return ConvertTo-LVStixExport -Model $Model }
+            'builtin:timeline' { return @(Get-LVTimelineLine -Result $Model.Result -Redact:([bool]$Model.Context.privacy.redacted)) }
+            default { throw ("Unsupported built-in export projection '{0}'." -f $Template.projection) }
+        }
+    }
+    $scope = [pscustomobject][ordered]@{
+        context = $Model.Context
+        model = $Model
+        findings = @($Model.Findings)
+        advisories = @($Model.Advisories)
+        correlations = @($Model.Correlations)
+        root = $Model
+    }
+    return ConvertTo-LVTemplateValue -Value $Template.projection -Scope $scope
+}
+
 function ConvertTo-LVStandardTimestamp {
     param([AllowNull()]$Value)
 
@@ -287,6 +640,7 @@ function Get-LVStandardModel {
     param([Parameter(Mandatory)]$Result)
 
     return [pscustomobject][ordered]@{
+        result = $Result
         context = Get-LVStandardContext -Result $Result
         findings = @($Result.Findings | Where-Object { $_ } | ForEach-Object { ConvertTo-LVStandardFinding -Finding $_ })
         advisories = @($Result.Advisories | Where-Object { $_ } | ForEach-Object { ConvertTo-LVStandardAdvisory -Advisory $_ })
@@ -545,6 +899,72 @@ function Write-LVJsonlTimeline {
         throw
     }
     return [pscustomobject][ordered]@{ Path = $Path; LineCount = $lineCount; Redacted = [bool]$Redact; Format = 'LogVerdict.Timeline' }
+}
+
+function ConvertTo-LVTemplateJsonLine {
+    param(
+        [Parameter(Mandatory)]$Model,
+        [Parameter(Mandatory)]$Template
+    )
+
+    $values = if ([string]$Template.projection -eq 'builtin:timeline') {
+        @(Get-LVTimelineLine -Result $Model.Result -Redact:([bool]$Model.Context.privacy.redacted))
+    } else {
+        @(ConvertTo-LVTemplateRecord -Model $Model -Template $Template)
+    }
+    foreach ($value in $values) {
+        $safe = ConvertTo-LVJsonSafeValue -Value $value
+        $safe | ConvertTo-Json -Depth 30 -Compress
+    }
+}
+
+function Write-LVTemplateJsonl {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Lines,
+        [switch]$Append
+    )
+
+    $parent = Split-Path -Parent $Path
+    if ($parent -and -not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    if ($Append) {
+        $needsSeparator = $false
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            $length = (Get-Item -LiteralPath $Path).Length
+            if ($length -gt 0) {
+                $stream = [System.IO.File]::OpenRead($Path)
+                try {
+                    $stream.Seek(-1, [System.IO.SeekOrigin]::End) | Out-Null
+                    $needsSeparator = ($stream.ReadByte() -ne 10)
+                } finally {
+                    $stream.Dispose()
+                }
+            }
+        }
+        $writer = New-Object System.IO.StreamWriter($Path, $true, $encoding)
+        try {
+            if ($needsSeparator) { $writer.WriteLine() }
+            foreach ($line in $Lines) { $writer.WriteLine($line) }
+            $writer.Flush()
+        } finally {
+            $writer.Dispose()
+        }
+        return
+    }
+
+    $temporary = '{0}.{1}.tmp' -f $Path, ([guid]::NewGuid().ToString('N'))
+    try {
+        $content = if ($Lines.Count -gt 0) { ($Lines -join [Environment]::NewLine) + [Environment]::NewLine } else { '' }
+        Write-LVTextFile -Path $temporary -Content $content
+        Move-Item -LiteralPath $temporary -Destination $Path -Force
+    } finally {
+        if (Test-Path -LiteralPath $temporary -PathType Leaf) {
+            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function ConvertTo-LVEcsExport {
@@ -918,15 +1338,16 @@ function ConvertTo-LVStixExport {
 }
 
 function ConvertTo-LVStandardDocument {
-    param([Parameter(Mandatory)]$Result, [Parameter(Mandatory)][string]$Format)
+    param(
+        [Parameter(Mandatory)]$Result,
+        [Parameter(Mandatory)][string]$Format,
+        [AllowNull()][string]$TemplatePath
+    )
 
     $model = Get-LVStandardModel -Result $Result
-    switch ($Format) {
-        'Ecs' { return ConvertTo-LVEcsExport -Model $model }
-        'Sarif' { return ConvertTo-LVSarifExport -Model $model }
-        'Ocsf' { return ConvertTo-LVOcsfExport -Model $model }
-        'OpenTelemetry' { return ConvertTo-LVOtelExport -Model $model }
-        'Stix' { return ConvertTo-LVStixExport -Model $model }
+    $template = Get-LVStandardTemplate -Format $Format -Path $TemplatePath
+    if ([string]$template.kind -ne 'single') {
+        throw ("Export template '{0}' is line-oriented; use its JSONL records rather than a single document." -f $Format)
     }
-    throw "Unsupported standard export format '$Format'."
+    return ConvertTo-LVTemplateDocument -Model $model -Template $template
 }

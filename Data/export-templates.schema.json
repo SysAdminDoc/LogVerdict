@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/SysAdminDoc/LogVerdict/schemas/export-templates.schema.json",
+  "title": "LogVerdict export template registry",
+  "type": "object",
+  "required": ["schemaVersion", "name", "templates"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "name": { "const": "LogVerdict.ExportTemplates" },
+    "templates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "projection"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$" },
+          "kind": { "enum": ["single", "line"] },
+          "mediaType": { "type": "string" },
+          "projection": {},
+          "source": { "type": "string" },
+          "recordType": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

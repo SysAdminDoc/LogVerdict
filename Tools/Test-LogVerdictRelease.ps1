@@ -297,6 +297,21 @@ if ([int]$providerSchema.properties.schemaVersion.const -ne 1 -or
     @($providerSchema.properties.capabilities.items.enum) -notcontains 'redaction') {
     throw 'Provider extension manifest schema is not pinned at version 1 with the required redaction and entrypoint contract.'
 }
+$exportTemplatePath = Join-Path $repoRoot 'Data/export-templates.json'
+$exportTemplateSchemaPath = Join-Path $repoRoot 'Data/export-templates.schema.json'
+$exportTemplateSchema = Get-Content -LiteralPath $exportTemplateSchemaPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([int]$exportTemplateSchema.properties.schemaVersion.const -ne 1 -or
+    [string]$exportTemplateSchema.properties.name.const -ne 'LogVerdict.ExportTemplates') {
+    throw 'Export template schema is not pinned at version 1.'
+}
+Test-LVReleaseJsonSchema -Path $exportTemplatePath -SchemaPath $exportTemplateSchemaPath -Label 'export templates'
+$exportTemplates = Get-Content -LiteralPath $exportTemplatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+foreach ($builtInFormat in @('Ecs', 'Ocsf', 'Sarif', 'OpenTelemetry', 'Stix', 'Jsonl')) {
+    $builtIn = @($exportTemplates.templates | Where-Object { $_.id -eq $builtInFormat })
+    if ($builtIn.Count -ne 1 -or -not $builtIn[0].projection) {
+        throw ("Export template registry is missing built-in format '{0}'." -f $builtInFormat)
+    }
+}
 
 $releaseSchemaRoot = Join-Path ([IO.Path]::GetTempPath()) ('LogVerdict-release-schema-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $releaseSchemaRoot -Force | Out-Null

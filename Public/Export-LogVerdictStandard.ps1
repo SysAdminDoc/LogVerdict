@@ -19,8 +19,15 @@ function Export-LogVerdictStandard {
         record per line and does not retain a second output graph.
 
         .PARAMETER Path
-        Optional JSON or JSONL destination. Jsonl writes atomically and returns a line
-        count; without -Path it streams compact JSON objects to the pipeline.
+        Optional JSON or JSONL destination. Line-oriented templates write atomically
+        unless -Append is supplied; without -Path they stream compact JSON objects.
+
+        .PARAMETER TemplatePath
+        Optional standalone template or template registry JSON. A standalone template
+        can project any normalized report-contract paths without a module code change.
+
+        .PARAMETER Append
+        Append JSON lines to -Path. This is rejected for single-document templates.
 
         .PARAMETER Redact
         Mask captured identifiers before the adapter document is built.
@@ -28,27 +35,39 @@ function Export-LogVerdictStandard {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, ValueFromPipeline)]$Result,
-        [ValidateSet('Ecs', 'Ocsf', 'Sarif', 'OpenTelemetry', 'Stix', 'Jsonl')][string]$Format = 'Ecs',
+        [string]$Format = 'Ecs',
         [string]$Path,
+        [string]$TemplatePath,
+        [switch]$Append,
         [switch]$Redact
     )
 
     process {
         $Result = Resolve-LVScanInput -InputObject $Result -Role 'result'
         $projected = if ($Redact) { ConvertTo-LVRedactedResult -Result $Result } else { $Result }
-        if ($Format -eq 'Jsonl') {
-            $timelineRedact = [bool]($Redact -or ($projected.PSObject.Properties['Redacted'] -and $projected.Redacted))
+        $template = Get-LVStandardTemplate -Format $Format -Path $TemplatePath
+        if ($Append -and -not $Path) {
+            throw 'Template append mode requires -Path so records have a destination.'
+        }
+        if ($Append -and [string]$template.kind -ne 'line') {
+            throw ("Template '{0}' is a single document; append mode is valid only for line-oriented templates." -f $template.id)
+        }
+
+        if ([string]$template.kind -eq 'line') {
+            $model = Get-LVStandardModel -Result $projected
+            $lines = @(ConvertTo-LVTemplateJsonLine -Model $model -Template $template)
             if ($Path) {
-                $written = Write-LVJsonlTimeline -Result $projected -Path $Path -Redact:$timelineRedact
-                return [pscustomobject][ordered]@{ Format = $Format; Path = $Path; LineCount = $written.LineCount; Document = $null }
+                Write-LVTemplateJsonl -Path $Path -Lines $lines -Append:$Append
+                return [pscustomobject][ordered]@{
+                    Format = $Format; TemplateName = [string]$template.id; Path = $Path
+                    LineCount = $lines.Count; Document = $null; Appended = [bool]$Append
+                }
             }
-            foreach ($line in Get-LVTimelineLine -Result $projected -Redact:$timelineRedact) {
-                $safeLine = ConvertTo-LVJsonSafeValue -Value $line
-                $safeLine | ConvertTo-Json -Depth 30 -Compress
-            }
+            $lines
             return
         }
-        $document = ConvertTo-LVJsonSafeValue -Value (ConvertTo-LVStandardDocument -Result $projected -Format $Format)
+        $model = Get-LVStandardModel -Result $projected
+        $document = ConvertTo-LVJsonSafeValue -Value (ConvertTo-LVTemplateDocument -Model $model -Template $template)
         if ($Path) {
             $parent = Split-Path -Parent $Path
             if ($parent -and -not (Test-Path -LiteralPath $parent)) {
@@ -56,6 +75,9 @@ function Export-LogVerdictStandard {
             }
             Write-LVTextFile -Path $Path -Content ($document | ConvertTo-Json -Depth 30)
         }
-        return [pscustomobject][ordered]@{ Format = $Format; Path = $Path; Document = $document }
+        return [pscustomobject][ordered]@{
+            Format = $Format; TemplateName = [string]$template.id; Path = $Path
+            Document = $document; Appended = $false
+        }
     }
 }

@@ -34,6 +34,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Closed CI quality gaps by running PSScriptAnalyzer on both PowerShell legs, pinning GitHub Actions to verified commits, directly verifying supply-chain metadata in the package job, and checking PowerShell script status without stale native exit codes.
 - Fixed advisory-enabled GUI renders so dependency labels cannot shadow the mutable window state; the findings filter and count now refresh normally when advisory context is present.
 - Added direct fixture coverage for the public console/advisory adapters, standard export contracts, evidence contracts, and review-artifact diff semantics.
+- Replaced the standard-export dispatch table with a versioned data-only template registry; custom single-document and line-oriented projections now work without module code changes, with atomic writes and guarded append mode.
 
 - Added a user-visible GUI settings reset that atomically restores safe scan defaults,
   resets the window size and transient source/report fields, and reports persistence failures;

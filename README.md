@@ -366,7 +366,17 @@ streaming timeline instead of an adapter document. It includes metadata, normali
 and finding lines, curated correlations, per-source coverage, and provider provenance;
 undated records keep `timestampUtc: null` rather than receiving an invented time. Omit
 `-Path` to stream compact JSON objects to the PowerShell pipeline, or supply a path for
-an atomic UTF-8 file.
+an atomic UTF-8 file. `-Append` is available for JSONL and other line-oriented templates;
+single-document formats reject it explicitly.
+
+The shipped standard formats are registered in `Data/export-templates.json`. You can
+create a standalone JSON template and pass it with `-TemplatePath` without changing the
+module. A template declares `schemaVersion: 1`, an `id`, `kind` (`single` or `line`),
+and a `projection` over the normalized report contract. Projections support `$path`,
+`$rootPath`, `$map`, `$filter`, `$concat`, `$if`, `$equals`, `$contains`, `$coalesce`,
+`$count`, `$format`, and `$literal`; they cannot execute PowerShell or read outside the
+scan result. Line templates default to the `findings` collection and can select another
+collection with `source`.
 
 To check whether a fix worked, save a JSON report before the change, scan again afterwards, and compare them. The output contains only signatures that are new, resolved, or worsening, as flat PowerShell objects that can be filtered or exported directly:
 

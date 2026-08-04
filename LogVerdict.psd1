@@ -70,6 +70,8 @@
         'Data\error-codes.json'
         'Data\error-codes.schema.json'
         'Data\evidence-contract.schema.json'
+        'Data\export-templates.json'
+        'Data\export-templates.schema.json'
         'Data\localization.json'
         'Data\provider.schema.json'
         'Data\report-contract.schema.json'

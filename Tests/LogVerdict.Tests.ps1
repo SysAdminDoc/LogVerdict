@@ -3621,6 +3621,51 @@ Describe 'Report rendering' {
         }
     }
 
+    It 'projects user templates and rejects append mode for single documents' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $lineTemplatePath = Join-Path $TestDrive 'finding-template.json'
+            $lineTemplate = [ordered]@{
+                schemaVersion = 1
+                id = 'FindingLine'
+                kind = 'line'
+                mediaType = 'application/x-ndjson'
+                source = 'findings'
+                recordType = 'finding'
+                projection = [ordered]@{
+                    key = [ordered]@{ '$path' = 'key' }
+                    provider = [ordered]@{ '$path' = 'event.provider' }
+                    verdict = '$verdict'
+                    text = [ordered]@{ '$coalesce' = @('$plain', '$title') }
+                    actionable = [ordered]@{ '$equals' = @('$verdict', 'actionable') }
+                    version = [ordered]@{ '$rootPath' = 'context.schemaVersion' }
+                }
+            }
+            $lineTemplate | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $lineTemplatePath -Encoding UTF8
+            $linePath = Join-Path $TestDrive 'out\findings.jsonl'
+
+            $first = Export-LogVerdictStandard -Result ($r | Select-Object *) -Format FindingLine `
+                -TemplatePath $lineTemplatePath -Path $linePath
+            $first.TemplateName | Should -BeExactly 'FindingLine'
+            $first.LineCount | Should -Be 1
+            $record = Get-Content -LiteralPath $linePath | ConvertFrom-Json
+            $record.recordType | Should -BeExactly 'finding'
+            $record.key | Should -BeExactly 'Acme/99'
+            $record.provider | Should -BeExactly 'Acme'
+            $record.actionable | Should -BeTrue
+            $record.version | Should -BeExactly '1.0.0'
+
+            $second = Export-LogVerdictStandard -Result ($r | Select-Object *) -Format FindingLine `
+                -TemplatePath $lineTemplatePath -Path $linePath -Append
+            $second.Appended | Should -BeTrue
+            @((Get-Content -LiteralPath $linePath)).Count | Should -Be 2
+
+            {
+                Export-LogVerdictStandard -Result ($r | Select-Object *) -Format Ecs -Path $linePath -Append
+            } | Should -Throw '*single document*append mode*line-oriented*'
+        }
+    }
+
     It 'scopes OCSF output to normalized evidence instead of a detection class' {
         InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
             param($r)
