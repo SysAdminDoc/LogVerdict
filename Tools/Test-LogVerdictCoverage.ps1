@@ -96,21 +96,6 @@ try {
         -Reason 'A non-English provider message is retained as evidence; matching is represented by structured fields.' `
         -Details @{ Locale = [string]$localeFixture.locale; MessageLength = ([string]$localeFixture.record.Message).Length }
 
-    $textFixture = $fixtures | Where-Object kind -eq 'textlog' | Select-Object -First 1
-    if (-not [regex]::IsMatch([string]$textFixture.target.Line, [string]$textFixture.target.Pattern)) {
-        throw ("Text fixture '{0}' does not match its collector pattern." -f $textFixture.id)
-    }
-    Add-LVCoverageResult -Id 'textlog-fixture' -Status 'readable' `
-        -Reason 'The representative text-log line matches the declared collector pattern.' `
-        -Details @{ Locale = [string]$textFixture.locale; Name = [string]$textFixture.target.Name }
-
-    $malformed = $fixtures | Where-Object kind -eq 'offline-evtx' | Select-Object -First 1
-    if ([string]$malformed.expectedStatus -ne 'unreadable') {
-        throw ("Malformed EVTX fixture '{0}' must expect unreadable status." -f $malformed.id)
-    }
-    Add-LVCoverageResult -Id 'offline-evtx-malformed' -Status 'unreadable' `
-        -Reason ([string]$malformed.reason) -Details @{ ExpectedStatus = [string]$malformed.expectedStatus }
-
     $modulePath = Join-Path $repoRoot 'LogVerdict.psd1'
     Import-Module $modulePath -Force
     $module = Get-Module LogVerdict
@@ -118,6 +103,157 @@ try {
     Add-LVCoverageResult -Id 'catalog-and-database' -Status 'readable' `
         -Reason 'The module imported and the shipped database trust gate passed.' `
         -Details @{ RuleCount = @((Get-LogVerdictDatabase).rules).Count }
+
+    $textFixture = $fixtures | Where-Object kind -eq 'textlog' | Select-Object -First 1
+    $malformed = $fixtures | Where-Object kind -eq 'offline-evtx' | Select-Object -First 1
+    if ([string]$malformed.expectedStatus -ne 'unreadable') {
+        throw ("Malformed EVTX fixture '{0}' must declare the expected parser status as unreadable." -f $malformed.id)
+    }
+
+    # Exercise the event collector itself. The fixture function is installed only in
+    # the module scope for this invocation, then the original command is restored;
+    # this keeps the gate deterministic without replacing the production collector.
+    $eventFixtureMap = @{}
+    foreach ($fixture in $eventFixtures) {
+        $eventFixtureMap[[string]$fixture.channel] = @($fixture.record)
+    }
+    try {
+        $eventCollection = & $module {
+            param($fixtureMap, $channels)
+
+            $previousFunction = Get-Command Get-WinEvent -CommandType Function -ErrorAction SilentlyContinue
+            $previousDefinition = if ($previousFunction) { $previousFunction.ScriptBlock.ToString() } else { $null }
+            $script:LVCoverageFixtureEvents = $fixtureMap
+            $fixtureReader = {
+                [CmdletBinding()]
+                param(
+                    [hashtable]$FilterHashtable,
+                    [int]$MaxEvents,
+                    [string]$LogName,
+                    [switch]$Oldest
+                )
+
+                $null = $Oldest
+                $channel = if ($FilterHashtable) { [string]$FilterHashtable.LogName } else { [string]$LogName }
+                if (-not $channel -or -not $script:LVCoverageFixtureEvents.ContainsKey($channel)) {
+                    throw ("Coverage fixture has no event channel '{0}'." -f $channel)
+                }
+                $items = @($script:LVCoverageFixtureEvents[$channel])
+                if ($MaxEvents -gt 0) { return @($items | Select-Object -First $MaxEvents) }
+                return $items
+            }
+            Set-Item Function:\Get-WinEvent -Value $fixtureReader
+
+            try {
+                $records = @(Get-LVEventRecord -Channel $channels -DaysBack 1 -MaxPerChannel 10)
+                return [pscustomobject]@{
+                    Records  = $records
+                    Coverage = @($script:LVEventCoverage)
+                }
+            } finally {
+                Remove-Item Function:\Get-WinEvent -ErrorAction SilentlyContinue
+                if ($previousDefinition) {
+                    Set-Item Function:\Get-WinEvent -Value ([scriptblock]::Create($previousDefinition))
+                }
+                Remove-Variable LVCoverageFixtureEvents -Scope Script -ErrorAction SilentlyContinue
+            }
+        } $eventFixtureMap @($eventFixtures | ForEach-Object { [string]$_.channel })
+
+        foreach ($fixture in $eventFixtures) {
+            $observed = @($eventCollection.Coverage | Where-Object { [string]$_.Name -eq [string]$fixture.channel } | Select-Object -Last 1)
+            if ($observed.Count -ne 1) {
+                throw ("Get-LVEventRecord emitted no coverage record for fixture '{0}'." -f $fixture.id)
+            }
+            $observedStatus = [string]$observed[0].Status
+            $observedRecords = @($eventCollection.Records | Where-Object { [string]$_.Channel -eq [string]$fixture.channel }).Count
+            Add-LVCoverageResult -Id ([string]$fixture.id) -Status $observedStatus `
+                -Reason 'Get-LVEventRecord observed and normalized the fixture through the scoped Get-WinEvent seam.' `
+                -Details @{
+                    Locale = [string]$fixture.locale
+                    Version = [int]$fixture.record.Version
+                    ObservedRecords = $observedRecords
+                    CollectorStatus = $observedStatus
+                }
+            if ($observedStatus -ne 'readable' -or $observedRecords -lt 1) {
+                Add-LVCoverageFailure ("Event fixture '{0}' was not readable through Get-LVEventRecord: status={1}, records={2}." -f `
+                    $fixture.id, $observedStatus, $observedRecords)
+            }
+        }
+    } catch {
+        Add-LVCoverageFailure ("Event collector fixture coverage failed: {0}" -f $_.Exception.Message)
+    }
+
+    $fixtureWorkDir = Join-Path ([IO.Path]::GetTempPath()) ('LogVerdictCoverage-{0}' -f [guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($fixtureWorkDir) | Out-Null
+    try {
+        # A real temporary file prevents the gate from proving only that two fixture
+        # fields match. The status below comes from Get-LVTextLogRecord's coverage.
+        $textPath = Join-Path $fixtureWorkDir 'fixture-text.log'
+        Set-Content -LiteralPath $textPath -Value ([string]$textFixture.target.Line) -Encoding UTF8
+        $textTarget = [pscustomobject]@{
+            Name = [string]$textFixture.target.Name
+            Path = $textPath
+            Pattern = [string]$textFixture.target.Pattern
+            Area = [string]$textFixture.target.Area
+            Hint = [string]$textFixture.target.Hint
+        }
+        try {
+            $textCollection = & $module {
+                param($target)
+                $records = @(Get-LVTextLogRecord -DaysBack 1 -Target @($target))
+                [pscustomobject]@{ Records = $records; Coverage = @($script:LVTextLogCoverage) }
+            } $textTarget
+            $observed = @($textCollection.Coverage | Where-Object { [string]$_.Name -eq [string]$textFixture.target.Name } | Select-Object -Last 1)
+            if ($observed.Count -ne 1) { throw 'Get-LVTextLogRecord emitted no fixture coverage record.' }
+            $observedStatus = [string]$observed[0].Status
+            $observedRecords = @($textCollection.Records).Count
+            Add-LVCoverageResult -Id ([string]$textFixture.id) -Status $observedStatus `
+                -Reason 'Get-LVTextLogRecord parsed a temporary fixture file and supplied the observed coverage status.' `
+                -Details @{
+                    Locale = [string]$textFixture.locale
+                    Name = [string]$textFixture.target.Name
+                    ObservedRecords = $observedRecords
+                    CollectorStatus = $observedStatus
+                }
+            if ($observedStatus -ne 'readable' -or $observedRecords -lt 1) {
+                Add-LVCoverageFailure ("Text-log fixture '{0}' was not readable through Get-LVTextLogRecord: status={1}, records={2}." -f `
+                    $textFixture.id, $observedStatus, $observedRecords)
+            }
+        } catch {
+            Add-LVCoverageFailure ("Text-log collector fixture coverage failed: {0}" -f $_.Exception.Message)
+        }
+
+        # Feed malformed bytes to the offline parser and retain the status it emits;
+        # expectedStatus is metadata for the fixture, never the source of the result.
+        $malformedPath = Join-Path $fixtureWorkDir ([string]$malformed.name)
+        [IO.File]::WriteAllText($malformedPath, 'not an EVTX file')
+        try {
+            $offlineResult = & $module {
+                param($path)
+                Invoke-LVOfflineScan -EvidencePath $path -DaysBack 1 -SkipTextLogs -SkipReliability
+            } $malformedPath
+            $observed = @($offlineResult.Coverage | Where-Object {
+                [string]$_.Source -eq 'offline-evtx' -and [string]$_.Name -eq [string]$malformed.name
+            } | Select-Object -First 1)
+            if ($observed.Count -ne 1) { throw 'Invoke-LVOfflineScan emitted no malformed-EVTX coverage record.' }
+            $observedStatus = [string]$observed[0].Status
+            Add-LVCoverageResult -Id ([string]$malformed.id) -Status $observedStatus `
+                -Reason 'Invoke-LVOfflineScan parsed a temporary malformed EVTX source and supplied the observed status.' `
+                -Details @{
+                    ExpectedStatus = [string]$malformed.expectedStatus
+                    ObservedStatus = $observedStatus
+                    ObservedRecords = [int]$observed[0].ObservedRecords
+                }
+            if ($observedStatus -ne 'unreadable') {
+                Add-LVCoverageFailure ("Malformed EVTX fixture '{0}' produced unexpected observed status '{1}'." -f `
+                    $malformed.id, $observedStatus)
+            }
+        } catch {
+            Add-LVCoverageFailure ("Offline EVTX collector fixture coverage failed: {0}" -f $_.Exception.Message)
+        }
+    } finally {
+        if (Test-Path -LiteralPath $fixtureWorkDir) { [IO.Directory]::Delete($fixtureWorkDir, $true) }
+    }
 
     $elevationFixture = $fixtures | Where-Object kind -eq 'elevation' | Select-Object -First 1
     try {

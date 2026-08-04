@@ -60,6 +60,30 @@ jobs:
           .\Tools\Test-LogVerdictGui.ps1 -Theme HighContrast -ScalePercent 125
           if (-not $?) { exit 1 }
 
+      - name: Prove GUI filter rejects renamed suites
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $probe = Join-Path $env:RUNNER_TEMP 'logverdict-gui-vacuity-probe.ps1'
+          $source = Get-Content -LiteralPath .\Tests\LogVerdict.Tests.ps1 -Raw -Encoding UTF8
+          $renamed = [regex]::Replace($source, "(?m)^Describe 'GUI", "Describe 'Renamed")
+          if ($renamed -eq $source) { throw 'The GUI vacuity probe did not rename any GUI Describe block.' }
+          Set-Content -LiteralPath $probe -Value $renamed -Encoding UTF8
+          try {
+            $probeExit = 0
+            try {
+              .\Tools\Test-LogVerdictGui.ps1 -TestPath $probe -Theme Normal -ScalePercent 125
+              $probeExit = if ($LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+            } catch {
+              $probeExit = 1
+              Write-Output ('Expected vacuity rejection: {0}' -f $_.Exception.Message)
+            }
+            if ($probeExit -eq 0) { throw 'The GUI filter accepted a deliberately renamed test suite.' }
+            Write-Output ('GUI vacuity probe correctly failed with exit code {0}.' -f $probeExit)
+          } finally {
+            if (Test-Path -LiteralPath $probe) { Remove-Item -LiteralPath $probe -Force }
+          }
+
       - name: Run structured coverage gate in STA
         shell: ${{ matrix.shell }}
         run: |
@@ -131,6 +155,54 @@ jobs:
           $ErrorActionPreference = 'Stop'
           .\Tools\Build-LogVerdictExe.ps1
           if (-not $?) { exit 1 }
+
+      - name: Smoke packaged console executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $consolePath = Join-Path (Get-Location).Path 'dist\LogVerdict.exe'
+          $version = (& .\Tools\Get-LogVerdictVersion.ps1).Trim()
+          $allowedExitCodes = @(0..4)
+
+          & $consolePath -DaysBack 1 -NoReport -NoPause
+          $noReportExit = [int]$LASTEXITCODE
+          if ($allowedExitCodes -notcontains $noReportExit) {
+            throw "Packaged console no-report smoke returned unexpected exit code $noReportExit."
+          }
+
+          $scratch = Join-Path $env:RUNNER_TEMP 'logverdict-console-smoke'
+          if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force }
+          New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+          try {
+            & $consolePath -DaysBack 1 -OutputDir $scratch -Format All -NoPause
+            $reportExit = [int]$LASTEXITCODE
+            if ($allowedExitCodes -notcontains $reportExit) {
+              throw "Packaged console report smoke returned unexpected exit code $reportExit."
+            }
+
+            $requiredReports = @(
+              'LogVerdict-Report.txt'
+              'LogVerdict-Report.json'
+              'LogVerdict-Report.csv'
+              'LogVerdict-Report.html'
+              'LogVerdict-Ticket-Summary.md'
+              'LogVerdict-Run.log'
+            )
+            foreach ($name in $requiredReports) {
+              $path = Join-Path $scratch $name
+              if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                throw "Packaged console did not write required report '$name'."
+              }
+            }
+
+            $json = Get-Content -LiteralPath (Join-Path $scratch 'LogVerdict-Report.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ([string]$json.Version -ne $version) {
+              throw "Packaged JSON report version '$($json.Version)' does not match VERSION '$version'."
+            }
+            Write-Output "Packaged console smoke passed with report exit code $reportExit and version $version."
+          } finally {
+            if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force }
+          }
 
       - name: Regenerate package metadata from local assets
         shell: pwsh

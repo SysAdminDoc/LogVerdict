@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [0.8.2] - 2026-08-02
 
+- Made CI execute the packaged console twice, reject vacuous GUI filters with a deliberate renamed-suite probe, and drive coverage fixtures through the real event, text-log, and offline collectors; refreshed stale GUI fixture names and removed an unearned keyboard check.
 - Closed generated-document injection paths: HTML formatting now encodes by default, localization is encoded, CSV cells are formula-safe, and case-profile prose/recipes reject or quote directive-breaking input.
 - Hardened standard export templates with reserved built-in projection pins, canonical format metadata, standalone-only fallback, bounded evaluation, normalized-only scope, file-size limits, and strict operator objects.
 - Compiled rule message and structured regular expressions once with bounded match timeouts; invalid patterns now fail database trust and timed-out matches remain unknown with an explicit warning.

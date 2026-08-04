@@ -308,7 +308,6 @@ try {
     Wait-SmokeElement -Description 'cancelled result state' -Getter { Find-SmokeText -Root $rootElement -Text 'Scan cancelled' } | Out-Null
     Add-SmokeCheck -Id 'cancelled-state' -Passed $true -Details 'The packaged scan can be cancelled and reports that nothing changed'
 
-    Add-SmokeCheck -Id 'keyboard-targets' -Passed $true -Details 'Navigation and scan controls expose UI Automation control patterns'
     $evidence.passed = $true
 } finally {
     if ($process -and -not $process.HasExited) {

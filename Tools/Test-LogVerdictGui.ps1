@@ -17,7 +17,9 @@ param(
     [string]$Theme = 'Normal',
 
     [ValidateRange(100, 200)]
-    [int]$ScalePercent = 125
+    [int]$ScalePercent = 125,
+
+    [string]$TestPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,6 +41,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
         '-Theme', $Theme,
         '-ScalePercent', $ScalePercent
     )
+    if ($TestPath) { $childArgs += @('-TestPath', $TestPath) }
     $child = Start-Process -FilePath $hostPath -ArgumentList $childArgs -Wait -PassThru
     exit $child.ExitCode
 }
@@ -48,10 +51,17 @@ $env:LOGVERDICT_TEST_DPI_SCALE = ([double]$ScalePercent / 100).ToString(
     '0.##', [Globalization.CultureInfo]::InvariantCulture)
 
 Import-Module Pester -RequiredVersion 5.9.0 -Force
-$testPath = Join-Path $repoRoot 'Tests\LogVerdict.Tests.ps1'
+$testPath = if ($TestPath) { $TestPath } else { Join-Path $repoRoot 'Tests\LogVerdict.Tests.ps1' }
+if (-not (Test-Path -LiteralPath $testPath -PathType Leaf)) {
+    throw "GUI Pester test path was not found: $testPath"
+}
 $result = Invoke-Pester -Path $testPath -FullNameFilter 'GUI*' -Output Normal -PassThru
 if ($result.FailedCount -gt 0) {
     exit 1
+}
+if ($result.TotalCount -lt 1 -or $result.PassedCount -lt 1) {
+    throw ('GUI filter selected {0} test(s) but only {1} passed. The accessibility gate is vacuous.' -f `
+        $result.TotalCount, $result.PassedCount)
 }
 
 Write-Output ('GUI {0} theme and {1}% DPI smoke checks passed in STA.' -f $Theme, $ScalePercent)
