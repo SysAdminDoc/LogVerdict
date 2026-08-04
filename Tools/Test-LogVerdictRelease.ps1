@@ -307,7 +307,7 @@ if ([int]$exportTemplateSchema.properties.schemaVersion.const -ne 1 -or
 Test-LVReleaseJsonSchema -Path $exportTemplatePath -SchemaPath $exportTemplateSchemaPath -Label 'export templates'
 $exportTemplates = Get-Content -LiteralPath $exportTemplatePath -Raw -Encoding UTF8 | ConvertFrom-Json
 $reservedExportProjections = [ordered]@{
-    Ecs            = [pscustomobject]@{ Projection = 'builtin:ecs'; Kind = 'single'; Source = $null }
+    Ecs            = [pscustomobject]@{ Projection = 'builtin:ecs'; Kind = 'line'; Source = 'findings' }
     Ocsf           = [pscustomobject]@{ Projection = 'builtin:ocsf'; Kind = 'single'; Source = $null }
     Sarif          = [pscustomobject]@{ Projection = 'builtin:sarif'; Kind = 'single'; Source = $null }
     OpenTelemetry  = [pscustomobject]@{ Projection = 'builtin:opentelemetry'; Kind = 'single'; Source = $null }
@@ -441,6 +441,84 @@ try {
         }
         Test-LVReleaseJsonSchema -Path $documentInfo.Path -SchemaPath $documentInfo.SchemaPath -Label $documentInfo.Label
         Test-LVReleaseUtcDocument -Path $documentInfo.Path -Label $documentInfo.Label
+    }
+
+    # Standards smoke contract. These assertions stay intentionally field-level:
+    # an envelope can round-trip through ConvertFrom-Json while still violating the
+    # target format's ingest rules.
+    $standardFinding = [pscustomobject][ordered]@{
+        Key = 'event|System|41'; Source = 'event'; Channel = 'System'; Provider = 'Microsoft-Windows-Kernel-Power'; Id = 41
+        Level = 1; WorstLevel = 1; LevelName = 'Critical'; Count = 1; PerDay = 1; FirstSeen = $releaseScanTime; LastSeen = $releaseScanTime
+        SampleMessage = 'Kernel-Power event 41'; Samples = @('Kernel-Power event 41');
+        Verdict = 'actionable'; Title = 'Unexpected shutdown'; Plain = 'The system restarted without a clean shutdown.'
+        Why = 'Release-gate fixture'; Action = 'Review the preceding bugcheck evidence.'; RuleId = 'LV-0001'; Confidence = 'high'
+        Reference = $null; References = @(); Sources = @(); Suppressed = $false
+    }
+    $releaseResult.Findings = @($standardFinding)
+    $releaseResult.Reduction.SignatureCount = 1
+
+    $ecsPath = Join-Path $releaseSchemaRoot 'standard.ecs.jsonl'
+    $ecsWritten = Export-LogVerdictStandard -Result $releaseResult -Format Ecs -Path $ecsPath
+    if ([int]$ecsWritten.LineCount -ne 1) { throw 'ECS export must emit one line per finding.' }
+    $ecsDocument = Get-Content -LiteralPath $ecsPath | Select-Object -First 1 | ConvertFrom-Json
+    if ($ecsDocument.PSObject.Properties['findings'] -or $ecsDocument.event.PSObject.Properties['count'] -or
+        $ecsDocument.rule.PSObject.Properties['confidence']) {
+        throw 'ECS export leaked the old container or reserved field namespaces.'
+    }
+    if ([string]$ecsDocument.log.level -eq [string]$standardFinding.Verdict) {
+        throw 'ECS log.level must describe the source event, not the LogVerdict verdict.'
+    }
+
+    $sarifDocument = (Export-LogVerdictStandard -Result $releaseResult -Format Sarif).Document
+    if ([string]$sarifDocument.'$schema' -notmatch '/cos02/schemas/sarif-schema-2\.1\.0\.json$') {
+        throw 'SARIF export is not pinned to the cos02 schema URL.'
+    }
+    $sarifRuleIds = @{}
+    foreach ($rule in @($sarifDocument.runs[0].tool.driver.rules)) { $sarifRuleIds[[string]$rule.id] = $true }
+    foreach ($sarifResult in @($sarifDocument.runs[0].results)) {
+        if ($sarifResult.ruleId -and -not $sarifRuleIds.ContainsKey([string]$sarifResult.ruleId)) {
+            throw ("SARIF result ruleId '{0}' is absent from driver.rules." -f $sarifResult.ruleId)
+        }
+        if ([string]$sarifResult.kind -ne 'fail' -and [string]$sarifResult.level -ne 'none') {
+            throw 'SARIF non-fail results must use level=none.'
+        }
+        if ($sarifResult.locations[0].physicalLocation) {
+            throw 'SARIF fabricated a physical source location for the release fixture.'
+        }
+    }
+    if (-not [bool]$sarifDocument.runs[0].invocations[0].executionSuccessful) {
+        throw 'SARIF executionSuccessful should be true for the zero-exit release fixture.'
+    }
+
+    $otelDocument = (Export-LogVerdictStandard -Result $releaseResult -Format OpenTelemetry).Document
+    foreach ($logRecord in @($otelDocument.resourceLogs[0].scopeLogs[0].logRecords)) {
+        foreach ($name in @('timeUnixNano', 'observedTimeUnixNano')) {
+            if ($logRecord.PSObject.Properties[$name] -and $logRecord.$name -isnot [string]) {
+                throw ("OpenTelemetry {0} must be a decimal string in JSON." -f $name)
+            }
+            if ([string]$logRecord.$name -eq '0') {
+                throw ("OpenTelemetry {0} may not invent the Unix epoch." -f $name)
+            }
+        }
+        if ($logRecord.droppedAttributesCount -isnot [int32] -and $logRecord.droppedAttributesCount -isnot [int64]) {
+            throw 'OpenTelemetry droppedAttributesCount must remain a uint32 JSON number.'
+        }
+        foreach ($attribute in @($logRecord.attributes)) {
+            if ($attribute.value.PSObject.Properties['intValue'] -and $attribute.value.intValue -isnot [string]) {
+                throw 'OpenTelemetry AnyValue.intValue must be a decimal string.'
+            }
+        }
+    }
+
+    $stixFirst = (Export-LogVerdictStandard -Result $releaseResult -Format Stix).Document
+    $stixSecond = (Export-LogVerdictStandard -Result $releaseResult -Format Stix).Document
+    if ($stixFirst.PSObject.Properties['spec_version']) { throw 'STIX bundles must not carry spec_version.' }
+    if ((@($stixFirst.objects | ForEach-Object id) -join '|') -ne (@($stixSecond.objects | ForEach-Object id) -join '|')) {
+        throw 'STIX object identifiers must be deterministic for one signature set.'
+    }
+    foreach ($observed in @($stixFirst.objects | Where-Object type -eq 'observed-data')) {
+        if (-not $observed.created -or -not $observed.modified -or [int64]$observed.number_observed -lt 1 -or
+            @($observed.object_refs).Count -lt 1) { throw 'STIX observed-data is missing its 2.1 required fields.' }
     }
 } finally {
     if (Test-Path -LiteralPath $releaseSchemaRoot) {

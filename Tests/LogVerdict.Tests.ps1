@@ -3749,13 +3749,13 @@ Describe 'Suppression expectations' {
             $text | Should -Match 'UNMATCHED matched nothing'
             $text | Should -Match 'EXPIRED expired/review due'
             $ticket | Should -Match 'Suppression expectations'
-            $ticket | Should -Match 'UNMATCHED'
+            $ticket | Should -Match '1 matched nothing; 1 expired or due for review'
 
-            $ecs = (Export-LogVerdictStandard -Result $result -Format Ecs).Document
+            $ecs = @((Export-LogVerdictStandard -Result $result -Format Ecs) | ForEach-Object { $_ | ConvertFrom-Json })[0]
             $ecs.logverdict.scan.windowsBuild | Should -Be 26100
             $ecs.logverdict.suppression.suppressedFindingCount | Should -Be 1
-            $ecs.findings[0].logverdict.suppressed | Should -BeTrue
-            $ecs.findings[0].logverdict.suppression.id | Should -BeExactly 'MATCHED'
+            $ecs.logverdict.finding.suppressed | Should -BeTrue
+            $ecs.logverdict.finding.suppression.id | Should -BeExactly 'MATCHED'
             $sarif = (Export-LogVerdictStandard -Result $result -Format Sarif).Document
             $sarif.runs[0].results[0].baselineState | Should -BeExactly 'unchanged'
             $sarif.runs[0].results[0].suppressions[0].kind | Should -BeExactly 'external'
@@ -4336,7 +4336,7 @@ Describe 'Report rendering' {
 
             $telemetryJson = $metric | ConvertTo-Json -Depth 5
             $telemetryJson | Should -Not -Match 'Message|Path|HOST|C:\\|secret'
-            $ecs = (Export-LogVerdictStandard -Result $result -Format Ecs).Document
+            $ecs = @((Export-LogVerdictStandard -Result $result -Format Ecs) | ForEach-Object { $_ | ConvertFrom-Json })[0]
             $ecs.logverdict.scan.performanceTelemetry | Should -BeTrue
             $ecs.logverdict.scan.performance[0].status | Should -BeExactly 'empty'
             $ecs.logverdict.scan.performance[0].elapsedMilliseconds | Should -Be 1200
@@ -4377,23 +4377,33 @@ Describe 'Report rendering' {
             })
             $formats = @('Ecs', 'Ocsf', 'Sarif', 'OpenTelemetry', 'Stix')
             foreach ($format in $formats) {
-                $export = Export-LogVerdictStandard -Result $result -Format $format
-                $json = $export.Document | ConvertTo-Json -Depth 30
-                $roundTrip = $json | ConvertFrom-Json
+                if ($format -eq 'Ecs') {
+                    $lines = @(Export-LogVerdictStandard -Result $result -Format Ecs)
+                    $json = $lines -join [Environment]::NewLine
+                    $roundTrip = $lines[0] | ConvertFrom-Json
+                    $roundTrip.logverdict.adapter | Should -BeExactly 'ecs'
+                } else {
+                    $export = Export-LogVerdictStandard -Result $result -Format $format
+                    $json = $export.Document | ConvertTo-Json -Depth 30
+                    $roundTrip = $json | ConvertFrom-Json
+                }
                 if ($format -eq 'Sarif') {
                     $roundTrip.version | Should -BeExactly '2.1.0'
                     @($roundTrip.runs).Count | Should -Be 1
-                } else {
+                } elseif ($format -eq 'Stix') {
+                    $roundTrip.type | Should -BeExactly 'bundle'
+                    $roundTrip.id | Should -Match '^bundle--[0-9a-f-]{36}$'
+                } elseif ($format -ne 'Ecs') {
                     $roundTrip.schemaVersion | Should -BeExactly '1.0.0'
                     $roundTrip.adapter | Should -Not -BeNullOrEmpty
                 }
                 $json | Should -Match 'Acme'
                 $json | Should -Match 'high'
-                $json | Should -Match 'coverage'
+                if ($format -ne 'Stix') { $json | Should -Match 'coverage' }
             }
-            $ecs = (Export-LogVerdictStandard -Result $result -Format Ecs).Document
-            $ecs.findings[0].logverdict.event.provider | Should -BeExactly 'Acme'
-            $ecs.findings[0].rule.confidence | Should -BeExactly 'high'
+            $ecs = @((Export-LogVerdictStandard -Result $result -Format Ecs) | ForEach-Object { $_ | ConvertFrom-Json })[0]
+            $ecs.logverdict.finding.event.provider | Should -BeExactly 'Acme'
+            $ecs.logverdict.rule.confidence | Should -BeExactly 'high'
             $ecs.logverdict.coverage[0].status | Should -BeExactly 'empty'
             $ocsf = (Export-LogVerdictStandard -Result $result -Format Ocsf).Document
             $ocsf.evidence[0].unmapped.logverdict.finding.key | Should -BeExactly 'Acme/99'
@@ -4402,10 +4412,11 @@ Describe 'Report rendering' {
             $stix = (Export-LogVerdictStandard -Result $result -Format Stix).Document
             @($stix.objects | Where-Object type -eq 'observed-data').Count | Should -Be 1
             ($stix.objects | Where-Object type -eq 'report').x_logverdict.schemaVersion | Should -BeExactly '1.0.0'
+            ($stix.objects | Where-Object type -eq 'report').x_logverdict.coverage[0].status | Should -BeExactly 'empty'
             $path = Join-Path $TestDrive 'adapters\ecs.json'
             $written = Export-LogVerdictStandard -Result $result -Format Ecs -Path $path
             $written.Path | Should -BeExactly $path
-            (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).adapter | Should -BeExactly 'ecs'
+            (Get-Content -LiteralPath $path | Select-Object -First 1 | ConvertFrom-Json).logverdict.adapter | Should -BeExactly 'ecs'
         }
     }
 
@@ -4449,7 +4460,7 @@ Describe 'Report rendering' {
             @((Get-Content -LiteralPath $linePath)).Count | Should -Be 2
 
             {
-                Export-LogVerdictStandard -Result ($r | Select-Object *) -Format Ecs -Path $linePath -Append
+                Export-LogVerdictStandard -Result ($r | Select-Object *) -Format Sarif -Path $linePath -Append
             } | Should -Throw '*single document*append mode*line-oriented*'
         }
     }
@@ -4590,8 +4601,10 @@ Describe 'Report rendering' {
             $run.tool.driver.name | Should -BeExactly 'LogVerdict'
             $database = Get-LogVerdictDatabase
             $activeRules = @($database.rules | Where-Object { Test-LVRuleActive -Rule $_ })
-            @($run.tool.driver.rules).Count | Should -Be $activeRules.Count
+            $expectedRuleIds = @($activeRules.id) + @($result.Findings.RuleId | Where-Object { $_ }) | Sort-Object -Unique
+            @($run.tool.driver.rules).Count | Should -Be $expectedRuleIds.Count
             @($run.tool.driver.rules.id) | Should -Contain 'LV-0001'
+            @($run.tool.driver.rules.id) | Should -Contain 'LV-0002'
             @($run.results).Count | Should -Be 3
 
             $eventResult = @($run.results | Where-Object { $_.properties.'logverdict.channel' -eq 'System' })[0]
@@ -4600,18 +4613,74 @@ Describe 'Report rendering' {
             $eventResult.locations[0].logicalLocations[0].fullyQualifiedName | Should -Match 'event/System/Acme/99'
 
             $cbsResult = @($run.results | Where-Object { $_.properties.'logverdict.channel' -eq 'CBS' })[0]
-            $cbsResult.locations[0].physicalLocation.artifactLocation.uri | Should -BeExactly 'file:///C:/Windows/Logs/CBS/CBS.log'
-            $cbsResult.locations[0].physicalLocation.region.startLine | Should -Be 17
-            $cbsResult.locations[0].physicalLocation.region.endLine | Should -Be 17
+            $cbsResult.locations[0].logicalLocations[0].fullyQualifiedName | Should -Match 'textlog/CBS/CBS/0'
+            @($cbsResult.locations[0].PSObject.Properties.Name) | Should -Not -Contain 'physicalLocation'
 
             $dismResult = @($run.results | Where-Object { $_.properties.'logverdict.channel' -eq 'DISM' })[0]
             $dismResult.level | Should -BeExactly 'warning'
-            $dismResult.locations[0].physicalLocation.artifactLocation.uri | Should -BeExactly 'file:///C:/Windows/Logs/DISM/dism.log'
-            $dismResult.locations[0].physicalLocation.region.startLine | Should -Be 23
+            $dismResult.locations[0].logicalLocations[0].fullyQualifiedName | Should -Match 'textlog/DISM/DISM/0'
+            @($dismResult.locations[0].PSObject.Properties.Name) | Should -Not -Contain 'physicalLocation'
             $json = $sarif | ConvertTo-Json -Depth 30
             $roundTrip = $json | ConvertFrom-Json
             $roundTrip.runs[0].tool.driver.rules[0].id | Should -Not -BeNullOrEmpty
             $roundTrip.runs[0].results[0].partialFingerprints.'logverdict.signature' | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'maps each standard adapter field-by-field instead of trusting an envelope' {
+        InModuleScope LogVerdict -Parameters @{ r = $script:FakeResult } {
+            param($r)
+            $result = $r | Select-Object *
+            $finding = $r.Findings[0] | Select-Object *
+            $finding | Add-Member -NotePropertyName LevelName -NotePropertyValue 'Error' -Force
+            $finding | Add-Member -NotePropertyName WorstLevel -NotePropertyValue 2 -Force
+            $finding | Add-Member -NotePropertyName SourcePath -NotePropertyValue 'C:\Windows\Logs\CBS\CBS.log' -Force
+            $finding | Add-Member -NotePropertyName SourceLine -NotePropertyValue 42 -Force
+            $finding.RuleId = 'LOCAL-HISTORIC'
+            $result.Findings = @($finding)
+
+            $ecsLines = @(Export-LogVerdictStandard -Result $result -Format Ecs)
+            $ecsLines.Count | Should -Be 1
+            $ecs = $ecsLines[0] | ConvertFrom-Json
+            @($ecs.PSObject.Properties.Name) | Should -Not -Contain 'findings'
+            $ecs.log.level | Should -BeExactly 'error'
+            @($ecs.event.PSObject.Properties.Name) | Should -Not -Contain 'count'
+            @($ecs.rule.PSObject.Properties.Name) | Should -Not -Contain 'confidence'
+            $ecs.logverdict.rule.confidence | Should -BeExactly 'high'
+
+            $sarif = (Export-LogVerdictStandard -Result $result -Format Sarif).Document
+            $sarif.'$schema' | Should -Match '/cos02/schemas/sarif-schema-2\.1\.0\.json$'
+            $sarif.runs[0].tool.driver.rules.id | Should -Contain 'LOCAL-HISTORIC'
+            $sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri | Should -BeExactly 'file:///C:/Windows/Logs/CBS/CBS.log'
+            $sarif.runs[0].results[0].locations[0].physicalLocation.region.startLine | Should -Be 42
+            $sarif.runs[0].invocations[0].executionSuccessful | Should -BeFalse
+
+            $stix1 = (Export-LogVerdictStandard -Result $result -Format Stix).Document
+            $stix2 = (Export-LogVerdictStandard -Result $result -Format Stix).Document
+            $stix1.PSObject.Properties.Name | Should -Not -Contain 'spec_version'
+            (@($stix1.objects | ForEach-Object id) -join '|') | Should -Be ((@($stix2.objects | ForEach-Object id) -join '|'))
+            ($stix1.objects | Where-Object type -eq 'identity').identity_class | Should -BeExactly 'system'
+            $observed = @($stix1.objects | Where-Object type -eq 'observed-data')[0]
+            $observed.created | Should -Not -BeNullOrEmpty
+            $observed.modified | Should -Not -BeNullOrEmpty
+            [int64]$observed.number_observed | Should -BeGreaterOrEqual 1
+            @($observed.object_refs).Count | Should -Be 1
+
+            $otel = (Export-LogVerdictStandard -Result $result -Format OpenTelemetry).Document
+            $record = $otel.resourceLogs[0].scopeLogs[0].logRecords[0]
+            $record.timeUnixNano | Should -BeOfType [string]
+            $record.observedTimeUnixNano | Should -BeOfType [string]
+            $record.droppedAttributesCount | Should -BeOfType [int32]
+            $record.timeUnixNano | Should -Not -BeExactly '0'
+            foreach ($attribute in @($record.attributes | Where-Object { $_.value.PSObject.Properties['intValue'] })) {
+                $attribute.value.intValue | Should -BeOfType [string]
+            }
+
+            $undated = $finding | Select-Object *
+            $undated.FirstSeen = $null; $undated.LastSeen = $null
+            $result.Findings = @($undated)
+            $undatedRecord = ((Export-LogVerdictStandard -Result $result -Format OpenTelemetry).Document).resourceLogs[0].scopeLogs[0].logRecords[0]
+            @($undatedRecord.PSObject.Properties.Name) | Should -Not -Contain 'timeUnixNano'
         }
     }
 
@@ -4625,13 +4694,19 @@ Describe 'Report rendering' {
         })
         $timestampPattern = '(?im)"(?:generatedAt|scanTime|scanTimes|firstObserved|lastObserved|windowStart|windowEnd|oldestRecord|timestampUtc|endTimestampUtc|startTimeUtc|endTimeUtc|firstDetectionTimeUtc|lastDetectionTimeUtc)"\s*:\s*"([^"]+)"'
         foreach ($format in @('Ecs', 'Ocsf', 'Sarif', 'OpenTelemetry', 'Stix')) {
-            $document = (Export-LogVerdictStandard -Result $result -Format $format).Document
-            $json = $document | ConvertTo-Json -Depth 30
-            $json | Should -Not -Match '(?i)/Date\('
-            $timestampMatches = [regex]::Matches($json, $timestampPattern)
-            $timestampMatches.Count | Should -BeGreaterThan 0 -Because "$format must carry machine-readable timestamps"
-            foreach ($match in $timestampMatches) {
-                $match.Groups[1].Value | Should -Match 'Z$' -Because "$format timestamps must be UTC"
+            $documents = if ($format -eq 'Ecs') {
+                @(Export-LogVerdictStandard -Result $result -Format Ecs | ForEach-Object { $_ | ConvertFrom-Json })
+            } else {
+                @((Export-LogVerdictStandard -Result $result -Format $format).Document)
+            }
+            foreach ($document in $documents) {
+                $json = $document | ConvertTo-Json -Depth 30
+                $json | Should -Not -Match '(?i)/Date\('
+                $timestampMatches = [regex]::Matches($json, $timestampPattern)
+                $timestampMatches.Count | Should -BeGreaterThan 0 -Because "$format must carry machine-readable timestamps"
+                foreach ($match in $timestampMatches) {
+                    $match.Groups[1].Value | Should -Match 'Z$' -Because "$format timestamps must be UTC"
+                }
             }
         }
 
@@ -4672,10 +4747,10 @@ Describe 'Report rendering' {
             $records = @($lines | ForEach-Object { $_ | ConvertFrom-Json })
             $records[0].recordType | Should -BeExactly 'metadata'
             $records[0].format | Should -BeExactly 'LogVerdict.Timeline'
-            $event = $records | Where-Object recordType -eq 'event' | Select-Object -First 1
+            $eventRecord = $records | Where-Object recordType -eq 'event' | Select-Object -First 1
             $findingRecord = $records | Where-Object recordType -eq 'finding' | Select-Object -First 1
-            $event.recordId | Should -BeExactly 'evt-99'
-            @($event.recordIds) | Should -Contain 'evt-100'
+            $eventRecord.recordId | Should -BeExactly 'evt-99'
+            @($eventRecord.recordIds) | Should -Contain 'evt-100'
             $findingRecord.provenance.ruleId | Should -BeExactly 'T-1'
             $findingRecord.privacy.state | Should -BeExactly 'redacted'
             ($records | ConvertTo-Json -Depth 30) | Should -Not -Match 'HOST-9|C:\\\\Users\\\\bob'
@@ -4695,10 +4770,11 @@ Describe 'Report rendering' {
             $result.Findings = @($finding)
             $result.MachineName = 'HOST-9'
             $result | Add-Member -NotePropertyName Redacted -NotePropertyValue $false
-            $export = Export-LogVerdictStandard -Result $result -Format Ecs -Redact
-            $json = $export.Document | ConvertTo-Json -Depth 30
-            $export.Document.logverdict.privacy.redacted | Should -BeTrue
-            $export.Document.logverdict.privacy.rawEvidenceIncluded | Should -BeFalse
+            $line = @(Export-LogVerdictStandard -Result $result -Format Ecs -Redact)[0]
+            $document = $line | ConvertFrom-Json
+            $json = $document | ConvertTo-Json -Depth 30
+            $document.logverdict.privacy.redacted | Should -BeTrue
+            $document.logverdict.privacy.rawEvidenceIncluded | Should -BeFalse
             $json | Should -Not -Match 'HOST-9|bob'
             $json | Should -Match '<MACHINE>|identifiersMasked'
         }

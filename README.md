@@ -364,7 +364,10 @@ $advisories = Get-LogVerdictAdvisory -Package PowerShell -Version 7.4.0
 $r.Findings | Where-Object Verdict -eq 'actionable'
 $r | Export-LogVerdictReport -OutputDir C:\Temp\lv
 
-# Versioned machine-interchange JSON for ECS, OCSF evidence, OpenTelemetry Logs, or STIX 2.1
+# Versioned ECS NDJSON (one ingestible document per finding)
+Export-LogVerdictStandard -Result $r -Format Ecs -Path C:\Temp\lv\findings.ecs.jsonl -Redact
+
+# Legacy normalized-evidence compatibility envelope (not native OCSF)
 Export-LogVerdictStandard -Result $r -Format Ocsf -Path C:\Temp\lv\finding.ocsf.json -Redact
 
 # SARIF 2.1.0 for GitHub code scanning and SARIF viewers
@@ -377,32 +380,48 @@ Export-LogVerdictStandard -Result $r -Format Jsonl -Path C:\Temp\lv\timeline.jso
 Show-LogVerdictGui -DaysBack 7 -AutoScan
 ```
 
-`Export-LogVerdictStandard` uses one adapter contract across `Ecs`, `Ocsf`,
-`Sarif`, `OpenTelemetry`, and `Stix`. Each non-SARIF JSON document declares
-`schemaVersion: 1.0.0`,
+`Export-LogVerdictStandard` uses one normalized model across `Ecs`, `Ocsf`,
+`Sarif`, `OpenTelemetry`, and `Stix`. ECS is line-oriented: each output line is
+one ingestible finding document with source event fields in ECS namespaces and
+LogVerdict-specific context under `logverdict.*`. LogVerdict-owned envelopes declare
+`schemaVersion: 1.0.0` in that context,
 preserves finding confidence, rule references, source/channel/provider/EventID fields,
 timestamps, normalized coverage, configuration-health profiles, and explicit
 `privacy.redacted`/`privacy.rawEvidenceIncluded` state. `-Redact` applies the same
 identifier masking as the ordinary reports before projection; the adapters never copy
 the internal result object wholesale or add raw EVTX bytes.
 
-The OCSF adapter is deliberately scoped to normalized diagnostic evidence. LogVerdict
-does not claim OCSF's security-oriented `Detection Finding` class for health, benign, or
-operational diagnostics: each `evidence[]` record carries generic time/count fields and
-the complete normalized finding under `unmapped.logverdict.finding`. The adapter's
-advisories and correlations are likewise under `unmapped.logverdict`; use the vendor
-extension as the source of verdicts and rules rather than treating the record as a native
-OCSF detection event.
+The `Ocsf` compatibility envelope is deliberately scoped to normalized diagnostic
+evidence and is not a native OCSF document. LogVerdict does not claim OCSF's
+security-oriented `Detection Finding` class for health, benign, or operational
+diagnostics; each `evidence[]` record carries generic time/count fields and the complete
+normalized finding under `unmapped.logverdict.finding`. Do not send this envelope to an
+OCSF ingest endpoint. A future consumer-gated adapter may target OCSF 1.9.0's
+`device_power_state_activity` class for Kernel-Power 41, but this release does not guess
+that mapping.
 
 `-Format Sarif` emits a native SARIF 2.1.0 document. `tool.driver.rules[]` contains
-every active rule from the loaded verdict database; findings map to SARIF `results[]`
-with `level`, `message`, `occurrenceCount`, and `partialFingerprints` keyed by the
-LogVerdict signature. Event findings use `logicalLocations`; CBS and DISM findings use
-the corresponding log file with a matched-line `region`. Scan coverage, privacy,
+every active rule from the loaded verdict database plus historical rule ids needed by
+the results; findings map to SARIF `results[]` with `kind`, schema-valid `level`,
+`message`, `occurrenceCount`, and `partialFingerprints` keyed by the LogVerdict
+signature. A physical artifact/region is emitted only when the source path and line
+were captured; otherwise findings use `logicalLocations`. Scan coverage, privacy,
 health, advisory, and correlation context remains available in SARIF property bags.
 Suppressed findings also carry SARIF `suppressions[]`, an `unchanged` `baselineState`,
 and the expectation id/action/statement. `expiresOn` and the 90-day review date are
 stored under suppression properties because SARIF defines no expiry field.
+
+`-Format Ecs` writes ECS NDJSON. Omit `-Path` to stream one compact JSON object per
+finding to the PowerShell pipeline, or supply a path for an atomic UTF-8 file. Source
+event severity is `log.level`; verdict and confidence remain under `logverdict.*`.
+
+`-Format OpenTelemetry` follows the OTLP/JSON scalar rules: nanosecond `int64` values
+and `AnyValue.intValue` are decimal strings, while `uint32` counters remain numbers.
+An undated finding omits `timeUnixNano`; it is never rewritten as Unix epoch zero.
+`-Format Stix` emits a STIX 2.1 Bundle without a Bundle `spec_version`, uses the
+`system` identity vocabulary, includes `created`/`modified` and `object_refs` on each
+observed-data object, and derives every object id from the signature key with UUIDv5 so
+repeat exports are diffable.
 
 `-Format Jsonl` uses the same versioned privacy and provenance envelope but writes a
 streaming timeline instead of an adapter document. It includes metadata, normalized event

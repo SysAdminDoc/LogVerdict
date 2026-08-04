@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "name": "LogVerdict.ExportTemplates",
   "templates": [
-    { "id": "Ecs", "kind": "single", "mediaType": "application/json", "projection": "builtin:ecs" },
-    { "id": "Ocsf", "kind": "single", "mediaType": "application/json", "projection": "builtin:ocsf" },
+    { "id": "Ecs", "kind": "line", "mediaType": "application/x-ndjson", "projection": "builtin:ecs", "source": "findings", "recordType": "finding" },
+    { "id": "Ocsf", "kind": "single", "mediaType": "application/vnd.logverdict.normalized-evidence+json", "projection": "builtin:ocsf" },
     { "id": "Sarif", "kind": "single", "mediaType": "application/sarif+json", "projection": "builtin:sarif" },
     { "id": "OpenTelemetry", "kind": "single", "mediaType": "application/json", "projection": "builtin:opentelemetry" },
     { "id": "Stix", "kind": "single", "mediaType": "application/stix+json", "projection": "builtin:stix" },

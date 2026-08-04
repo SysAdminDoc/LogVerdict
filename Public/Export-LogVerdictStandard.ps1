@@ -1,7 +1,8 @@
 function Export-LogVerdictStandard {
     <#
         .SYNOPSIS
-        Export a scan result through a versioned ECS, OCSF, SARIF, OpenTelemetry, STIX, or JSONL timeline adapter.
+        Export a scan result through a versioned ECS NDJSON, normalized-evidence,
+        SARIF, OpenTelemetry, STIX, or JSONL timeline adapter.
 
         .DESCRIPTION
         The adapter output is JSON and carries the same normalized findings, event/source
@@ -14,7 +15,9 @@ function Export-LogVerdictStandard {
         The object returned by Invoke-LogVerdictScan.
 
         .PARAMETER Format
-        The target adapter: Ecs, Ocsf, Sarif (SARIF 2.1.0), OpenTelemetry, Stix (STIX 2.1), or Jsonl.
+        The target adapter: Ecs (ECS NDJSON), Ocsf (legacy normalized-evidence
+        compatibility envelope; not native OCSF), Sarif (SARIF 2.1.0),
+        OpenTelemetry, Stix (STIX 2.1), or Jsonl.
         Jsonl emits one metadata, event, finding, correlation, coverage, or provider
         record per line and does not retain a second output graph.
 

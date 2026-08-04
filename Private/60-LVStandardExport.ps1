@@ -72,7 +72,7 @@ function Assert-LVStandardTemplateRegistry {
         if ([string]$template.projection -cne $expectedProjection) {
             throw ("Export template id '{0}' is reserved for projection '{1}', not '{2}'." -f $id, $expectedProjection, [string]$template.projection)
         }
-        $expectedKind = if ($reserved[0] -ieq 'Jsonl') { 'line' } else { 'single' }
+        $expectedKind = if ($reserved[0] -ieq 'Jsonl' -or $reserved[0] -ieq 'Ecs') { 'line' } else { 'single' }
         if ([string]$template.kind -cne $expectedKind) {
             throw ("Export template id '{0}' is reserved for kind '{1}', not '{2}'." -f $id, $expectedKind, [string]$template.kind)
         }
@@ -126,7 +126,7 @@ function Get-LVStandardTemplate {
             schemaVersion = 1
             name = 'LogVerdict.ExportTemplates'
             templates = @(
-                [pscustomobject]@{ id = 'Ecs'; kind = 'single'; projection = 'builtin:ecs' }
+                [pscustomobject]@{ id = 'Ecs'; kind = 'line'; projection = 'builtin:ecs' }
                 [pscustomobject]@{ id = 'Ocsf'; kind = 'single'; projection = 'builtin:ocsf' }
                 [pscustomobject]@{ id = 'Sarif'; kind = 'single'; projection = 'builtin:sarif' }
                 [pscustomobject]@{ id = 'OpenTelemetry'; kind = 'single'; projection = 'builtin:opentelemetry' }
@@ -532,6 +532,24 @@ function ConvertTo-LVStandardUnixMillisecond {
     return [DateTimeOffset]::Parse($timestamp).ToUnixTimeMilliseconds()
 }
 
+function ConvertTo-LVOtelUnixNano {
+    <#
+        OTLP/JSON represents int64 values as decimal strings. Keep the timestamp
+        conversion nullable: an undated record is evidence without a timestamp,
+        not a record at the Unix epoch.
+    #>
+    param([AllowNull()]$Value)
+
+    $milliseconds = ConvertTo-LVStandardUnixMillisecond -Value $Value
+    if ($null -eq $milliseconds) { return $null }
+    try {
+        $big = [System.Numerics.BigInteger]::Parse([string]$milliseconds, [Globalization.CultureInfo]::InvariantCulture)
+        return ($big * [System.Numerics.BigInteger]::Parse('1000000', [Globalization.CultureInfo]::InvariantCulture)).ToString([Globalization.CultureInfo]::InvariantCulture)
+    } catch {
+        return $null
+    }
+}
+
 function Get-LVStandardReference {
     param([Parameter(Mandatory)]$Finding)
 
@@ -665,6 +683,10 @@ function ConvertTo-LVStandardFinding {
         eventVersion = if ($Finding.PSObject.Properties['Version']) { $Finding.Version } else { $null }
         task = if ($Finding.PSObject.Properties['Task']) { $Finding.Task } else { $null }
         opcode = if ($Finding.PSObject.Properties['Opcode']) { $Finding.Opcode } else { $null }
+        level = if ($Finding.PSObject.Properties['WorstLevel']) { $Finding.WorstLevel } elseif ($Finding.PSObject.Properties['Level']) { $Finding.Level } else { $null }
+        levelName = if ($Finding.PSObject.Properties['LevelName']) { $Finding.LevelName } else { $null }
+        sourcePath = if ($Finding.PSObject.Properties['SourcePath']) { $Finding.SourcePath } elseif ($Finding.PSObject.Properties['Path']) { $Finding.Path } elseif ($Finding.PSObject.Properties['FilePath']) { $Finding.FilePath } else { $null }
+        sourceLine = if ($Finding.PSObject.Properties['SourceLine']) { $Finding.SourceLine } elseif ($Finding.PSObject.Properties['LineNumber']) { $Finding.LineNumber } elseif ($Finding.PSObject.Properties['Line']) { $Finding.Line } else { $null }
         count = $Finding.Count
         recordId = if ($Finding.PSObject.Properties['RecordId']) { $Finding.RecordId } else { $null }
         recordIds = if ($Finding.PSObject.Properties['RecordIds']) { @($Finding.RecordIds) } else { @() }
@@ -1147,10 +1169,10 @@ function ConvertTo-LVTemplateJsonLine {
     )
 
     if ($null -eq $Budget) { $Budget = New-LVTemplateBudget }
-    $values = if ([string]$Template.projection -eq 'builtin:timeline') {
-        @(Get-LVTimelineLine -Result $Model.Result -Redact:([bool]$Model.Context.privacy.redacted))
-    } else {
-        @(ConvertTo-LVTemplateRecord -Model $Model -Template $Template -Budget $Budget)
+    $values = switch ([string]$Template.projection) {
+        'builtin:timeline' { @(Get-LVTimelineLine -Result $Model.Result -Redact:([bool]$Model.Context.privacy.redacted)); break }
+        'builtin:ecs' { @(ConvertTo-LVEcsExport -Model $Model); break }
+        default { @(ConvertTo-LVTemplateRecord -Model $Model -Template $Template -Budget $Budget); break }
     }
     foreach ($value in $values) {
         $safe = ConvertTo-LVJsonSafeValue -Value $value
@@ -1210,7 +1232,7 @@ function Write-LVTemplateJsonl {
 function ConvertTo-LVEcsExport {
     param([Parameter(Mandatory)]$Model)
 
-    $findings = foreach ($finding in @($Model.Findings)) {
+    $documents = foreach ($finding in @($Model.Findings)) {
         $severity = switch ([string]$finding.verdict) {
             'critical' { 100 }
             'actionable' { 80 }
@@ -1219,50 +1241,57 @@ function ConvertTo-LVEcsExport {
             'informational' { 20 }
             default { 0 }
         }
+        $level = if ($finding.event.levelName) { ([string]$finding.event.levelName).ToLowerInvariant() } else { $null }
+        $ecsEvent = [ordered]@{
+            kind = 'alert'
+            category = @('host')
+            type = @('info')
+            dataset = 'logverdict.finding'
+            outcome = 'unknown'
+            created = $finding.event.firstObserved
+            start = $finding.event.firstObserved
+            end = $finding.event.lastObserved
+            provider = $finding.event.provider
+            code = if ($null -ne $finding.event.eventId) { [string]$finding.event.eventId } else { $null }
+        }
+        $log = [ordered]@{
+            logger = 'LogVerdict'
+            origin = [pscustomobject]@{ file = [pscustomobject]@{ name = $finding.event.channel } }
+        }
+        if ($level) { $log.level = $level }
+        $rule = [ordered]@{
+            id = $finding.ruleId
+            name = $finding.title
+            description = $finding.plain
+            reference = @($finding.references)
+        }
         [pscustomobject][ordered]@{
-            event = [pscustomobject][ordered]@{
-                kind = 'alert'
-                category = @('host')
-                type = @('info')
-                dataset = 'logverdict.finding'
-                action = $finding.verdict
-                outcome = 'unknown'
-                severity = $severity
-                created = $finding.event.firstObserved
-                start = $finding.event.firstObserved
-                end = $finding.event.lastObserved
-                count = $finding.event.count
-                provider = $finding.event.provider
-                code = $finding.event.eventId
-            }
+            ecs = [pscustomobject]@{ version = '8.11.0' }
+            observer = [pscustomobject][ordered]@{ product = 'LogVerdict'; version = $Model.Context.scan.version }
+            event = [pscustomobject]$ecsEvent
             host = [pscustomobject]@{ name = $Model.Context.scan.machine }
-            log = [pscustomobject][ordered]@{
-                level = $finding.verdict
-                logger = 'LogVerdict'
-                origin = [pscustomobject]@{ file = [pscustomobject]@{ name = $finding.event.channel } }
-            }
-            rule = [pscustomobject][ordered]@{
-                id = $finding.ruleId
-                name = $finding.title
-                description = $finding.plain
-                reference = @($finding.references)
-                confidence = $finding.confidence
-            }
+            log = [pscustomobject]$log
+            rule = [pscustomobject]$rule
             message = $finding.plain
-            logverdict = $finding
+            logverdict = [pscustomobject][ordered]@{
+                adapter = 'ecs'
+                schemaVersion = $Model.Context.schemaVersion
+                scan = $Model.Context.scan
+                privacy = $Model.Context.privacy
+                finding = $finding
+                severity = $severity
+                rule = [pscustomobject][ordered]@{
+                    confidence = $finding.confidence
+                    status = if ($finding.PSObject.Properties['status']) { $finding.status } else { $null }
+                }
+                coverage = @($Model.Context.coverage)
+                suppression = $Model.Context.suppression
+                advisories = @($Model.Advisories)
+                correlations = @($Model.Correlations)
+            }
         }
     }
-    return [pscustomobject][ordered]@{
-        adapter = 'ecs'
-        schemaVersion = $Model.Context.schemaVersion
-        ecs = [pscustomobject]@{ version = '8.11.0' }
-        observer = [pscustomobject][ordered]@{ product = 'LogVerdict'; version = $Model.Context.scan.version }
-        event = [pscustomobject][ordered]@{ kind = 'event'; dataset = 'logverdict.scan'; created = $Model.Context.scan.started }
-        logverdict = $Model.Context
-        findings = @($findings)
-        advisories = @($Model.Advisories)
-        correlations = @($Model.Correlations)
-    }
+    return @($documents)
 }
 
 function ConvertTo-LVSarifLevel {
@@ -1319,23 +1348,31 @@ function ConvertTo-LVSarifRuleDescriptor {
 function ConvertTo-LVSarifLocation {
     param([Parameter(Mandatory)]$Finding)
 
-    $source = [string]$Finding.event.source
-    $channel = [string]$Finding.event.channel
-    if ($source -eq 'textlog' -and $channel -in @('CBS', 'DISM')) {
-        $lineNumber = 1
-        $parsedLineNumber = 0
-        if ([int]::TryParse([string]$Finding.event.recordId, [ref]$parsedLineNumber) -and $parsedLineNumber -gt 0) {
-            $lineNumber = $parsedLineNumber
+    $sourcePath = [string]$Finding.event.sourcePath
+    $sourceLine = 0
+    $hasSourceLine = [int]::TryParse([string]$Finding.event.sourceLine, [ref]$sourceLine) -and $sourceLine -gt 0
+    if ($sourcePath -and $sourcePath -notmatch '^<[^>]+>$' -and $hasSourceLine) {
+        $uri = $sourcePath
+        if ($sourcePath -notmatch '^[A-Za-z][A-Za-z0-9+.-]*://') {
+            if (-not [IO.Path]::IsPathRooted($sourcePath)) {
+                $uri = $null
+            } else {
+                try { $uri = ([System.Uri]::new($sourcePath)).AbsoluteUri } catch { $uri = $null }
+            }
         }
-        $path = if ($channel -eq 'CBS') { 'file:///C:/Windows/Logs/CBS/CBS.log' } else { 'file:///C:/Windows/Logs/DISM/dism.log' }
-        return [pscustomobject][ordered]@{
-            physicalLocation = [pscustomobject][ordered]@{
-                artifactLocation = [pscustomobject][ordered]@{ uri = $path }
-                region = [pscustomobject][ordered]@{ startLine = $lineNumber; endLine = $lineNumber }
+        if ($uri) {
+            $lineNumber = $sourceLine
+            return [pscustomobject][ordered]@{
+                physicalLocation = [pscustomobject][ordered]@{
+                    artifactLocation = [pscustomobject][ordered]@{ uri = $uri }
+                    region = [pscustomobject][ordered]@{ startLine = $lineNumber; endLine = $lineNumber }
+                }
             }
         }
     }
 
+    $source = [string]$Finding.event.source
+    $channel = [string]$Finding.event.channel
     $parts = @($source, $channel, [string]$Finding.event.provider, [string]$Finding.event.eventId) | Where-Object { $_ }
     $name = ($parts -join '/')
     if (-not $name) { $name = [string]$Finding.key }
@@ -1366,7 +1403,9 @@ function ConvertTo-LVSarifResult {
 
     $result = [ordered]@{
         kind = $kind
-        level = ConvertTo-LVSarifLevel -Verdict $verdict
+        # SARIF 2.1.0 errata 3.27.9 requires level=none for every result whose
+        # kind is not fail. A verdict still travels in the property bag below.
+        level = if ($kind -eq 'fail') { ConvertTo-LVSarifLevel -Verdict $verdict } else { 'none' }
         message = [pscustomobject][ordered]@{ text = $messageText }
         locations = @((ConvertTo-LVSarifLocation -Finding $Finding))
         partialFingerprints = [pscustomobject][ordered]@{ 'logverdict.signature' = $key }
@@ -1423,8 +1462,25 @@ function ConvertTo-LVSarifExport {
     param([Parameter(Mandatory)]$Model)
 
     $database = Get-LogVerdictDatabase
-    $ruleDescriptors = foreach ($rule in @($database.rules | Where-Object { Test-LVRuleActive -Rule $_ })) {
-        ConvertTo-LVSarifRuleDescriptor -Rule $rule
+    $ruleDescriptors = New-Object System.Collections.Generic.List[object]
+    $ruleIds = @{}
+    foreach ($rule in @($database.rules | Where-Object { Test-LVRuleActive -Rule $_ })) {
+        $descriptor = ConvertTo-LVSarifRuleDescriptor -Rule $rule
+        $ruleDescriptors.Add($descriptor) | Out-Null
+        $ruleIds[[string]$descriptor.id] = $true
+    }
+    # Offline bundles and local verdict databases can contain a finding whose rule
+    # was retired after the scan. SARIF requires every result ruleId to be declared
+    # by driver.rules, so retain a minimal descriptor for that historical identifier.
+    foreach ($finding in @($Model.Findings)) {
+        $ruleId = [string]$finding.ruleId
+        if (-not $ruleId -or $ruleIds.ContainsKey($ruleId)) { continue }
+        $ruleDescriptors.Add((ConvertTo-LVSarifRuleDescriptor -Rule ([pscustomobject][ordered]@{
+            id = $ruleId; title = $finding.title; plain = $finding.plain; action = $finding.action
+            verdict = $finding.verdict; confidence = $finding.confidence; references = @($finding.references)
+            status = 'historical'
+        }))) | Out-Null
+        $ruleIds[$ruleId] = $true
     }
     $results = New-Object System.Collections.Generic.List[object]
     $index = 0
@@ -1445,7 +1501,10 @@ function ConvertTo-LVSarifExport {
         'logverdict.correlations' = @($Model.Correlations)
         'logverdict.suppressions' = $Model.Context.suppression
     }
-    $invocation = [ordered]@{ executionSuccessful = $true }
+    $invocation = [ordered]@{}
+    if ($null -ne $Model.Context.scan.exitCode) {
+        $invocation.executionSuccessful = ([int]$Model.Context.scan.exitCode -eq 0)
+    }
     if ($Model.Context.scan.started) { $invocation.startTimeUtc = [string]$Model.Context.scan.started }
     if ($Model.Context.scan.completed) { $invocation.endTimeUtc = [string]$Model.Context.scan.completed }
     if ($null -ne $Model.Context.scan.exitCode) { $invocation.exitCode = [int]$Model.Context.scan.exitCode }
@@ -1454,7 +1513,7 @@ function ConvertTo-LVSarifExport {
         name = 'LogVerdict'
         version = [string]$Model.Context.scan.version
         informationUri = 'https://github.com/SysAdminDoc/LogVerdict'
-        rules = @($ruleDescriptors)
+        rules = @($ruleDescriptors.ToArray())
     }
     $run = [pscustomobject][ordered]@{
         tool = [pscustomobject][ordered]@{ driver = $driver }
@@ -1464,7 +1523,7 @@ function ConvertTo-LVSarifExport {
         properties = [pscustomobject]$runProperties
     }
     return [pscustomobject][ordered]@{
-        '$schema' = 'https://docs.oasis-open.org/sarif/sarif/v2.1.0/cs01/schemas/sarif-schema-2.1.0.json'
+        '$schema' = 'https://docs.oasis-open.org/sarif/sarif/v2.1.0/cos02/schemas/sarif-schema-2.1.0.json'
         version = '2.1.0'
         runs = @($run)
         properties = [pscustomobject][ordered]@{
@@ -1516,7 +1575,17 @@ function ConvertTo-LVOcsfExport {
 function New-LVOtelAttribute {
     param([Parameter(Mandatory)][string]$Key, [AllowNull()]$Value)
 
-    $valueObject = if ($Value -is [bool]) { [pscustomobject]@{ boolValue = [bool]$Value } } elseif ($Value -is [int] -or $Value -is [long]) { [pscustomobject]@{ intValue = [long]$Value } } else { [pscustomobject]@{ stringValue = [string]$Value } }
+    if ($null -eq $Value) { return $null }
+    $valueObject = if ($Value -is [bool]) {
+        [pscustomobject]@{ boolValue = [bool]$Value }
+    } elseif ($Value -is [int16] -or $Value -is [int32] -or $Value -is [int64] -or $Value -is [long]) {
+        # OTLP/JSON maps int64 to a decimal string to avoid IEEE-754 loss.
+        [pscustomobject]@{ intValue = ([Convert]::ToInt64($Value)).ToString([Globalization.CultureInfo]::InvariantCulture) }
+    } elseif ($Value -is [single] -or $Value -is [double] -or $Value -is [decimal]) {
+        [pscustomobject]@{ doubleValue = [double]$Value }
+    } else {
+        [pscustomobject]@{ stringValue = [string]$Value }
+    }
     return [pscustomobject][ordered]@{ key = $Key; value = $valueObject }
 }
 
@@ -1536,16 +1605,24 @@ function ConvertTo-LVOtelExport {
             @{ Key = 'logverdict.event.provider'; Value = $finding.event.provider }
             @{ Key = 'logverdict.event.id'; Value = $finding.event.eventId }
             @{ Key = 'logverdict.privacy.redacted'; Value = $Model.Context.privacy.redacted }
-        )) { $attributes.Add((New-LVOtelAttribute -Key $pair.Key -Value $pair.Value)) | Out-Null }
-        [pscustomobject][ordered]@{
-            timeUnixNano = [long]((ConvertTo-LVStandardUnixMillisecond $finding.event.firstObserved) * 1000000)
-            observedTimeUnixNano = [long]((ConvertTo-LVStandardUnixMillisecond $Model.Context.scan.started) * 1000000)
+        )) {
+            $attribute = New-LVOtelAttribute -Key $pair.Key -Value $pair.Value
+            if ($attribute) { $attributes.Add($attribute) | Out-Null }
+        }
+        $record = [ordered]@{
             severityNumber = $severityMap[[string]$finding.verdict]
             severityText = ([string]$finding.verdict).ToUpperInvariant()
-            body = [pscustomobject]@{ stringValue = $finding.plain }
+            body = [pscustomobject]@{ stringValue = [string]$finding.plain }
             attributes = @($attributes.ToArray())
+            # This is uint32 in OTLP, so protobuf JSON keeps it numeric; only the
+            # int64 nanosecond fields and AnyValue.intValue use decimal strings.
             droppedAttributesCount = 0
         }
+        $timeUnixNano = ConvertTo-LVOtelUnixNano -Value $finding.event.firstObserved
+        if ($timeUnixNano) { $record['timeUnixNano'] = $timeUnixNano }
+        $observedTimeUnixNano = ConvertTo-LVOtelUnixNano -Value $Model.Context.scan.started
+        if ($observedTimeUnixNano) { $record['observedTimeUnixNano'] = $observedTimeUnixNano }
+        [pscustomobject]$record
     }
     return [pscustomobject][ordered]@{
         adapter = 'opentelemetry'
@@ -1565,39 +1642,104 @@ function ConvertTo-LVOtelExport {
     }
 }
 
+function ConvertTo-LVUuidNetworkByteArray {
+    param([Parameter(Mandatory)][Guid]$Guid)
+
+    $bytes = $Guid.ToByteArray()
+    # Guid.ToByteArray uses the .NET mixed-endian layout; UUIDv5 hashes the
+    # namespace in network byte order.
+    [Array]::Reverse($bytes, 0, 4)
+    [Array]::Reverse($bytes, 4, 2)
+    [Array]::Reverse($bytes, 6, 2)
+    return ,([byte[]]$bytes)
+}
+
+function Get-LVStixUuidV5 {
+    param(
+        [Parameter(Mandatory)][Guid]$Namespace,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $namespaceBytes = ConvertTo-LVUuidNetworkByteArray -Guid $Namespace
+    $nameBytes = [Text.Encoding]::UTF8.GetBytes($Name)
+    $hashInput = New-Object byte[] ($namespaceBytes.Length + $nameBytes.Length)
+    [Buffer]::BlockCopy($namespaceBytes, 0, $hashInput, 0, $namespaceBytes.Length)
+    [Buffer]::BlockCopy($nameBytes, 0, $hashInput, $namespaceBytes.Length, $nameBytes.Length)
+    $sha1 = [Security.Cryptography.SHA1]::Create()
+    try { $digest = $sha1.ComputeHash($hashInput) } finally { $sha1.Dispose() }
+    $digest[6] = [byte](($digest[6] -band 0x0f) -bor 0x50)
+    $digest[8] = [byte](($digest[8] -band 0x3f) -bor 0x80)
+    $guidBytes = [byte[]]$digest[0..15]
+    [Array]::Reverse($guidBytes, 0, 4)
+    [Array]::Reverse($guidBytes, 4, 2)
+    [Array]::Reverse($guidBytes, 6, 2)
+    return (New-Object System.Guid (,$guidBytes)).ToString()
+}
+
+function Get-LVStixTimestamp {
+    param(
+        [AllowNull()]$Primary,
+        [AllowNull()]$Fallback
+    )
+
+    $timestamp = ConvertTo-LVStandardTimestamp -Value $Primary
+    if ($timestamp) { return $timestamp }
+    return ConvertTo-LVStandardTimestamp -Value $Fallback
+}
+
 function ConvertTo-LVStixExport {
     param([Parameter(Mandatory)]$Model)
 
-    $identityId = 'identity--' + [guid]::NewGuid().ToString()
-    $reportId = 'report--' + [guid]::NewGuid().ToString()
+    $namespace = [Guid]'5ce6a5c1-7c11-5d46-9e4d-5f2d2eec4b36'
+    $keys = @($Model.Findings | ForEach-Object { [string]$_.key } | Sort-Object -Unique)
+    $identityId = 'identity--' + (Get-LVStixUuidV5 -Namespace $namespace -Name 'identity:LogVerdict')
+    $reportId = 'report--' + (Get-LVStixUuidV5 -Namespace $namespace -Name ('report:' + ($keys -join '|')))
+    $bundleId = 'bundle--' + (Get-LVStixUuidV5 -Namespace $namespace -Name ('bundle:' + ($keys -join '|')))
+    $defaultTimestamp = Get-LVStixTimestamp -Primary $Model.Context.scan.started -Fallback $Model.Context.generatedAt
+    $completedTimestamp = Get-LVStixTimestamp -Primary $Model.Context.scan.completed -Fallback $defaultTimestamp
     $objects = New-Object System.Collections.Generic.List[object]
     $objects.Add([pscustomobject][ordered]@{
-        type = 'identity'; spec_version = '2.1'; id = $identityId; created = $Model.Context.generatedAt; modified = $Model.Context.generatedAt
-        name = 'LogVerdict'; identity_class = 'tool'; labels = @('diagnostic-tool')
+        type = 'identity'; spec_version = '2.1'; id = $identityId; created = $defaultTimestamp; modified = $completedTimestamp
+        name = 'LogVerdict'; identity_class = 'system'; labels = @('diagnostic-tool')
+        x_logverdict = [pscustomobject][ordered]@{ version = $Model.Context.scan.version }
     }) | Out-Null
     $refs = New-Object System.Collections.Generic.List[string]
     foreach ($finding in @($Model.Findings)) {
-        $observedId = 'observed-data--' + [guid]::NewGuid().ToString()
+        $key = [string]$finding.key
+        $observedId = 'observed-data--' + (Get-LVStixUuidV5 -Namespace $namespace -Name ('observed:' + $key))
+        $eventId = 'x-logverdict-event--' + (Get-LVStixUuidV5 -Namespace $namespace -Name ('event:' + $key))
+        $firstObserved = Get-LVStixTimestamp -Primary $finding.event.firstObserved -Fallback $defaultTimestamp
+        $lastObserved = Get-LVStixTimestamp -Primary $finding.event.lastObserved -Fallback $firstObserved
+        $numberObserved = [Math]::Max(1, [int64]$finding.event.count)
         $refs.Add($observedId) | Out-Null
         $objects.Add([pscustomobject][ordered]@{
+            type = 'x-logverdict-event'; spec_version = '2.1'; id = $eventId
+            x_logverdict = [pscustomobject][ordered]@{
+                source = $finding.event.source; channel = $finding.event.channel
+                provider = $finding.event.provider; event_id = $finding.event.eventId
+                event_version = $finding.event.eventVersion; message_samples = @($finding.event.messageSamples)
+            }
+        }) | Out-Null
+        $objects.Add([pscustomobject][ordered]@{
             type = 'observed-data'; spec_version = '2.1'; id = $observedId
-            created_by_ref = $identityId; first_observed = $finding.event.firstObserved; last_observed = $finding.event.lastObserved
-            number_observed = $finding.event.count
-            objects = [pscustomobject][ordered]@{ '0' = [pscustomobject][ordered]@{
-                type = 'x-logverdict-event'; source = $finding.event.source; channel = $finding.event.channel
-                provider = $finding.event.provider; event_id = $finding.event.eventId; event_version = $finding.event.eventVersion
-                message_samples = @($finding.event.messageSamples)
-            } }
-            x_logverdict = $finding
+            created_by_ref = $identityId; created = $firstObserved; modified = $lastObserved
+            first_observed = $firstObserved; last_observed = $lastObserved
+            number_observed = $numberObserved; object_refs = @($eventId)
+            x_logverdict = [pscustomobject][ordered]@{ finding = $finding }
         }) | Out-Null
     }
     $objects.Add([pscustomobject][ordered]@{
         type = 'report'; spec_version = '2.1'; id = $reportId; created_by_ref = $identityId
-        created = $Model.Context.scan.started; modified = $Model.Context.scan.completed; published = $Model.Context.scan.completed
+        created = $defaultTimestamp; modified = $completedTimestamp; published = $completedTimestamp
         name = 'LogVerdict scan'; description = 'Structured diagnostic findings and source coverage from LogVerdict.'
-        object_refs = @($refs.ToArray()); x_logverdict = $Model.Context
+        object_refs = @($refs.ToArray()); x_logverdict = [pscustomobject][ordered]@{
+            schemaVersion = $Model.Context.schemaVersion; scan = $Model.Context
+            coverage = @($Model.Context.coverage); healthProfiles = @($Model.Context.healthProfiles)
+            privacy = $Model.Context.privacy; suppression = $Model.Context.suppression
+            advisories = @($Model.Advisories); correlations = @($Model.Correlations)
+        }
     }) | Out-Null
-    return [pscustomobject][ordered]@{ type = 'bundle'; id = 'bundle--' + [guid]::NewGuid().ToString(); spec_version = '2.1'; adapter = 'stix-2.1'; schemaVersion = $Model.Context.schemaVersion; advisories = @($Model.Advisories); objects = @($objects.ToArray()) }
+    return [pscustomobject][ordered]@{ type = 'bundle'; id = $bundleId; objects = @($objects.ToArray()) }
 }
 
 function ConvertTo-LVStandardDocument {
