@@ -184,6 +184,22 @@ foreach ($entry in $catalog) {
     if ($entry.sourceHash -notmatch '^(?i:[0-9a-f]{64})$' -or $entry.normalized.family -ne $entry.kind) {
         throw ("Typed error catalog entry '{0}' failed normalized metadata validation." -f $entry.id)
     }
+    if ($entry.sourceRepository -notmatch '^MicrosoftDocs/' -or
+        $entry.sourcePath -notmatch '^(desktop-src|windows-driver-docs-pr|support)/' -or
+        $entry.sourceRevision -notmatch '^(?i:[0-9a-f]{40}|source-archive)$' -or
+        $entry.licence -ne 'CC-BY-4.0' -or
+        $entry.sourceDocumentHash -notmatch '^(?i:[0-9a-f]{64})$') {
+        throw ("Typed error catalog entry '{0}' failed licensed-source provenance validation." -f $entry.id)
+    }
+}
+$noticePath = Join-Path $repoRoot 'NOTICE'
+if (-not (Test-Path -LiteralPath $noticePath -PathType Leaf)) {
+    throw 'NOTICE is missing the CC-BY-4.0 catalog attribution.'
+}
+$notice = Get-Content -LiteralPath $noticePath -Raw -Encoding UTF8
+if ($notice -notmatch 'CC-BY-4\.0' -or $notice -notmatch 'MicrosoftDocs/win32' -or
+    $notice -notmatch 'MicrosoftDocs/windows-driver-docs') {
+    throw 'NOTICE does not identify the licensed MicrosoftDocs catalog sources.'
 }
 $database = Get-LogVerdictDatabase
 $ruleCount = @($database.rules).Count
@@ -238,7 +254,7 @@ if ([int]$screenshotMetadata.width -le 0 -or [int]$screenshotMetadata.height -le
     throw 'GUI screenshot metadata has invalid dimensions.'
 }
 $catalogSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/error-codes.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-if ([int]$catalogSchema.properties.schemaVersion.const -ne 2) { throw 'Typed error catalog schema is not pinned at version 2.' }
+if ([int]$catalogSchema.properties.schemaVersion.const -ne 3) { throw 'Typed error catalog schema is not pinned at version 3.' }
 $advisoryCache = if ($AdvisoryPath) { [IO.Path]::GetFullPath($AdvisoryPath) } else { Join-Path $repoRoot 'Data/advisories.json' }
 if (-not (Test-LogVerdictAdvisoryDatabase -Path $advisoryCache -Quiet)) { throw 'Offline advisory cache validation failed.' }
 $advisorySchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/advisories.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json

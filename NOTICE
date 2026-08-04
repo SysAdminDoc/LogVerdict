@@ -1,0 +1,20 @@
+LogVerdict third-party notices
+
+The generated Data/error-codes.json catalog includes modified documentation data
+from the following Microsoft repositories:
+
+- MicrosoftDocs/win32, revision 2eb6588c6703d31599285bbb06563c3d41b57590
+- MicrosoftDocs/windows-driver-docs, revision 6e12748c3f7046b9d3d1c48a5064a9c09ce28564
+- MicrosoftDocs/SupportArticles-docs, revision a1e3a50b11ddf2e3e98ed0be6817f9a6dd009f56
+
+Those repositories license their documentation under the Creative Commons
+Attribution 4.0 International Public License (CC-BY-4.0):
+https://creativecommons.org/licenses/by/4.0/
+
+Copyright Microsoft Corporation. Microsoft is the source author. LogVerdict's
+2026-08-03 modifications parse the Markdown tables, normalize identifiers and
+numeric fields, add source paths and hashes, and add separate diagnostic guidance.
+Each generated entry retains its repository, revision, relative source path,
+source-file SHA-256, retrieval date, licence, and corresponding Microsoft Learn URL.
+
+LogVerdict's own source code remains licensed under the MIT License in LICENSE.

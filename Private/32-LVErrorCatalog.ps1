@@ -2,7 +2,7 @@
 # pretending that a generic status, by itself, proves a root cause.
 
 $script:LVErrorCatalogSchemaVersionMin = 2
-$script:LVErrorCatalogSchemaVersionMax = 2
+$script:LVErrorCatalogSchemaVersionMax = 3
 $script:LVErrorCatalogKinds = @('win32', 'hresult', 'bugcheck', 'ntstatus', 'setup', 'windowsupdate')
 
 function Get-LVErrorCatalogSha256 {
@@ -14,6 +14,15 @@ function Get-LVErrorCatalogSha256 {
     } finally {
         $sha.Dispose()
     }
+}
+
+function ConvertTo-LVErrorCatalogSourceManifest {
+    param([Parameter(Mandatory)]$Sources)
+
+    $items = @($Sources | Where-Object { $null -ne $_ })
+    if ($items.Count -eq 0) { return '' }
+    if ($items[0] -is [string]) { return ($items -join "`n") }
+    return (ConvertTo-Json -InputObject $items -Depth 8 -Compress)
 }
 
 function ConvertTo-LVErrorHex {
@@ -273,7 +282,22 @@ function Get-LVErrorCatalog {
     if ([string]$catalog.sourceHash -notmatch '^(?i:[0-9a-f]{64})$') {
         throw ("Error catalog '{0}' has no valid sourceHash." -f $source)
     }
-    if ([string]$catalog.sourceHash -ine (Get-LVErrorCatalogSha256 -Text (@($catalog.sources) -join "`n"))) {
+    if ($version -ge 3) {
+        foreach ($manifest in @($catalog.sources)) {
+            if (-not $manifest.repository -or -not $manifest.revision -or
+                [string]$manifest.licence -ne 'CC-BY-4.0' -or
+                [string]$manifest.licenceHash -notmatch '^(?i:[0-9a-f]{64})$') {
+                throw ("Error catalog '{0}' contains incomplete licensed source manifest metadata." -f $source)
+            }
+        }
+    } else {
+        foreach ($reference in @($catalog.sources)) {
+            if ($reference -isnot [string] -or [string]$reference -notmatch '^https?://') {
+                throw ("Error catalog '{0}' contains invalid legacy source metadata." -f $source)
+            }
+        }
+    }
+    if ([string]$catalog.sourceHash -ine (Get-LVErrorCatalogSha256 -Text (ConvertTo-LVErrorCatalogSourceManifest -Sources $catalog.sources))) {
         throw ("Error catalog '{0}' has a sourceHash that does not match its source manifest." -f $source)
     }
 
@@ -285,6 +309,10 @@ function Get-LVErrorCatalog {
         if (-not $entry.id -or -not $entry.kind -or -not $entry.hex -or -not $entry.name -or -not $entry.description -or -not $entry.explanation -or -not $entry.reference -or -not $entry.retrieved -or -not $entry.sourceHash -or -not $entry.applicability -or -not $entry.normalized) {
             throw ("Error catalog '{0}' contains an incomplete typed entry." -f $source)
         }
+        if ($version -ge 3 -and (-not $entry.sourceRepository -or -not $entry.sourcePath -or
+            -not $entry.sourceRevision -or -not $entry.licence -or -not $entry.sourceDocumentHash)) {
+            throw ("Error catalog '{0}' contains an incomplete licensed typed entry." -f $source)
+        }
         $kind = [string]$entry.kind
         if ($script:LVErrorCatalogKinds -notcontains $kind) {
             throw ("Error catalog '{0}' contains unsupported family '{1}'." -f $source, $kind)
@@ -294,6 +322,10 @@ function Get-LVErrorCatalog {
         }
         if ([string]$entry.sourceHash -notmatch '^(?i:[0-9a-f]{64})$' -or [string]$entry.retrieved -notmatch '^\d{4}-\d{2}-\d{2}$' -or [string]$entry.applicability -notmatch '\S') {
             throw ("Error catalog '{0}' entry '{1}' has invalid provenance metadata." -f $source, $entry.id)
+        }
+        if ($version -ge 3 -and ([string]$entry.sourceDocumentHash -notmatch '^(?i:[0-9a-f]{64})$' -or
+            [string]$entry.licence -ne 'CC-BY-4.0')) {
+            throw ("Error catalog '{0}' entry '{1}' has invalid licensed-source provenance metadata." -f $source, $entry.id)
         }
         $hex = ConvertTo-LVErrorHex -Value ([string]$entry.hex)
         if (-not $hex) { throw ("Error catalog '{0}' entry '{1}' has an invalid hexadecimal value." -f $source, $entry.id) }

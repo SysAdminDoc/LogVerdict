@@ -837,6 +837,79 @@ Describe 'Bundled Microsoft error catalog' {
               $entry.sourceHash | Should -Match '^[0-9a-f]{64}$'
               $entry.applicability | Should -Not -BeNullOrEmpty
           }
+          foreach ($entry in @($catalog)) {
+              $entry.sourceRepository | Should -Match '^MicrosoftDocs/'
+              $entry.sourcePath | Should -Match '^(desktop-src|windows-driver-docs-pr|support)/'
+              $entry.sourceRevision | Should -Match '^(?:[0-9a-f]{40}|source-archive)$'
+              $entry.licence | Should -BeExactly 'CC-BY-4.0'
+              $entry.sourceDocumentHash | Should -Match '^[0-9a-f]{64}$'
+          }
+
+          $document = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Data/error-codes.json') -Raw | ConvertFrom-Json
+          $document.schemaVersion | Should -Be 3
+          @($document.sources).Count | Should -Be 3
+          foreach ($source in @($document.sources)) {
+              $source.repository | Should -Match '^MicrosoftDocs/'
+              $source.revision | Should -Match '^[0-9a-f]{40}$'
+              $source.licence | Should -BeExactly 'CC-BY-4.0'
+              $source.licenceHash | Should -Match '^[0-9a-f]{64}$'
+          }
+    }
+
+    It 'continues to load legacy schema v2 catalogs' {
+        $repoRoot = Split-Path $PSScriptRoot -Parent
+        $current = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/error-codes.json') -Raw | ConvertFrom-Json
+        $current.schemaVersion = 2
+        $current.sources = @(
+            'https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes'
+            'https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/bug-check-code-reference2'
+        )
+        $sourceText = @($current.sources) -join "`n"
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $current.sourceHash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($sourceText)))).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $sha.Dispose()
+        }
+        $current.entries = @($current.entries | Select-Object -First 2)
+        foreach ($entry in $current.entries) {
+            foreach ($property in @('sourceRepository', 'sourcePath', 'sourceRevision', 'licence', 'sourceDocumentHash')) {
+                $entry.PSObject.Properties.Remove($property)
+            }
+        }
+        $legacyPath = Join-Path $TestDrive 'error-codes-v2.json'
+        $current | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $legacyPath -Encoding UTF8
+
+        InModuleScope LogVerdict -Parameters @{ legacyPath = $legacyPath } {
+            param($legacyPath)
+            $legacy = Get-LVErrorCatalog -Path $legacyPath
+            $legacy.schemaVersion | Should -Be 2
+            @($legacy.entries).Count | Should -Be 2
+        }
+    }
+
+    It 'imports only licence-verified local MicrosoftDocs sources' {
+        $repoRoot = Split-Path $PSScriptRoot -Parent
+        $importer = Join-Path $repoRoot 'Tools/Import-MicrosoftErrorCatalog.ps1'
+        $source = Get-Content -LiteralPath $importer -Raw
+        $source | Should -Not -Match 'Invoke-(WebRequest|RestMethod)'
+        $source | Should -Match 'MicrosoftDocs/win32'
+        $source | Should -Match 'MicrosoftDocs/windows-driver-docs'
+        $source | Should -Match 'MicrosoftDocs/SupportArticles-docs'
+
+        $unlicensed = Join-Path $TestDrive 'unlicensed-docs'
+        New-Item -ItemType Directory -Path $unlicensed -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $unlicensed 'LICENSE'), 'MIT', (New-Object Text.UTF8Encoding($false)))
+        $output = Join-Path $TestDrive 'catalog.json'
+        {
+            & $importer -Win32DocsPath $unlicensed -WindowsDriverDocsPath $unlicensed `
+                -SupportArticlesPath $unlicensed -OutputPath $output -AllowIncomplete
+        } | Should -Throw '*not recognizably CC-BY-4.0*'
+        Test-Path -LiteralPath $output | Should -BeFalse
+
+        $notice = Get-Content -LiteralPath (Join-Path $repoRoot 'NOTICE') -Raw
+        $notice | Should -Match 'CC-BY-4.0'
+        $notice | Should -Match 'MicrosoftDocs/win32'
     }
 
     It 'resolves common Win32 and HRESULT lookups locally' {
