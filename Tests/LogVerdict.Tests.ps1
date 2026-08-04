@@ -1531,6 +1531,30 @@ Describe 'Bundled Microsoft error catalog' {
         }
     }
 
+    It 'prefers an explicit ResultCode over incidental message prose and resolves short Win32 codes deterministically' {
+        InModuleScope LogVerdict {
+            $signature = [pscustomobject]@{
+                SampleMessage = 'CBS mentioned incidental 0x1 before the authoritative result.'
+                ErrorContext = [pscustomobject]@{ ResultCode = '0x800F081F' }
+            }
+            $match = Get-LVErrorCatalogMatch -Signature $signature
+            $match.Entry.name | Should -BeExactly 'CBS_E_SOURCE_MISSING'
+            $match.RawCode | Should -BeExactly '0x800F081F'
+
+            $decimal = [pscustomobject]@{
+                SampleMessage = 'CBS mentioned incidental 0x1 before the authoritative result.'
+                ErrorContext = [pscustomobject]@{ ResultCode = '5' }
+            }
+            (Get-LVErrorCatalogMatch -Signature $decimal).Entry.name | Should -BeExactly 'ERROR_ACCESS_DENIED'
+
+            $catalog = Get-LVErrorCatalog
+            $short = Find-LVErrorCatalogEntry -Catalog $catalog -Hex '0x00000005' -PreferredKind @()
+            $short.kind | Should -BeExactly 'win32'
+            $explicit = Find-LVErrorCatalogEntry -Catalog $catalog -Hex '0x00000005' -PreferredKind @('bugcheck')
+            $explicit.kind | Should -BeExactly 'bugcheck'
+        }
+    }
+
     It 'continues to load legacy schema v2 catalogs' {
         $repoRoot = Split-Path $PSScriptRoot -Parent
         $current = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/error-codes.json') -Raw | ConvertFrom-Json
@@ -2614,6 +2638,18 @@ Describe 'SetupDiag Panther integration' {
         }
     }
 
+    It 'rejects DTDs and external entities in persisted SetupDiag XML' {
+        InModuleScope LogVerdict {
+            $xml = @'
+<!DOCTYPE SetupDiag [<!ENTITY external SYSTEM "file:///definitely-not-read.txt">]>
+<SetupDiag>
+  <ProfileName>&external;</ProfileName>
+</SetupDiag>
+'@
+            { ConvertFrom-LVSetupDiagXml -Xml $xml -FallbackWhen (Get-Date) } | Should -Throw '*could not be read*'
+        }
+    }
+
     It 'reads the documented registry result shape without executing SetupDiag' {
         InModuleScope LogVerdict -Parameters @{ root=$script:SetupDiagFixtureRoot } {
             param($root)
@@ -3402,6 +3438,66 @@ Describe 'Provider and configuration health profiles' {
             @($profiles).Count | Should -Be 2
             @($profiles | Where-Object MetadataStatus -eq 'readable').Count | Should -Be 2
             Should -Invoke Get-WinEvent -Times 1 -Exactly
+        }
+    }
+
+    It 'marks a readable Sysmon config without EventFiltering as invalid with a reason' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $oldProgramData = $env:ProgramData
+            $oldProgramFiles = $env:ProgramFiles
+            $oldSystemRoot = $env:SystemRoot
+            try {
+                $sysmon = Join-Path $Root 'Sysmon'
+                New-Item -ItemType Directory -Path $sysmon -Force | Out-Null
+                $config = Join-Path $sysmon 'config.xml'
+                Set-Content -LiteralPath $config -Value '<Sysmon schemaversion="4.90" />' -Encoding UTF8
+                $env:ProgramData = $Root
+                $env:ProgramFiles = $Root
+                $env:SystemRoot = $Root
+                $status = @{ 'Microsoft-Windows-Sysmon/Operational' = [pscustomobject]@{ Access = 'readable' } }
+
+                $sysmonProfile = Get-LVSysmonHealthProfile -EventRecord @() -ChannelStatus $status
+                $sysmonProfile.Status | Should -BeExactly 'invalid'
+                $sysmonProfile.Path | Should -BeExactly $config
+                $sysmonProfile.Reason | Should -Match 'EventFiltering'
+            } finally {
+                $env:ProgramData = $oldProgramData
+                $env:ProgramFiles = $oldProgramFiles
+                $env:SystemRoot = $oldSystemRoot
+            }
+        }
+    }
+
+    It 'rejects DTDs and records an unreadable reason for a hostile Sysmon config' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $oldProgramData = $env:ProgramData
+            $oldProgramFiles = $env:ProgramFiles
+            $oldSystemRoot = $env:SystemRoot
+            try {
+                $environmentRoot = Join-Path $Root 'Sysmon-dtd-root'
+                $sysmon = Join-Path $environmentRoot 'Sysmon'
+                New-Item -ItemType Directory -Path $sysmon -Force | Out-Null
+                $config = Join-Path $sysmon 'config.xml'
+                @'
+<!DOCTYPE Sysmon [<!ENTITY external SYSTEM "file:///definitely-not-read.txt">]>
+<Sysmon schemaversion="4.90"><EventFiltering>&external;</EventFiltering></Sysmon>
+'@ | Set-Content -LiteralPath $config -Encoding UTF8
+                $env:ProgramData = $environmentRoot
+                $env:ProgramFiles = $environmentRoot
+                $env:SystemRoot = $environmentRoot
+                $status = @{ 'Microsoft-Windows-Sysmon/Operational' = [pscustomobject]@{ Access = 'readable' } }
+
+                $sysmonProfile = Get-LVSysmonHealthProfile -EventRecord @() -ChannelStatus $status
+                $sysmonProfile.Status | Should -BeExactly 'partial'
+                $sysmonProfile.Path | Should -BeNullOrEmpty
+                $sysmonProfile.Reason | Should -Match 'could not be read'
+            } finally {
+                $env:ProgramData = $oldProgramData
+                $env:ProgramFiles = $oldProgramFiles
+                $env:SystemRoot = $oldSystemRoot
+            }
         }
     }
 
@@ -7989,6 +8085,22 @@ Describe 'Report redaction' {
             foreach ($finding in @($audit.Findings)) {
                 $finding.PSObject.Properties.Name | Should -Not -Contain 'Value'
             }
+        }
+    }
+
+    It 'reports one-based privacy lines from the audited text after script-block removal' {
+        InModuleScope LogVerdict -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $path = Join-Path $Root 'privacy-lines.txt'
+            Set-Content -LiteralPath $path -Value @(
+                'ScriptBlockText=Get-Process'
+                'safe context'
+                'password=secret-value'
+            ) -Encoding UTF8
+            $audit = New-LVPrivacyAudit -Path @($path) -MachineName 'HOST' -UserName 'user' -Redacted
+            $credential = @($audit.Findings | Where-Object Category -eq 'credential-or-secret') | Select-Object -First 1
+            $credential.Lines | Should -Contain 3
+            $credential.Lines | Should -Not -Contain 4
         }
     }
 

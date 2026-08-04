@@ -145,10 +145,10 @@ if (-not $script:LVConstrainedLanguage) {
     }
 }
 
-# Get-LVShortHash is used for every text-log family key. HashAlgorithm instances reset
-# after ComputeHash, so a single module-local provider avoids allocating and disposing a
-# SHA-256 implementation for every record while retaining the same digest bytes.
+# Get-LVShortHash is used for every text-log family key. The provider is protected by a
+# lock because GUI and watch work can overlap in the same module runspace.
 $script:LVShortHashAlgorithm = $null
+$script:LVShortHashLock = New-Object object
 if (-not $script:LVConstrainedLanguage) {
     try { $script:LVShortHashAlgorithm = [System.Security.Cryptography.SHA256]::Create() } catch { $script:LVShortHashAlgorithm = $null }
 }
@@ -914,53 +914,6 @@ function Get-LVNormalizedSlotValue {
     }
 }
 
-function Add-LVTemplateMask {
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '',
-        Justification = 'Type, Slot, and Predicate are consumed by the manual match loop; static analysis does not follow the dynamic slot collection.')]
-    param(
-        [Parameter(Mandatory)][AllowEmptyString()][string]$Text,
-        [Parameter(Mandatory)][regex]$Pattern,
-        [Parameter(Mandatory)][string]$Type,
-        [Parameter(Mandatory)]$Slot,
-        [scriptblock]$Predicate
-    )
-
-    $templateMatches = $Pattern.Matches($Text)
-    if ($templateMatches.Count -eq 0) { return $Text }
-
-    # A PowerShell MatchEvaluator crosses the script/runtime boundary once per
-    # match. Template masking runs for every text-log record, so build the
-    # replacement in one pass over the match collection instead. The order and
-    # slot numbering remain identical to the evaluator path, including the IPv6
-    # predicate that can preserve a false-positive match.
-    $builder = New-Object System.Text.StringBuilder
-    $offset = 0
-    foreach ($match in $templateMatches) {
-        if ($match.Index -gt $offset) {
-            [void]$builder.Append($Text, $offset, $match.Index - $offset)
-        }
-        if ($Predicate -and -not (& $Predicate $match.Value)) {
-            [void]$builder.Append($match.Value)
-        } else {
-            # Letters only. A numeric marker would itself be consumed by the generic number
-            # mask during a later pass. Repeating X avoids a practical slot-count ceiling.
-            $marker = '__LVSLOT' + ('X' * ($Slot.Count + 1)) + '__'
-            $Slot.Add([pscustomobject]@{
-                Index  = $Slot.Count
-                Type   = $Type
-                Value  = Get-LVNormalizedSlotValue -Type $Type -Value $match.Value
-                Marker = $marker
-            }) | Out-Null
-            [void]$builder.Append($marker)
-        }
-        $offset = $match.Index + $match.Length
-    }
-    if ($offset -lt $Text.Length) {
-        [void]$builder.Append($Text, $offset, $Text.Length - $offset)
-    }
-    return $builder.ToString()
-}
-
 function ConvertTo-LVTemplateData {
     <#
         .SYNOPSIS
@@ -1425,8 +1378,13 @@ function ConvertTo-LVRedactedResult {
 function Get-LVShortHash {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
     if ($script:LVShortHashAlgorithm) {
-        $bytes = $script:LVShortHashAlgorithm.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Text))
-        return (($bytes[0..5] | ForEach-Object { $_.ToString('x2') }) -join '')
+        [Threading.Monitor]::Enter($script:LVShortHashLock)
+        try {
+            $bytes = $script:LVShortHashAlgorithm.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Text))
+            return (($bytes[0..5] | ForEach-Object { $_.ToString('x2') }) -join '')
+        } finally {
+            [Threading.Monitor]::Exit($script:LVShortHashLock)
+        }
     }
 
     # ConstrainedLanguage blocks non-core cryptography types. Keep signatures

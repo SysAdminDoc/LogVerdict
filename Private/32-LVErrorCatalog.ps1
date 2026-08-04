@@ -282,7 +282,12 @@ function Find-LVErrorCatalogEntry {
         if ($Catalog.LVIndexes.ByKindHex.ContainsKey($key)) { return $Catalog.LVIndexes.ByKindHex[$key] }
     }
     if ($Catalog.LVIndexes.ByHex.ContainsKey($Hex.ToUpperInvariant())) {
-        return @($Catalog.LVIndexes.ByHex[$Hex.ToUpperInvariant()])[0]
+        $kindOrder = @('win32', 'hresult', 'setup', 'windowsupdate', 'ntstatus', 'bugcheck')
+        return @($Catalog.LVIndexes.ByHex[$Hex.ToUpperInvariant()] |
+            Sort-Object -Property `
+                @{ Expression = { $index = $kindOrder.IndexOf([string]$_.kind); if ($index -lt 0) { 99 } else { $index } }; Descending = $false }, `
+                @{ Expression = { [string]$_.id }; Descending = $false } |
+            Select-Object -First 1)
     }
     return $null
 }
@@ -441,18 +446,54 @@ function Get-LVErrorCatalogMatch {
             Error              = $reason
         }
     }
+    # Typed result fields are authoritative. Put them ahead of prose so an incidental
+    # 0x1 in a CBS message cannot steal the explanation from an explicit 0x800f081f.
+    $authority = ''
     $sample = ''
-    foreach ($property in @('SampleMessage', 'Message', 'Key')) {
-        if ($Signature.PSObject.Properties[$property] -and $Signature.$property) { $sample += ' ' + [string]$Signature.$property }
-    }
-    foreach ($property in @('ErrorCode', 'HResult', 'HRESULT', 'Status', 'NtStatus', 'NTSTATUS', 'ResultCode', 'ExtendCode', 'FailureCode', 'Result', 'Code', 'ExitCode', 'Phase', 'Operation')) {
-        if ($Signature.PSObject.Properties[$property] -and $null -ne $Signature.$property) { $sample += ' ' + [string]$Signature.$property }
+    foreach ($property in @('ResultCode', 'ExtendCode', 'FailureCode', 'ErrorCode', 'HResult', 'HRESULT', 'Status', 'NtStatus', 'NTSTATUS', 'Result', 'Code', 'ExitCode', 'Phase', 'Operation')) {
+        if ($Signature.PSObject.Properties[$property] -and $null -ne $Signature.$property) {
+            $part = ' {0}={1}' -f $property, [string]$Signature.$property
+            $authority += $part
+            $sample += $part
+        }
     }
     foreach ($property in @('ResultCode', 'ExtendCode', 'Phase', 'Operation', 'ProviderLocale', 'FallbackMessage')) {
         $value = Get-LVErrorContextField -InputObject $Signature -Name $property
-        if ($null -ne $value -and [string]$value) { $sample += ' ' + [string]$value }
+        if ($null -ne $value -and [string]$value) {
+            $part = ' {0}={1}' -f $property, [string]$value
+            $authority += $part
+            $sample += $part
+        }
+    }
+    foreach ($property in @('SampleMessage', 'Message', 'Key')) {
+        if ($Signature.PSObject.Properties[$property] -and $Signature.$property) { $sample += ' ' + [string]$Signature.$property }
     }
     $bugCheckContext = $sample -match '(?i)(?:minidump|bug.?check|stop.?code)'
+    # Resolve explicit fields before scanning prose. This also covers decimal result
+    # codes, whose normalized hex form would otherwise be discovered only after an
+    # earlier incidental hex token in a message.
+    $authorityHexMatches = [regex]::Matches($authority, '(?i)(?<![0-9a-f])0x[0-9a-f]{1,8}(?![0-9a-f])')
+    foreach ($match in $authorityHexMatches) {
+        $hex = ConvertTo-LVErrorHex -Value $match.Value
+        if (-not $hex) { continue }
+        $preferred = @()
+        if ($bugCheckContext) { $preferred += 'bugcheck' }
+        $upper = $hex.ToUpperInvariant()
+        if ($upper -like '0XC190*' -or $upper -like '0X800F*') { $preferred += 'setup' }
+        if ($upper -like '0X8024*') { $preferred += 'windowsupdate' }
+        if ($upper -like '0XC*' -or $upper -like '0XE*') { $preferred += 'ntstatus' }
+        if ($upper -like '0X8*') { $preferred += 'hresult' }
+        if (-not $bugCheckContext -and $match.Value -notmatch '^(?i:0x)[0-9a-f]{8}$') { $preferred += 'win32' }
+        $entry = Find-LVErrorCatalogEntry -Catalog $catalog -Hex $hex -PreferredKind $preferred
+        if ($entry) { return [pscustomobject]@{ Entry=$entry; RawCode=$hex } }
+    }
+    $authorityDecimalMatches = [regex]::Matches($authority, '(?i)(?:error|err(?:or)?|code|status|hresult|exception|result)\s*(?:code\s*)?(?:is|was|=|:)\s*(?!0x)(-?\d{1,11})(?!\d)')
+    foreach ($match in $authorityDecimalMatches) {
+        $hex = ConvertTo-LVErrorHex -Value $match.Groups[1].Value
+        if (-not $hex) { continue }
+        $entry = Find-LVErrorCatalogEntry -Catalog $catalog -Hex $hex -PreferredKind @('win32')
+        if ($entry) { return [pscustomobject]@{ Entry=$entry; RawCode=$hex } }
+    }
     $hexMatches = [regex]::Matches($sample, '(?i)(?<![0-9a-f])0x[0-9a-f]{1,8}(?![0-9a-f])')
     foreach ($match in $hexMatches) {
         $hex = ConvertTo-LVErrorHex -Value $match.Value
@@ -464,7 +505,7 @@ function Get-LVErrorCatalogMatch {
         if ($upper -like '0X8024*') { $preferred += 'windowsupdate' }
         if ($upper -like '0XC*' -or $upper -like '0XE*') { $preferred += 'ntstatus' }
         if ($upper -like '0X8*') { $preferred += 'hresult' }
-        if (-not $bugCheckContext -and $hex -notmatch '^0x[0-9A-Fa-f]{8}$') { $preferred += 'win32' }
+        if (-not $bugCheckContext -and $match.Value -notmatch '^(?i:0x)[0-9a-f]{8}$') { $preferred += 'win32' }
         $entry = Find-LVErrorCatalogEntry -Catalog $catalog -Hex $hex -PreferredKind $preferred
         if ($entry) {
             $decoded = $null

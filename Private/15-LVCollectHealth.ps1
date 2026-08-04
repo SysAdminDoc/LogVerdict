@@ -661,6 +661,8 @@ function Get-LVSysmonHealthProfile {
     $records = @($EventRecord | Where-Object { $_ -and $_.Source -eq 'event' -and ([string]$_.Channel -eq $channel -or [string]$_.Provider -eq 'Microsoft-Windows-Sysmon') })
     $observed = @($records | Where-Object { $null -ne $_.Id } | ForEach-Object { [string]$_.Id } | Sort-Object -Unique)
     $configPath = $null
+    $configStatus = $null
+    $configReason = $null
     $enabled = @()
     $filtered = @()
     $candidatePaths = @(
@@ -671,8 +673,17 @@ function Get-LVSysmonHealthProfile {
     )
     foreach ($candidate in $candidatePaths) {
         if (-not $candidate -or -not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+        $reader = $null
+        $textReader = $null
         try {
-            $xml = [xml](Get-Content -LiteralPath $candidate -Raw -ErrorAction Stop)
+            $settings = New-Object System.Xml.XmlReaderSettings
+            $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+            $settings.XmlResolver = $null
+            $textReader = New-Object System.IO.StringReader((Get-Content -LiteralPath $candidate -Raw -ErrorAction Stop))
+            $reader = [System.Xml.XmlReader]::Create($textReader, $settings)
+            $xml = New-Object System.Xml.XmlDocument
+            $xml.XmlResolver = $null
+            $xml.Load($reader)
             $configPath = $candidate
             $map = @{
                 ProcessCreate=1; FileCreateTime=2; NetworkConnect=3; ProcessTerminate=5; DriverLoad=6; ImageLoad=7
@@ -681,6 +692,11 @@ function Get-LVSysmonHealthProfile {
                 ClipboardChange=24; ProcessTampering=25; SysmonError=255
             }
             $filter = $xml.SelectSingleNode("//*[local-name()='EventFiltering']")
+            if ($null -eq $filter) {
+                $configStatus = 'invalid'
+                $configReason = 'The Sysmon XML configuration was readable but contains no EventFiltering node.'
+                break
+            }
             foreach ($node in @($filter.ChildNodes)) {
                 if ($map.ContainsKey($node.LocalName)) {
                     $id = [string]$map[$node.LocalName]
@@ -688,18 +704,24 @@ function Get-LVSysmonHealthProfile {
                     if (@($node.ChildNodes).Count -gt 0) { $filtered += $id }
                 }
             }
+            $configStatus = 'readable'
             break
         } catch {
-            $configPath = $candidate
+            $configPath = $null
+            $configStatus = 'unreadable'
+            $configReason = 'The Sysmon XML configuration could not be read: {0}' -f $_.Exception.Message
+        } finally {
+            if ($reader) { $reader.Dispose() }
+            if ($textReader) { $textReader.Dispose() }
         }
     }
     $enabled = @($enabled | Sort-Object -Unique)
     $filtered = @($filtered | Sort-Object -Unique)
-    $status = if ($state.Access -in @('denied', 'missing', 'unreadable')) { 'not-observed' } elseif ($configPath -and $enabled.Count -gt 0) { 'readable' } else { 'partial' }
+    $status = if ($state.Access -in @('denied', 'missing', 'unreadable')) { 'not-observed' } elseif ($configStatus -eq 'invalid') { 'invalid' } elseif ($configPath -and $enabled.Count -gt 0) { 'readable' } else { 'partial' }
     $observedText = 'Observed EventID(s): {0}' -f $(if ($observed.Count -gt 0) { $observed -join ', ' } else { 'none' })
     if ($enabled.Count -gt 0) { $observedText += '; configured IDs: ' + ($enabled -join ', ') }
     if ($filtered.Count -gt 0) { $observedText += '; IDs with filtering rules: ' + ($filtered -join ', ') }
-    $reason = if ($state.Access -ne 'readable') { 'The Sysmon channel was not readable.' } elseif (-not $configPath) { 'No conventional Sysmon XML configuration path was readable; configured and filtered IDs remain unknown.' } else { $null }
+    $reason = if ($state.Access -ne 'readable') { 'The Sysmon channel was not readable.' } elseif ($configReason) { $configReason } elseif (-not $configPath) { 'No conventional Sysmon XML configuration path was readable; configured and filtered IDs remain unknown.' } else { $null }
     return New-LVHealthProfile -Profile 'sysmon-configuration' -Source 'sysmon' -Name 'Sysmon' -Status $status `
         -RequiredConfiguration 'Sysmon should be installed with an intentional EventFiltering configuration when Sysmon telemetry is required.' `
         -ObservedConfiguration $observedText -EnabledEventIds $enabled -FilteredEventIds $filtered `

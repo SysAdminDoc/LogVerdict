@@ -164,7 +164,12 @@ function New-LVPrivacyAudit {
             if ($privacyMatches.Count -eq 0) { continue }
             $lineNumbers = New-Object System.Collections.Generic.List[int]
             foreach ($match in $privacyMatches) {
-                $lineNumbers.Add((1 + @($text.Substring(0, $match.Index).Split("`n")).Count)) | Out-Null
+                # Match indexes refer to the audited text (which may have had the
+                # script-block placeholder removed), so calculate the line against
+                # that same string. Count newlines before the match and add the
+                # one-based line origin exactly once.
+                $line = 1 + ([regex]::Matches($auditText.Substring(0, $match.Index), "`n")).Count
+                $lineNumbers.Add($line) | Out-Null
             }
             $firstValue = [string]$privacyMatches[0].Value
             $finding = New-LVPrivacyFinding -Artifact $file.Name -Category $pattern.Category `
