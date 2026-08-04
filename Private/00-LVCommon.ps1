@@ -149,7 +149,9 @@ $script:LVDefaultStaleAfterDays = 180
 # locale of the machine that rendered their provider message.
 $script:LVUICulture = (Get-UICulture).Name
 
+$script:LVMaxLogLines = 5000
 $script:LVLogLines = New-Object System.Collections.Generic.List[string]
+$script:LVLogLinesTruncated = $false
 
 # Event collection keeps a second, unfiltered range when the normal scan level
 # filter would make RecordId continuity ambiguous. Initialize both values so a
@@ -557,6 +559,21 @@ function Get-LVCollectionBudgetSnapshot {
     }
 }
 
+function Add-LVLogLine {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[string]]$List,
+        [Parameter(Mandatory)][string]$Line
+    )
+
+    if ($List.Count -ge $script:LVMaxLogLines) {
+        $dropCount = [Math]::Max(1, [int][Math]::Floor($script:LVMaxLogLines / 4))
+        $List.RemoveRange(0, [Math]::Min($dropCount, $List.Count))
+        $script:LVLogLinesTruncated = $true
+    }
+    $List.Add($Line) | Out-Null
+}
+
 function Write-LVLog {
     <#
         .SYNOPSIS
@@ -574,7 +591,7 @@ function Write-LVLog {
 
     $line = '{0} {1}' -f $marks[$Level], $Message
     $stamped = '{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $line
-    $script:LVLogLines.Add($stamped)
+    Add-LVLogLine -List $script:LVLogLines -Line $stamped
 
     # Enqueue, never invoke a callback: the scan runs on a worker thread and touching
     # a WPF control from there throws. A queue lets the UI thread pull on its own timer.
@@ -810,7 +827,11 @@ function New-LVPerformanceRecord {
 }
 
 function Get-LVLogTranscript {
-    return ConvertTo-LVArrayOutput -Value @($script:LVLogLines.ToArray())
+    $lines = @($script:LVLogLines.ToArray())
+    if ($script:LVLogLinesTruncated) {
+        $lines = @('[!] Log transcript truncated; only the most recent {0} line(s) are retained.' -f $script:LVMaxLogLines) + $lines
+    }
+    return ConvertTo-LVArrayOutput -Value $lines
 }
 
 function Test-LVElevated {

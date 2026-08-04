@@ -27,6 +27,20 @@ if (-not (Test-Path -LiteralPath $resolvedGui -PathType Leaf)) { throw "GUI arti
 if ($ScreenshotMetadataPath -and -not $ScreenshotPath) {
     throw 'ScreenshotMetadataPath requires ScreenshotPath.'
 }
+if ($ScreenshotPath) {
+    $ScreenshotPath = [IO.Path]::GetFullPath($ScreenshotPath)
+    $ScreenshotDirectory = Split-Path -Parent $ScreenshotPath
+    if (-not (Test-Path -LiteralPath $ScreenshotDirectory -PathType Container)) {
+        New-Item -ItemType Directory -Path $ScreenshotDirectory -Force | Out-Null
+    }
+}
+if ($ScreenshotMetadataPath) {
+    $ScreenshotMetadataPath = [IO.Path]::GetFullPath($ScreenshotMetadataPath)
+    $screenshotPrefix = $ScreenshotDirectory.TrimEnd('\') + [IO.Path]::DirectorySeparatorChar
+    if (-not $ScreenshotMetadataPath.StartsWith($screenshotPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw ("ScreenshotMetadataPath must stay beside the requested screenshot under '{0}': {1}" -f $ScreenshotDirectory, $ScreenshotMetadataPath)
+    }
+}
 
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
 if (-not ('LogVerdict.GuiSmoke.Native' -as [type])) {
@@ -59,7 +73,6 @@ $rootElement = $null
 $smokeLocalAppData = Join-Path ([IO.Path]::GetTempPath()) ('LogVerdict-gui-smoke-appdata-' + [guid]::NewGuid().ToString('N'))
 $oldHighContrast = $env:LOGVERDICT_TEST_HIGH_CONTRAST
 $oldHold = $env:LOGVERDICT_GUI_SMOKE_HOLD_MS
-$oldScreenshotPath = $env:LOGVERDICT_GUI_SCREENSHOT_PATH
 $oldComputerName = $env:COMPUTERNAME
 $oldLocalAppData = $env:LOCALAPPDATA
 $originalSettingsPath = if ([string]::IsNullOrWhiteSpace($oldLocalAppData)) { $null } else { Join-Path (Join-Path $oldLocalAppData 'LogVerdict') 'settings.json' }
@@ -227,11 +240,14 @@ try {
     if ($Theme -eq 'HighContrast') { $env:LOGVERDICT_TEST_HIGH_CONTRAST = '1' }
     else { $env:LOGVERDICT_TEST_HIGH_CONTRAST = '0' }
     $env:LOGVERDICT_GUI_SMOKE_HOLD_MS = '5000'
-    if ($ScreenshotPath) { $env:LOGVERDICT_GUI_SCREENSHOT_PATH = [IO.Path]::GetFullPath($ScreenshotPath) }
     # Keep generated GUI evidence portable; the real application still reports the host name.
     $env:COMPUTERNAME = 'LOCAL-MACHINE'
 
-    $process = Start-Process -FilePath $resolvedGui -ArgumentList @('-DaysBack', '1') -PassThru
+    $guiArguments = @('-DaysBack', '1')
+    if ($ScreenshotPath) {
+        $guiArguments += @('-ScreenshotPath', $ScreenshotPath, '-ScreenshotDirectory', $ScreenshotDirectory)
+    }
+    $process = Start-Process -FilePath $resolvedGui -ArgumentList $guiArguments -PassThru
     $evidence.processId = $process.Id
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $handle = [IntPtr]::Zero
@@ -378,8 +394,6 @@ try {
     else { $env:LOGVERDICT_TEST_HIGH_CONTRAST = $oldHighContrast }
     if ($null -eq $oldHold) { Remove-Item Env:LOGVERDICT_GUI_SMOKE_HOLD_MS -ErrorAction SilentlyContinue }
     else { $env:LOGVERDICT_GUI_SMOKE_HOLD_MS = $oldHold }
-    if ($null -eq $oldScreenshotPath) { Remove-Item Env:LOGVERDICT_GUI_SCREENSHOT_PATH -ErrorAction SilentlyContinue }
-    else { $env:LOGVERDICT_GUI_SCREENSHOT_PATH = $oldScreenshotPath }
     if ($null -eq $oldComputerName) { Remove-Item Env:COMPUTERNAME -ErrorAction SilentlyContinue }
     else { $env:COMPUTERNAME = $oldComputerName }
     if ($null -eq $oldLocalAppData) { Remove-Item Env:LOCALAPPDATA -ErrorAction SilentlyContinue }

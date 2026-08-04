@@ -28,6 +28,12 @@
     .PARAMETER CaseProfilePath
     Optional validated case profile to attach for collection and handoff attribution.
 
+    .PARAMETER ScreenshotPath
+    Optional explicit documentation screenshot path used only by the release smoke test.
+
+    .PARAMETER ScreenshotDirectory
+    Caller-owned directory that contains ScreenshotPath.
+
     .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\LogVerdict-GUI.ps1
 
@@ -45,6 +51,8 @@ param(
     [string]$AdvisoryPackage,
     [string]$AdvisoryVersion,
     [string]$CaseProfilePath,
+    [string]$ScreenshotPath,
+    [string]$ScreenshotDirectory,
     [switch]$AutoScan
 )
 
@@ -65,6 +73,8 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     if ($AdvisoryPackage) { $relaunch += @('-AdvisoryPackage', $AdvisoryPackage) }
     if ($AdvisoryVersion) { $relaunch += @('-AdvisoryVersion', $AdvisoryVersion) }
     if ($CaseProfilePath) { $relaunch += @('-CaseProfilePath', $CaseProfilePath) }
+    if ($ScreenshotPath) { $relaunch += @('-ScreenshotPath', $ScreenshotPath) }
+    if ($ScreenshotDirectory) { $relaunch += @('-ScreenshotDirectory', $ScreenshotDirectory) }
     if ($AutoScan) { $relaunch += '-AutoScan' }
     Start-Process -FilePath 'powershell.exe' -ArgumentList $relaunch
     exit 0
@@ -85,6 +95,8 @@ try {
     if ($AdvisoryPackage) { $guiArgs['AdvisoryPackage'] = $AdvisoryPackage }
     if ($AdvisoryVersion) { $guiArgs['AdvisoryVersion'] = $AdvisoryVersion }
     if ($CaseProfilePath) { $guiArgs['CaseProfilePath'] = $CaseProfilePath }
+    if ($ScreenshotPath) { $guiArgs['ScreenshotPath'] = $ScreenshotPath }
+    if ($ScreenshotDirectory) { $guiArgs['ScreenshotDirectory'] = $ScreenshotDirectory }
     Show-LogVerdictGui @guiArgs
     exit 0
 } catch {

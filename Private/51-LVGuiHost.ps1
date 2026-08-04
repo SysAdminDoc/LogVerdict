@@ -271,6 +271,7 @@ function Select-LVGuiFolder {
 # Every brush the XAML treats as semantic rather than decorative. DynamicResource
 # references point at these keys, so replacing the resource objects repaints the
 # existing visual tree without rebuilding the window.
+$script:LVMaxGuiActivityLines = 2000
 $script:LVGuiThemeBrushKey = @(
     'Base', 'Mantle', 'Crust',
     'Surface0', 'Surface1', 'Surface2', 'Overlay0', 'Overlay1',

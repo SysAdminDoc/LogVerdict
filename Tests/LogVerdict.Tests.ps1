@@ -5863,6 +5863,52 @@ Describe 'Operator-state-safe tooling' {
         $closeIndex | Should -BeGreaterThan -1
         $forceIndex | Should -BeGreaterThan $closeIndex
     }
+
+    It 'requires an explicit caller-owned screenshot directory instead of an environment hook' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $gui = Get-Content -LiteralPath (Join-Path $root 'Public/Show-LogVerdictGui.ps1') -Raw
+        $entry = Get-Content -LiteralPath (Join-Path $root 'LogVerdict-GUI.ps1') -Raw
+        $gui | Should -Not -Match 'LOGVERDICT_GUI_SCREENSHOT_PATH'
+        $gui | Should -Match 'ScreenshotDirectory'
+        $gui | Should -Match 'ScreenshotPath must remain inside ScreenshotDirectory'
+        $gui | Should -Match 'GUI screenshot written to'
+        $entry | Should -Match 'ScreenshotPath'
+        $entry | Should -Match 'ScreenshotDirectory'
+    }
+
+    It 'bounds the GUI activity buffer and filters it literally' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $gui = Get-Content -LiteralPath (Join-Path $root 'Public/Show-LogVerdictGui.ps1') -Raw
+        $gui | Should -Match '\$activityMaxLines\s*=\s*\$script:LVMaxGuiActivityLines'
+        $gui | Should -Match '\$activityMaxCharacters\s*=\s*524288'
+        $gui | Should -Match 'ActivityCharacters'
+        $gui | Should -Match 'ActivityDropped'
+        $gui | Should -Match 'ActivityLines\.RemoveAt\(0\)'
+        $gui | Should -Match 'IndexOf\(\$needle, \[StringComparison\]::OrdinalIgnoreCase\)'
+    }
+
+    It 'bounds the shared transcript used by GUI and report output' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $common = Get-Content -LiteralPath (Join-Path $root 'Private/00-LVCommon.ps1') -Raw
+        $common | Should -Match '\$script:LVMaxLogLines\s*=\s*5000'
+        $common | Should -Match 'function Add-LVLogLine'
+        $common | Should -Match 'LVLogLinesTruncated'
+
+        InModuleScope LogVerdict {
+            $list = New-Object 'System.Collections.Generic.List[string]'
+            $previous = $script:LVLogLinesTruncated
+            try {
+                $script:LVLogLinesTruncated = $false
+                for ($i = 0; $i -lt ($script:LVMaxLogLines + 100); $i++) {
+                    Add-LVLogLine -List $list -Line ('line-{0}' -f $i)
+                }
+                $list.Count | Should -BeLessOrEqual $script:LVMaxLogLines
+                $script:LVLogLinesTruncated | Should -BeTrue
+            } finally {
+                $script:LVLogLinesTruncated = $previous
+            }
+        }
+    }
 }
 
 Describe 'Release supply-chain metadata' {

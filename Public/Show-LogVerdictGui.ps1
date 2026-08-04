@@ -34,6 +34,14 @@ function Show-LogVerdictGui {
         .PARAMETER CaseProfilePath
         Optional validated case profile to attach for collection and handoff attribution.
 
+        .PARAMETER ScreenshotPath
+        Optional explicit documentation screenshot path. It is accepted only together
+        with ScreenshotDirectory and must remain inside that caller-owned directory.
+
+        .PARAMETER ScreenshotDirectory
+        Caller-owned directory that contains ScreenshotPath when documentation capture
+        is explicitly requested.
+
         .EXAMPLE
         Show-LogVerdictGui
 
@@ -53,12 +61,33 @@ function Show-LogVerdictGui {
         [string]$AdvisoryPackage,
         [string]$AdvisoryVersion,
         [string]$CaseProfilePath,
+        [string]$ScreenshotPath,
+        [string]$ScreenshotDirectory,
         [switch]$AutoScan,
         [switch]$PassThru
     )
 
     if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
         throw 'The LogVerdict window needs a single-threaded apartment. Start PowerShell with -STA, or run LogVerdict-GUI.ps1 which handles this for you.'
+    }
+
+    $documentationScreenshotPath = $null
+    if ($ScreenshotPath) {
+        if (-not $ScreenshotDirectory) {
+            throw 'ScreenshotPath requires ScreenshotDirectory so capture cannot write outside the caller-owned output directory.'
+        }
+        $screenshotRoot = [IO.Path]::GetFullPath($ScreenshotDirectory).TrimEnd('\')
+        if (-not (Test-Path -LiteralPath $screenshotRoot -PathType Container)) {
+            throw ("ScreenshotDirectory does not exist: {0}" -f $screenshotRoot)
+        }
+        $documentationScreenshotPath = [IO.Path]::GetFullPath($ScreenshotPath)
+        $screenshotPrefix = $screenshotRoot + [IO.Path]::DirectorySeparatorChar
+        if (-not $documentationScreenshotPath.StartsWith($screenshotPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw ("ScreenshotPath must remain inside ScreenshotDirectory: {0}" -f $screenshotRoot)
+        }
+        Write-LVLog -Level info -Message ("Explicit GUI screenshot capture requested in {0}" -f $screenshotRoot)
+    } elseif ($ScreenshotDirectory) {
+        throw 'ScreenshotDirectory requires ScreenshotPath.'
     }
 
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
@@ -105,6 +134,8 @@ function Show-LogVerdictGui {
     # All mutable state lives on one object. Assigning to a plain variable inside an
     # event handler would create a handler-local copy and silently lose the write;
     # mutating a hashtable's keys does not have that problem.
+    $activityMaxLines = $script:LVMaxGuiActivityLines
+    $activityMaxCharacters = 524288
     $state = @{
         Result     = $null
         FindingStore = @()
@@ -128,6 +159,8 @@ function Show-LogVerdictGui {
         Scanning   = $false
         CurrentPage = 'Overview'
         ActivityLines = (New-Object System.Collections.Generic.List[string])
+        ActivityCharacters = 0
+        ActivityDropped = 0
     }
     foreach ($v in $script:LVVerdictDisplayOrder) { $state.Chips[$v] = $true }
 
@@ -280,6 +313,23 @@ function Show-LogVerdictGui {
         $ui.TxtProvenance.Text = $detail.Provenance
     }
 
+    $renderActivity = {
+        $needle = $ui.TxtActivitySearch.Text.Trim()
+        $ui.TxtActivitySearchHint.Visibility = $(if ($needle) { 'Collapsed' } else { 'Visible' })
+        $visibleLines = @($state.ActivityLines | Where-Object {
+                -not $needle -or $_.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0
+            })
+        $prefix = if ($state.ActivityDropped -gt 0) {
+            '[!] Earlier activity omitted after the {0}-line / {1:N0}-character display limit.' -f $activityMaxLines, $activityMaxCharacters
+        } else { $null }
+        if ($prefix) {
+            $ui.TxtActivityLog.Text = $prefix + [Environment]::NewLine + ($visibleLines -join [Environment]::NewLine)
+        } else {
+            $ui.TxtActivityLog.Text = $visibleLines -join [Environment]::NewLine
+        }
+        $ui.TxtActivityLog.ScrollToEnd()
+    }
+
     $appendLog = {
         param([string]$Level, [string]$Stamp, [string]$Message)
 
@@ -291,18 +341,26 @@ function Show-LogVerdictGui {
         # this one. Rebuilding it here is what stops the exported LogVerdict-Run.log
         # from being a blank file whenever the report came from the window.
         $transcriptLine = '{0} {1} {2}' -f $Stamp, $mark, $Message
-        $null = $script:LVLogLines.Add($transcriptLine)
+        Add-LVLogLine -List $script:LVLogLines -Line $transcriptLine
 
         $clock = $Stamp
         if ($Stamp.Length -ge 19) { $clock = $Stamp.Substring(11, 8) }
         $panelLine = '{0}  {1} {2}{3}' -f $clock, $mark, $Message, [Environment]::NewLine
 
-        $state.ActivityLines.Add($panelLine.TrimEnd()) | Out-Null
-        $activityFilter = $ui.TxtActivitySearch.Text.Trim()
-        if (-not $activityFilter -or $panelLine -like ('*{0}*' -f $activityFilter)) {
-            $ui.TxtActivityLog.AppendText($panelLine)
-            $ui.TxtActivityLog.ScrollToEnd()
+        $activityLine = $panelLine.TrimEnd()
+        if ($activityLine.Length -gt $activityMaxCharacters) {
+            $activityLine = $activityLine.Substring(0, $activityMaxCharacters)
+            $state.ActivityDropped++
         }
+        $state.ActivityLines.Add($activityLine) | Out-Null
+        $state.ActivityCharacters += $activityLine.Length + 1
+        while ($state.ActivityLines.Count -gt $activityMaxLines -or $state.ActivityCharacters -gt $activityMaxCharacters) {
+            $removedLine = [string]$state.ActivityLines[0]
+            $state.ActivityLines.RemoveAt(0)
+            $state.ActivityCharacters = [Math]::Max(0, $state.ActivityCharacters - $removedLine.Length - 1)
+            $state.ActivityDropped++
+        }
+        & $renderActivity
         $ui.TxtActivityLastLine.Text = $Message
         $ui.TxtStatus.Text = $Message
     }
@@ -802,16 +860,14 @@ function Show-LogVerdictGui {
 
     $ui.BtnActivityClear.Add_Click({
         $state.ActivityLines.Clear()
+        $state.ActivityCharacters = 0
+        $state.ActivityDropped = 0
         $ui.TxtActivityLog.Clear()
         $ui.TxtActivityLastLine.Text = ''
     })
 
     $ui.TxtActivitySearch.Add_TextChanged({
-        $needle = $ui.TxtActivitySearch.Text.Trim()
-        $ui.TxtActivitySearchHint.Visibility = $(if ($needle) { 'Collapsed' } else { 'Visible' })
-        $visibleLines = @($state.ActivityLines | Where-Object { -not $needle -or $_ -like ('*{0}*' -f $needle) })
-        $ui.TxtActivityLog.Text = $visibleLines -join [Environment]::NewLine
-        $ui.TxtActivityLog.ScrollToEnd()
+        & $renderActivity
     })
 
     $ui.TxtSearch.Add_TextChanged({
@@ -940,10 +996,13 @@ function Show-LogVerdictGui {
 
         $ui.TxtActivityLog.Clear()
         $state.ActivityLines.Clear()
+        $state.ActivityCharacters = 0
+        $state.ActivityDropped = 0
         $ui.TxtActivitySearch.Clear()
         $ui.TxtActivityLastLine.Text = ''
         # Each report carries its own scan's transcript, not everything since launch.
         $script:LVLogLines.Clear()
+        $script:LVLogLinesTruncated = $false
         $state.Sink = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
         $state.ReportDir = $null
         $state.HtmlPath = $null
@@ -1196,9 +1255,10 @@ function Show-LogVerdictGui {
 
     # Release QA can request a deterministic screenshot from WPF's own visual tree.
     # That avoids compositor and remote-desktop capture differences while ensuring the
-    # documentation image is rendered by the exact packaged GUI being tested.
-    $documentationScreenshotPath = $env:LOGVERDICT_GUI_SCREENSHOT_PATH
-    if (-not [string]::IsNullOrWhiteSpace($documentationScreenshotPath)) {
+    # documentation image is rendered by the exact packaged GUI being tested. The path
+    # is explicit and bounded to the caller-owned ScreenshotDirectory above; no ambient
+    # environment variable can cause the shipped GUI to write a file.
+    if ($documentationScreenshotPath) {
         $window.Add_ContentRendered({
             $target = $documentationScreenshotPath
             $width = [Math]::Max(1, [int][Math]::Ceiling($window.ActualWidth))
@@ -1210,8 +1270,15 @@ function Show-LogVerdictGui {
             $bitmap.Render($window)
             $encoder = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
             $encoder.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
-            $stream = [IO.File]::Open($target, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::Read)
-            try { $encoder.Save($stream) } finally { $stream.Dispose() }
+            $stream = $null
+            try {
+                $stream = [IO.File]::Open($target, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+                $encoder.Save($stream)
+                Write-LVLog -Level info -Message ("GUI screenshot written to {0}" -f $target)
+            } catch {
+                Write-LVLog -Level error -Message ("GUI screenshot could not be written to {0}: {1}" -f $target, $_.Exception.Message)
+                throw
+            } finally { if ($stream) { $stream.Dispose() } }
         })
     }
 

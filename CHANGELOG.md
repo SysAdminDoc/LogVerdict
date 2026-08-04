@@ -7,6 +7,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [0.8.2] - 2026-08-02
 
 - Made stale advisory data a warning for ordinary CI quality checks while keeping explicit package release validation fail-closed, and documented the monthly manual refresh cadence.
+- Removed the environment-triggered production GUI screenshot path, moved captures behind explicit output parameters, and bounded GUI activity/transcript retention.
 - Isolated GUI artifact smoke settings from operator state, closed the tested window through its own WPF close path, made advisory refresh `-WhatIf` side-effect-free, staged refresh backups outside the repository, and added Windows PowerShell basic parsing to every web request.
 - Made release provenance fail closed on dirty source trees, revision drift, tracked-file omissions, and unpinned dependency content; split runtime-agnostic release gates across the Windows PowerShell and PowerShell Core CI legs.
 - Added bounded ticket handoffs, email-safe Markdown/plain/inline-HTML summaries, a UTF-8 Intune digest with a binary exit contract, and a pre-base64 redacted evidence-bundle size cap.
