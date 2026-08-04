@@ -406,6 +406,7 @@ Describe 'CI gate wiring' {
         $script:CiWorkflow | Should -Match 'name: Run runtime-agnostic release gates'
         $script:CiWorkflow | Should -Match 'Tools\\Test-LogVerdictReleaseStatic\.ps1'
         $script:CiWorkflow | Should -Match 'name: Run Core schema release gates'
+        $script:CiWorkflow | Should -Match 'Test-LogVerdictRelease\.ps1[^\r\n]+-ReleaseValidation'
         $script:CiWorkflow | Should -Match 'if \(-not \$\?\) \{ exit 1 \}'
         $script:CiWorkflow | Should -Match 'probeExit = if \(\$LASTEXITCODE\)'
         $script:CiWorkflow | Should -Match 'reportExit = \[int\]\$LASTEXITCODE'
@@ -730,7 +731,7 @@ Describe 'Dependency advisory knowledge' {
         }
     }
 
-    It 'makes the release gate reject an aged cache' {
+    It 'warns on an aged cache during ordinary release checks' {
         $root = Split-Path $PSScriptRoot -Parent
         $path = Join-Path $TestDrive 'aged-release-advisories.json'
         $cache = Get-Content -LiteralPath (Join-Path $root 'Data\advisories.json') -Raw | ConvertFrom-Json
@@ -739,7 +740,21 @@ Describe 'Dependency advisory knowledge' {
         $cache | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
 
         $release = Join-Path $root 'Tools\Test-LogVerdictRelease.ps1'
-        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $release -AdvisoryPath $path 2>&1)
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $release -AdvisoryPath $path -SkipSchemaValidation 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        ($output -join "`n") | Should -Match 'Offline advisory cache is stale'
+    }
+
+    It 'makes explicit release validation reject an aged cache' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $path = Join-Path $TestDrive 'aged-release-validation-advisories.json'
+        $cache = Get-Content -LiteralPath (Join-Path $root 'Data\advisories.json') -Raw | ConvertFrom-Json
+        $cache.updated = '2020-01-01'
+        $cache.source.retrieved = '2020-01-01'
+        $cache | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
+
+        $release = Join-Path $root 'Tools\Test-LogVerdictRelease.ps1'
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $release -AdvisoryPath $path -SkipSchemaValidation -ReleaseValidation 2>&1)
         $LASTEXITCODE | Should -Not -Be 0
         ($output -join "`n") | Should -Match 'Offline advisory cache is stale'
     }

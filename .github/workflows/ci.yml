@@ -241,7 +241,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          .\Tools\Test-LogVerdictRelease.ps1 -ManifestDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging') -AssetDirectory (Join-Path (Get-Location).Path 'dist') -SupplyChainDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain')
+          .\Tools\Test-LogVerdictRelease.ps1 -ManifestDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-packaging') -AssetDirectory (Join-Path (Get-Location).Path 'dist') -SupplyChainDirectory (Join-Path $env:RUNNER_TEMP 'logverdict-supply-chain') -ReleaseValidation
           if (-not $?) { exit 1 }
 
       - name: Launch packaged GUI smoke matrix

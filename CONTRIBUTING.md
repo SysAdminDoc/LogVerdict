@@ -90,6 +90,14 @@ remediation, public source, Windows build range (if any), and regression fixture
 
 `Data/verdicts.schema.json` describes the full format. Point your editor at it for completion and inline validation.
 
+The advisory cache is intentionally not refreshed by CI. Ordinary push and pull-request quality checks warn when its 60-day UTC window is stale, while package release validation passes `-ReleaseValidation` and fails closed. Refresh it at least monthly, before the window expires, with network access:
+
+```powershell
+pwsh -NoProfile -File .\Tools\Refresh-LogVerdictAdvisoryCache.ps1
+```
+
+Use `-WhatIf` to verify the destination without making a network request or writing a file. The refresh helper validates the downloaded records and replaces the cache atomically.
+
 ## Writing the four fields well
 
 | Field | Ask yourself |

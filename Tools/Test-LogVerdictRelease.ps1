@@ -8,7 +8,9 @@ package metadata, typed error catalog, and verdict database. When -AssetDirector
 is supplied, package hashes are checked against the exact built executables too.
 When -SupplyChainDirectory is supplied, the SPDX and provenance records in that
 directory are also checked offline against the source checkout and assets.
-The script never downloads or publishes anything.
+The script never downloads or publishes anything. A stale advisory cache is a
+warning during ordinary quality checks and a blocker when -ReleaseValidation is
+supplied.
 ##>
 [CmdletBinding()]
 param(
@@ -16,7 +18,8 @@ param(
     [string]$AssetDirectory,
     [string]$SupplyChainDirectory,
     [string]$AdvisoryPath,
-    [switch]$SkipSchemaValidation
+    [switch]$SkipSchemaValidation,
+    [switch]$ReleaseValidation
 )
 
 $ErrorActionPreference = 'Stop'
@@ -274,7 +277,13 @@ if (-not (Test-LogVerdictAdvisoryDatabase -Path $advisoryCache -Quiet)) { throw 
 $advisorySchema = Get-Content -LiteralPath (Join-Path $repoRoot 'Data/advisories.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$advisorySchema.properties.schemaVersion.const -ne 2) { throw 'Offline advisory schema is not pinned at version 2.' }
 $advisoryStatus = Get-LogVerdictAdvisoryStatus -Path $advisoryCache
-if ($advisoryStatus.Status -ne 'fresh') {
+if ($advisoryStatus.Status -eq 'stale') {
+    $staleMessage = "Offline advisory cache is stale: $($advisoryStatus.Reason)"
+    if ($ReleaseValidation) {
+        throw $staleMessage
+    }
+    Write-Warning $staleMessage
+} elseif ($advisoryStatus.Status -ne 'fresh') {
     throw ("Offline advisory cache is {0}: {1}" -f $advisoryStatus.Status, $advisoryStatus.Reason)
 }
 foreach ($runtimeName in @('Windows PowerShell 5.1', 'PowerShell 7.6 LTS')) {
