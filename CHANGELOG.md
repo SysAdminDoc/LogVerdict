@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [0.8.2] - 2026-08-02
 
+- Raised severe-rule prose gates: active actionable and critical rules now require a false-positive condition and an external citation, event-id-only explanations are rejected, and the contributor rubric now follows plain-language error-message guidance.
 - Made stale advisory data a warning for ordinary CI quality checks while keeping explicit package release validation fail-closed, and documented the monthly manual refresh cadence.
 - Removed the environment-triggered production GUI screenshot path, moved captures behind explicit output parameters, and bounded GUI activity/transcript retention.
 - Isolated GUI artifact smoke settings from operator state, closed the tested window through its own WPF close path, made advisory refresh `-WhatIf` side-effect-free, staged refresh backups outside the repository, and added Windows PowerShell basic parsing to every web request.

@@ -1050,6 +1050,36 @@ Describe 'Verdict database' {
         @(Test-LogVerdictDatabase).Count | Should -Be 0
     }
 
+    It 'requires false-positive guidance and an external citation for active severe rules' {
+        $source = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data\verdicts.json'
+        $raw = Get-Content -LiteralPath $source -Raw -Encoding UTF8 | ConvertFrom-Json
+        $rule = @($raw.rules | Where-Object id -eq 'LV-0011')[0]
+        $rule.falsepositives = @()
+        $rule.references = @()
+        $path = Join-Path $TestDrive 'uncited-severe.json'
+        $raw | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
+
+        $problems = @(Test-LogVerdictDatabase -Path $path -SkipFixture)
+        @($problems | Where-Object { $_.RuleId -eq 'LV-0011' -and $_.Problem -like '*requires at least one falsepositives entry' }).Count | Should -Be 1
+        $citationProblem = @($problems | Where-Object { $_.RuleId -eq 'LV-0011' -and $_.Problem -like '*requires at least one external citation*' })
+        $citationProblem.Count | Should -Be 1
+        $citationProblem[0].Severity | Should -BeExactly 'error'
+    }
+
+    It 'rejects a plain field that only restates its event id' {
+        $source = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data\verdicts.json'
+        $raw = Get-Content -LiteralPath $source -Raw -Encoding UTF8 | ConvertFrom-Json
+        $rule = @($raw.rules | Where-Object id -eq 'LV-0011')[0]
+        $rule.plain = 'Event ID 18.'
+        $path = Join-Path $TestDrive 'event-label-prose.json'
+        $raw | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
+
+        $problems = @(Test-LogVerdictDatabase -Path $path -SkipFixture)
+        $plainProblem = @($problems | Where-Object { $_.RuleId -eq 'LV-0011' -and $_.Problem -like '*only restating an event id*' })
+        $plainProblem.Count | Should -Be 1
+        $plainProblem[0].Severity | Should -BeExactly 'error'
+    }
+
     It 'reports an uncompilable message or structured regex as a rule trust problem' {
         $rules = @(
             [ordered]@{
@@ -6318,6 +6348,35 @@ Describe 'Rule provenance' {
         $observedPath = Join-Path $TestDrive 'observed.json'
         $observed | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $observedPath -Encoding UTF8
         Test-LogVerdictDatabase -Path $observedPath -Quiet | Should -BeTrue
+    }
+
+    It 'requires severe active rules to document false positives and an external citation' {
+        $rule = [ordered]@{
+            id = 'SEVERE-PROSE'; status = 'stable'; verified = '2026-08-03'; modified = '2026-08-03'
+            match = @{ source = 'event'; provider = 'Contoso'; eventId = 4242 }
+            verdict = 'critical'; title = 'A severe test ruling'; plain = 'The component failed.'
+            why = 'The failure can affect the system.'; action = 'Investigate the component.'; confidence = 'high'
+            provenance = 'internal-observation'; references = @(); falsepositives = @()
+        }
+        $path = Join-Path $TestDrive 'severe-prose.json'
+        [ordered]@{ schemaVersion = 7; name = 'severe-prose'; updated = '2026-08-03'; rules = @($rule); correlations = @() } |
+            ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path -Encoding UTF8
+
+        $problems = @(Test-LogVerdictDatabase -Path $path -SkipFixture)
+        @($problems | Where-Object { $_.Problem -like '*requires at least one falsepositives*' }).Count | Should -Be 1
+        @($problems | Where-Object { $_.Problem -like '*requires at least one external citation*' }).Count | Should -Be 1
+        @($problems | Where-Object { $_.Severity -ne 'error' }).Count | Should -Be 0
+
+        $rule.falsepositives = @('A test harness can deliberately trigger this failure.')
+        $rule.references = @('https://example.invalid/severe')
+        [ordered]@{ schemaVersion = 7; name = 'severe-prose'; updated = '2026-08-03'; rules = @($rule); correlations = @() } |
+            ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path -Encoding UTF8
+        Test-LogVerdictDatabase -Path $path -SkipFixture -Quiet | Should -BeTrue
+
+        $rule.status = 'deprecated'; $rule.falsepositives = @(); $rule.references = @(); $rule.Remove('provenance')
+        [ordered]@{ schemaVersion = 7; name = 'severe-prose'; updated = '2026-08-03'; rules = @($rule); correlations = @() } |
+            ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path -Encoding UTF8
+        Test-LogVerdictDatabase -Path $path -SkipFixture -Quiet | Should -BeTrue
     }
 
     It 'gives every active shipped rule source metadata or explicit provenance' {

@@ -179,13 +179,76 @@ function Test-LogVerdictDatabase {
             $problems.Add([pscustomobject]@{ RuleId = $id; Problem = 'falsepositives must be a list' }) | Out-Null
         }
 
+        # Filtered, not just wrapped: @($null) is a one-element array holding null.
+        $ruleSources = @($rule.sources | Where-Object { $_ })
+
+        # The prose is part of the trust boundary. A severe ruling without a
+        # counterexample invites over-triage, and a severe ruling with no external
+        # citation leaves the reader unable to check the claim. Deprecated and
+        # unsupported rules are explicit lifecycle downgrades and are not active.
+        if ((Test-LVRuleActive -Rule $rule) -and $rule.verdict -in @('actionable', 'critical')) {
+            $falsePositiveText = @($rule.falsepositives | Where-Object {
+                    -not [string]::IsNullOrWhiteSpace([string]$_)
+                })
+            if ($falsePositiveText.Count -eq 0) {
+                $problems.Add([pscustomobject]@{
+                        RuleId = $id
+                        Problem = 'actionable or critical active rule requires at least one falsepositives entry'
+                    }) | Out-Null
+            }
+
+            $externalCitations = @($rule.references | Where-Object {
+                    [string]$_ -match '^https?://'
+                })
+            $externalCitations += @($ruleSources | Where-Object {
+                    [string]$_.uri -match '^https?://'
+                })
+            if ($externalCitations.Count -eq 0) {
+                $problems.Add([pscustomobject]@{
+                        RuleId = $id
+                        Problem = 'actionable or critical active rule requires at least one external citation in references[] or sources[].uri'
+                    }) | Out-Null
+            }
+        }
+
+        # Event ids are useful match keys, not explanations. Reject only a narrow
+        # label form that merely repeats this rule's event id, while allowing a
+        # substantive sentence that explains what the event means.
+        $eventId = $null
+        if ($rule.match -and $rule.match.PSObject.Properties['eventId']) {
+            $eventId = [string]$rule.match.eventId
+        }
+        if (-not [string]::IsNullOrWhiteSpace($eventId)) {
+            $normalizedPlain = (([string]$rule.plain).ToLowerInvariant() -replace '[^a-z0-9]+', ' ').Trim()
+            $normalizedEventId = $eventId.ToLowerInvariant()
+            $eventLabels = @(
+                $normalizedEventId
+                "event $normalizedEventId"
+                "event id $normalizedEventId"
+                "event number $normalizedEventId"
+                "windows event $normalizedEventId"
+                "windows event id $normalizedEventId"
+                "event $normalizedEventId occurred"
+                "event id $normalizedEventId occurred"
+                "event $normalizedEventId was logged"
+                "event id $normalizedEventId was logged"
+                "event $normalizedEventId recorded"
+                "event id $normalizedEventId recorded"
+            )
+        } else {
+            $eventLabels = @()
+            $normalizedPlain = $null
+        }
+        if ($eventLabels -contains $normalizedPlain) {
+            $problems.Add([pscustomobject]@{
+                    RuleId = $id
+                    Problem = 'plain must explain what happened rather than only restating an event id'
+                }) | Out-Null
+        }
+
         # Provenance. A ruling nobody can check is an assertion, and this tool exists to
         # be trusted; a rule derived from a licensed corpus additionally carries legal
         # obligations that only travel if they are recorded here.
-        # Filtered, not just wrapped: @($null) is a one-element array holding null, so a
-        # rule with no sources would otherwise iterate once over a phantom entry and be
-        # reported as having a source with no uri.
-        $ruleSources = @($rule.sources | Where-Object { $_ })
         if ($rule.provenance -and $rule.provenance -ne 'internal-observation') {
             $problems.Add([pscustomobject]@{ RuleId = $id; Problem = ("unknown provenance '{0}'; valid: internal-observation" -f $rule.provenance) }) | Out-Null
         } elseif ((Test-LVRuleActive -Rule $rule) -and -not (Test-LVDatabaseProvenance -Item $rule)) {

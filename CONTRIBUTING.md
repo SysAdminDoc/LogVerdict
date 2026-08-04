@@ -107,10 +107,22 @@ Use `-WhatIf` to verify the destination without making a network request or writ
 | `why` | Does this help someone decide whether to care? |
 | `action` | Can someone actually do this? `Ignore.` is a complete answer and often the right one. |
 
-Every rule should carry at least one `sources` entry or a `references` URL. The
-validator reports an unsourced rule as a warning rather than an error, so it will not
-block a build, but a ruling nobody can check is an assertion and this tool asks people to
-act on it.
+Use the [Nielsen Norman Group error-message guidelines](https://www.nngroup.com/articles/error-message-guidelines/)
+and the four principles of [ISO 24495-1 plain language](https://www.iso.org/standard/78907.html)
+as the prose rubric: say what happened, explain why it matters, give a concrete next step,
+and make the important information findable without requiring the reader to decode an id.
+The [Digital.gov plain-language guide](https://digital.gov/guides/plain-language) is a
+practical companion, and the [FSE 2025 suppression study](https://doi.org/10.1145/3715729)
+is the reminder to name known false-positive contexts instead of hiding uncertainty behind
+a severity label.
+The validator rejects a `plain` field that is only an event id. It also rejects active
+`actionable` and `critical` rules unless they name at least one false-positive condition
+and carry an external URL in `references[]` or `sources[].uri`; `provenance:
+internal-observation` does not substitute for that citation. `deprecated` and
+`unsupported` are the explicit lifecycle downgrades for rules that are not ready to assert.
+
+Every other active rule should carry at least one `sources` entry or a `references` URL.
+A ruling nobody can check is an assertion and this tool asks people to act on it.
 
 Use `sources` when the terms matter and `references` for plain further reading. A source
 entry is `{ uri, licence, author, retrieved, modified }`; only `uri` is required. Fill
@@ -121,7 +133,9 @@ the validator rejects a DRL source without one because the licence obliges us to
 on every match. Do not copy prose from a source whose terms you have not checked - most
 event-ID encyclopaedias are proprietary.
 
-Always fill `falsepositives` when the ruling is "ignore this". That field is what stops the tool from talking someone out of investigating a real problem.
+Always fill `falsepositives`. For `actionable` and `critical` rules it is a release gate;
+for every other verdict it is still what stops the tool from talking someone out of
+investigating a real problem.
 
 Prefer `Provider + eventId` matching. It is locale-independent. `messagePattern` against event text is **not** — Windows renders event messages from localized resources, so an English pattern will not match on a German install. If you must use one, set `locale`. Text-log rules (CBS, DISM, SetupAPI) are exempt: those files are invariant English.
 

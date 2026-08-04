@@ -129,8 +129,12 @@
       "why": "Uncorrected machine check errors are hardware faults, not software ones. No amount of driver reinstalling addresses them.",
       "action": "Treat as a hardware fault. Test memory, check CPU and board temperatures and power delivery, remove any overclock, and plan replacement of the reporting component.",
       "confidence": "high",
-      "references": [],
-      "falsepositives": [],
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-hardware/drivers/whea/error-processing"
+      ],
+      "falsepositives": [
+        "A firmware or platform defect can emit one malformed WHEA record without a repeatable physical failure; confirm recurrence and the complete error record before replacing hardware."
+      ],
       "provenance": "internal-observation"
     },
     {
@@ -211,8 +215,12 @@
       "why": "This is the single most informative record of a crash that is available without opening the dump in a debugger.",
       "action": "Read the bug check code from the event detail. Pair it with the matching minidump under C:\\Windows\\Minidump for the faulting driver.",
       "confidence": "high",
-      "references": [],
-      "falsepositives": [],
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/bug-check-code-reference2"
+      ],
+      "falsepositives": [
+        "A deliberate Driver Verifier, crash-dump, or hardware test can trigger a bug check; correlate the timestamp with the test before treating it as an unexpected crash."
+      ],
       "provenance": "internal-observation"
     },
     {
@@ -253,8 +261,12 @@
       "why": "Paging errors mean the failure reached the point where Windows could not rely on the disk. Cabling, the controller, or the drive itself is at fault.",
       "action": "Check the drive's SMART data, verify cabling and power, and back up before further troubleshooting.",
       "confidence": "high",
-      "references": [],
-      "falsepositives": [],
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/event-id-51-information"
+      ],
+      "falsepositives": [
+        "Removable or blank optical media and a transient bus reset can produce one paging-operation event without a persistent disk failure; check recurrence and the named device."
+      ],
       "provenance": "internal-observation"
     },
     {
@@ -296,8 +308,12 @@
       "why": "Left alone this compounds. It is also frequently a symptom of the storage faults above rather than an isolated software problem.",
       "action": "Run chkdsk on the named volume. If it recurs after a clean pass, suspect the drive rather than the file system.",
       "confidence": "high",
-      "references": [],
-      "falsepositives": [],
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/troubleshoot-data-corruption-and-disk-errors"
+      ],
+      "falsepositives": [
+        "A transient disconnect or a shadow-copy volume can produce an isolated corruption event; verify the named volume with Chkdsk and check whether the event returns."
+      ],
       "provenance": "internal-observation"
     },
     {
@@ -709,7 +725,9 @@
       "why": "Repeated failures on the same update usually mean component store damage rather than a problem with the update.",
       "action": "Note the error code. If the same update fails repeatedly, check the CBS findings in this report and run DISM RestoreHealth followed by SFC.",
       "confidence": "high",
-      "references": [],
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/installing-updates-features-roles/troubleshoot-windows-update-error-0x80070002"
+      ],
       "falsepositives": [
         "A single transient failure often succeeds on the next attempt."
       ],
@@ -997,7 +1015,9 @@
       "action": "Run DISM /Online /Cleanup-Image /RestoreHealth, then sfc /scannow, then re-check. If DISM cannot repair from Windows Update, supply a matching install image with the Source parameter.",
       "confidence": "high",
       "references": [],
-      "falsepositives": [],
+      "falsepositives": [
+        "CBS can record a transient component mismatch during a servicing operation that completes successfully; confirm an SFC or DISM failure before treating one line as persistent store damage."
+      ],
       "sources": [
         {
           "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-client/installing-updates-features-roles/analyze-sfc-program-log-file-entries",
@@ -2382,7 +2402,9 @@
       "references": [
         "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service"
       ],
-      "falsepositives": [],
+      "falsepositives": [
+        "A deliberately small shadow-storage quota or a short high-write backup burst can exhaust the allocation while the source volume remains healthy."
+      ],
       "sources": [
         {
           "uri": "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service",
@@ -2410,7 +2432,9 @@
       "references": [
         "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service"
       ],
-      "falsepositives": [],
+      "falsepositives": [
+        "Windows can delete snapshots after a deliberately small quota or a short high-write burst exhausts copy-on-write space; verify the storage policy and create a fresh snapshot."
+      ],
       "sources": [
         {
           "uri": "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service",
@@ -2438,7 +2462,9 @@
       "references": [
         "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service"
       ],
-      "falsepositives": [],
+      "falsepositives": [
+        "A short high-write burst can exhaust intentionally small shadow storage and abort one snapshot while the underlying volume is healthy; verify a new snapshot after correcting the quota."
+      ],
       "sources": [
         {
           "uri": "https://learn.microsoft.com/en-us/windows-server/storage/file-server/volume-shadow-copy-service",
@@ -2766,7 +2792,9 @@
       "references": [
         "https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/user-profiles-may-fail-load"
       ],
-      "falsepositives": [],
+      "falsepositives": [
+        "A roaming or network profile that is unavailable briefly during startup can make one sign-in fall back without indicating permanent local-profile damage."
+      ],
       "sources": [
         {
           "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/user-profiles-may-fail-load",
@@ -2794,7 +2822,9 @@
       "references": [
         "https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/user-profiles-may-fail-load"
       ],
-      "falsepositives": [],
+      "falsepositives": [
+        "A temporary profile during a brief startup, domain, or network outage can clear on the next sign-in; verify whether the normal profile remains available before repairing it."
+      ],
       "sources": [
         {
           "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/user-profiles-may-fail-load",
@@ -2940,7 +2970,9 @@
       "references": [
         "https://learn.microsoft.com/en-us/windows/security/hardware-security/tpm/how-windows-uses-the-tpm"
       ],
-      "falsepositives": [],
+      "falsepositives": [
+        "A firmware update, attestation test, or transient TPM initialization failure can produce one failed measurement; retry after a clean boot and preserve the event details before changing the TPM."
+      ],
       "sources": [
         {
           "uri": "https://learn.microsoft.com/en-us/windows/security/hardware-security/tpm/how-windows-uses-the-tpm",
@@ -3058,7 +3090,9 @@
       "references": [
         "https://learn.microsoft.com/en-us/troubleshoot/windows-server/networking/delayed-write-failed-error-data-lost"
       ],
-      "falsepositives": [],
+      "falsepositives": [
+        "An unplugged or write-protected removable exFAT volume can log delayed-write data loss even when the media is not failing; treat the data as at risk and verify the connection before deciding the media is bad."
+      ],
       "sources": [
         {
           "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/networking/delayed-write-failed-error-data-lost",
@@ -3090,7 +3124,9 @@
       "references": [
         "https://learn.microsoft.com/en-us/dotnet/core/runtime-discovery/troubleshoot-app-launch"
       ],
-      "falsepositives": [],
+      "falsepositives": [
+        "A self-contained deployment, wrong-architecture launch, or obsolete binary can produce one runtime-start failure without affecting applications that use another installed runtime."
+      ],
       "sources": [
         {
           "uri": "https://learn.microsoft.com/en-us/dotnet/core/runtime-discovery/troubleshoot-app-launch",
@@ -4694,7 +4730,9 @@
         "https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/bug-check-code-reference2",
         "https://github.com/volatilityfoundation/volatility/wiki/Crash-Address-Space"
       ],
-      "falsepositives": [],
+      "falsepositives": [
+        "A deliberate crash test or a stale, partial dump can preserve a valid stop code without representing an unexpected current system failure; correlate the dump time with the scan window."
+      ],
       "sources": [
         {
           "uri": "https://github.com/volatilityfoundation/volatility/wiki/Crash-Address-Space",
@@ -4719,8 +4757,12 @@
       "why": "Writes can fail even when Explorer still shows a small amount free because transactions, the page file, or thin-provisioned backing storage need reserved capacity.",
       "action": "Read the volume and process from the event, free or extend space there, then repeat the failed operation. On thin-provisioned storage, check the backing pool as well as the Windows volume.",
       "confidence": "high",
-      "references": [],
-      "falsepositives": [],
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/disk-space-problems-on-ntfs-volumes"
+      ],
+      "falsepositives": [
+        "Reserved transaction space, quotas, or thin-provisioned backing storage can make one operation fail even when Explorer shows free bytes; confirm the volume and backing pool before declaring an ongoing capacity failure."
+      ],
       "provenance": "internal-observation"
     },
     {
@@ -4809,7 +4851,9 @@
       "why": "New allocations can fail at this point, causing applications to hang, close, or behave unpredictably even when some physical RAM still appears free.",
       "action": "Check the largest memory users near the event time and confirm the page file is enabled and has room to grow. Update or restart a leaking process; add memory only when sustained workload genuinely exceeds capacity.",
       "confidence": "high",
-      "references": [],
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-application-service-memory-leaks"
+      ],
       "falsepositives": [
         "A deliberately constrained test or short-lived peak can trigger one notification without an ongoing leak."
       ],
