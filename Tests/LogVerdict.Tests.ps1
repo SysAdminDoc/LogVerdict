@@ -164,6 +164,112 @@ Describe 'Case profiles and responder handoffs' {
     }
 }
 
+Describe 'Export adapters and contract builders' {
+    BeforeAll {
+        $script:AdapterResult = [pscustomobject]@{
+            Tool = 'LogVerdict'; Version = '0.7.0'; MachineName = 'TESTPC'
+            ScanTime = [datetime]'2026-07-31T12:00:00Z'; Duration = [timespan]::FromSeconds(3)
+            DaysBack = 30; Elevated = $false; Channels = @('System')
+            Reduction = [pscustomobject]@{ RecordCount = 10; SignatureCount = 1; Ratio = 10 }
+            Findings = @([pscustomobject]@{
+                Key = 'Acme/99'; Source = 'event'; Channel = 'System'; Provider = 'Acme'; Id = 99
+                Count = 2; PerDay = 0.1; FirstSeen = [datetime]'2026-07-30T10:00:00Z'; LastSeen = [datetime]'2026-07-30T10:01:00Z'
+                Verdict = 'actionable'; Title = 'Something broke'; Plain = 'plain text'
+                Why = 'why text'; Action = 'do this'; RuleId = 'T-1'; Confidence = 'high'
+                Reference = $null; References = @(); SampleMessage = 'raw message'
+            })
+            CoverageNotes = @(); Coverage = @(); HealthProfiles = @(); Correlations = @()
+            Advisories = @(); AdvisoryStatus = 'not-requested'; AdvisoryCache = $null
+            CaseProfile = $null; ProviderExtensions = @(); ProviderProjections = @()
+            CrashArtifacts = @(); Horizon = @{}; HorizonWarning = $null; Stability = $null; SetupDiag = $null
+            DatabaseName = 'test db'; DatabaseDate = '2026-07-31'; RuleCount = 1
+            WorstVerdict = 'actionable'; ExitCode = 2
+        }
+    }
+
+    It 'invokes the console report and advisory-status public adapters directly' {
+        $output = @(& { Show-LogVerdictReport -Result $script:AdapterResult } 6>&1 | ForEach-Object { [string]$_ })
+        ($output -join "`n") | Should -Match 'LogVerdict \d+\.\d+\.\d+ - TESTPC'
+        ($output -join "`n") | Should -Match '\[ACTIONABLE\] Something broke'
+        ($output -join "`n") | Should -Match 'Do this\s+: do this'
+
+        $root = Split-Path $PSScriptRoot -Parent
+        $cache = Get-LogVerdictAdvisoryStatus -Path (Join-Path $root 'Data\advisories.json')
+        $cache.Status | Should -BeIn @('fresh', 'stale')
+        $cache.EntryCount | Should -BeGreaterThan 0
+        $cache.SourceHash | Should -Match '^[0-9a-f]{64}$'
+
+        $missing = Get-LogVerdictAdvisoryStatus -Path (Join-Path $TestDrive 'missing-advisories.json')
+        $missing.Status | Should -BeExactly 'unavailable'
+        $missing.EntryCount | Should -Be 0
+        $missing.Reason | Should -Not -BeNullOrEmpty
+    }
+
+    It 'builds and validates report and evidence contracts without a report export' {
+        InModuleScope LogVerdict -Parameters @{ InputResult = $script:AdapterResult; Drive = $TestDrive } {
+            param($InputResult, $Drive)
+            $result = $InputResult | Select-Object *
+            $result | Add-Member -NotePropertyName Coverage -NotePropertyValue @() -Force
+            $result | Add-Member -NotePropertyName Performance -NotePropertyValue @() -Force
+
+            $reportContract = New-LVReportContract -Result $result -Redacted
+            $reportContract.schemaVersion | Should -Be 1
+            $reportContract.name | Should -BeExactly 'LogVerdict.Report'
+            $reportContract.privacy.redacted | Should -BeTrue
+
+            $report = ConvertTo-LVReportContract -Result $result -Redacted
+            Test-LVReportContract -InputObject $report -Quiet | Should -BeTrue
+
+            $evidencePath = Join-Path $Drive 'contract-evidence.txt'
+            'fixture evidence' | Set-Content -LiteralPath $evidencePath -Encoding UTF8
+            $evidence = New-LVEvidenceContract -Result $result -Content @($evidencePath) `
+                -Omission @('event channels omitted') -Redacted
+            $evidence.Contract.name | Should -BeExactly 'LogVerdict.Evidence'
+            $evidence.Privacy.rawEvidence | Should -BeFalse
+            $evidence.Files[0].name | Should -BeExactly 'contract-evidence.txt'
+            $evidence.Files[0].sha256 | Should -Match '^[0-9a-f]{64}$'
+            @($evidence.Omissions) | Should -Contain 'event channels omitted'
+            Test-LVEvidenceContract -InputObject $evidence -Quiet | Should -BeTrue
+            (ConvertFrom-LVEvidenceContract -InputObject $evidence).Contract.schemaVersion | Should -Be 1
+        }
+    }
+
+    It 'diffs review artifacts by stable id and validates their exchange envelope' {
+        InModuleScope LogVerdict {
+            $previous = [pscustomobject]@{
+                items = @(
+                    [pscustomobject]@{ id = 'UNKNOWN-OLD'; kind = 'unknown'; review = [pscustomobject]@{ status = 'pending' } }
+                    [pscustomobject]@{ id = 'CANDIDATE-REMOVED'; kind = 'candidate'; review = [pscustomobject]@{ status = 'pending' } }
+                )
+            }
+            $current = [pscustomobject]@{
+                items = @(
+                    [pscustomobject]@{ id = 'UNKNOWN-OLD'; kind = 'unknown'; review = [pscustomobject]@{ status = 'accepted' } }
+                    [pscustomobject]@{ id = 'UNKNOWN-ADDED'; kind = 'unknown'; review = [pscustomobject]@{ status = 'pending' } }
+                )
+            }
+            $diff = Get-LVReviewArtifactDiff -Previous $previous -Current $current
+            @($diff.added) | Should -Be @('UNKNOWN-ADDED')
+            @($diff.changed) | Should -Be @('UNKNOWN-OLD')
+            @($diff.removed) | Should -Be @('CANDIDATE-REMOVED')
+            $diff.counts.current | Should -Be 2
+            $diff.counts.reviewed | Should -Be 1
+
+            $artifact = [pscustomobject]@{
+                schemaVersion = 1; name = 'LogVerdict.ReviewArtifact'
+                privacy = [pscustomobject]@{ redacted = $true; rawEvidence = $false }
+                items = @([pscustomobject]@{
+                    id = 'UNKNOWN-OLD'; kind = 'unknown'
+                    review = [pscustomobject]@{ status = 'accepted' }
+                })
+            }
+            Test-LVReviewArtifactObject -Artifact $artifact | Should -BeTrue
+            $artifact.items[0].review.status = 'invalid'
+            { Test-LVReviewArtifactObject -Artifact $artifact } | Should -Throw '*unsupported review status*'
+        }
+    }
+}
+
 Describe 'CI gate wiring' {
     BeforeAll {
         $root = Split-Path $PSScriptRoot -Parent
