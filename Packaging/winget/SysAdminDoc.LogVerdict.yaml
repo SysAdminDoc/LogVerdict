@@ -27,6 +27,6 @@ ReleaseDate: 2026-08-02
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/SysAdminDoc/LogVerdict/releases/download/v0.8.2/LogVerdict.exe
-    InstallerSha256: CF07C16EAA33A498BB46534E247AFEBC4E9407E34FE0421DA33B1EE6A3399885
+    InstallerSha256: EABE953DD1131D9156B8FE9F1AA4A170047C9D21B716A6CA12CE5DCEB7A86DC8
 ManifestType: singleton
 ManifestVersion: 1.12.0
