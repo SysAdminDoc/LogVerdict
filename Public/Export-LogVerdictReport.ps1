@@ -34,6 +34,10 @@ function Export-LogVerdictReport {
         -IncludeEvidence when -Redact is not selected. Raw bundles are never described
         as sanitized and their privacy audit records any sensitive patterns found.
 
+        .PARAMETER ProviderTemplatePath
+        Optional validated provider message-template cache to include in an evidence
+        bundle for offline review. The cache is written as PROVIDER-TEMPLATES.json.
+
         .EXAMPLE
         Invoke-LogVerdictScan | Export-LogVerdictReport
 
@@ -50,7 +54,8 @@ function Export-LogVerdictReport {
         [ValidateSet('Text', 'Json', 'Csv', 'Html', 'Markdown', 'TicketText', 'TicketHtml', 'All')][string[]]$Format = @('All'),
         [switch]$Redact,
         [switch]$IncludeEvidence,
-        [switch]$AllowRawEvidence
+        [switch]$AllowRawEvidence,
+        [string]$ProviderTemplatePath
     )
 
     process {
@@ -154,6 +159,7 @@ function Export-LogVerdictReport {
         if ($IncludeEvidence) {
             $bundle = New-LVEvidenceBundle -Result $Result -OutputDir $OutputDir `
                 -ReportFile @($written.ToArray()) -Redact:$Redact -AllowRawEvidence:$AllowRawEvidence `
+                -ProviderTemplatePath $ProviderTemplatePath `
                 -OriginalMachineName $folderMachine -OriginalUserName $env:USERNAME -Audit ([ref]$privacyAudit)
         }
 

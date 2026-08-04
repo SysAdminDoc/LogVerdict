@@ -100,6 +100,12 @@ function Invoke-LogVerdictScan {
         One or more local provider manifests or provider directories. Providers are
         live-only, explicitly opt-in, and contribute redacted normalized evidence.
 
+        .PARAMETER ProviderTemplatePath
+        Optional operator-supplied provider message-template cache. The cache is
+        validated for bounded size and license provenance; it is never downloaded by
+        the scan. Offline evidence packages can carry the same file as
+        PROVIDER-TEMPLATES.json.
+
         .PARAMETER AllowUntrustedProvider
         Explicitly approve execution of the pinned provider entrypoints named by
         ProviderPath. Providers are always marked untrusted and cannot supply verdicts.
@@ -141,6 +147,7 @@ function Invoke-LogVerdictScan {
         [string]$AdvisoryVersion,
         [string]$CaseProfilePath,
         [string[]]$ProviderPath,
+        [string]$ProviderTemplatePath,
         [switch]$AllowUntrustedProvider,
         [ValidateRange(1, 8589934592)][long]$MaxCollectionBytes = 536870912,
         [ValidateRange(1, 10000000)][int]$MaxCollectionRecords = 100000,
@@ -173,6 +180,7 @@ function Invoke-LogVerdictScan {
             OllamaEndpoint = $OllamaEndpoint
             PromoteToRule  = $PromoteToRule
             LocalRulePath  = $LocalRulePath
+            ProviderTemplatePath = $ProviderTemplatePath
             CollectionBudget = $collectionBudget
         }
         if ($PSBoundParameters.ContainsKey('DaysBack')) { $offlineArgs['DaysBack'] = $DaysBack }
@@ -228,6 +236,7 @@ function Invoke-LogVerdictScan {
     $script:LVReliabilityStatus = 'available'
     $script:LVReliabilitySkipReason = $null
     $script:LVReliabilityBudgetStop = $null
+    Initialize-LVProviderTemplateCache -Path $ProviderTemplatePath | Out-Null
 
     Write-LVLog -Level step -Message ('LogVerdict {0} starting - window {1} day(s)' -f $script:LVVersion, $DaysBack)
     if (-not $elevated) {
@@ -636,10 +645,18 @@ function Invoke-LogVerdictScan {
         $coverageNotes.Add('Crash artifacts were inventoried, but none contained supported readable header metadata. They remain available by path and were not interpreted as health.') | Out-Null
     }
 
+    $providerTemplateCoverage = New-LVProviderTemplateCoverageRecord -Cache $script:LVProviderTemplateCoverage.Cache `
+        -LocalMissing $script:LVProviderTemplateCoverage.LocalMissing `
+        -CacheResolved $script:LVProviderTemplateCoverage.CacheResolved `
+        -Origin 'live' -CollectionBudget $collectionBudget
+    if ($providerTemplateCoverage -and $providerTemplateCoverage.Reason) {
+        $coverageNotes.Add([string]$providerTemplateCoverage.Reason) | Out-Null
+    }
     $coverageSources = New-Object System.Collections.Generic.List[object]
     foreach ($entry in @($script:LVEventCoverage) + @($script:LVTextLogCoverage)) {
         if ($entry) { $coverageSources.Add($entry) | Out-Null }
     }
+    if ($providerTemplateCoverage) { $coverageSources.Add($providerTemplateCoverage) | Out-Null }
     foreach ($entry in @($diagnosticEvidence.Coverage | Where-Object { $_ })) {
         $coverageSources.Add($entry) | Out-Null
     }

@@ -678,6 +678,7 @@ function ConvertTo-LVStandardFinding {
         source = $Finding.Source
         channel = $Finding.Channel
         provider = $Finding.Provider
+        providerTemplateSource = if ($Finding.PSObject.Properties['ProviderTemplateSource']) { $Finding.ProviderTemplateSource } else { $null }
         providerId = if ($Finding.PSObject.Properties['ProviderId']) { $Finding.ProviderId } else { $null }
         eventId = $Finding.Id
         eventVersion = if ($Finding.PSObject.Properties['Version']) { $Finding.Version } else { $null }

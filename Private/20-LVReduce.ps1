@@ -148,6 +148,7 @@ function Get-LVSignatureReduction {
                 Operations    = New-Object 'System.Collections.Generic.HashSet[string]'
                 ProviderLocales = New-Object 'System.Collections.Generic.HashSet[string]'
                 FallbackMessages = New-Object 'System.Collections.Generic.HashSet[string]'
+                ProviderTemplateSources = New-Object 'System.Collections.Generic.HashSet[string]'
                 # Every occurrence time, capped. FirstSeen and LastSeen describe the span
                 # but say nothing about what happened INSIDE it, and correlation is
                 # entirely a question about the inside: two signatures whose spans overlap
@@ -180,6 +181,9 @@ function Get-LVSignatureReduction {
         )) {
             $value = ConvertTo-LVErrorContextText $item.Context.($field.Context)
             if ($value) { [void]$b.($field.Bucket).Add($value) }
+        }
+        if ($r.PSObject.Properties['ProviderTemplateSource'] -and $r.ProviderTemplateSource) {
+            [void]$b.ProviderTemplateSources.Add([string]$r.ProviderTemplateSource)
         }
 
         # Undated records carry a null time (text-log lines with no parseable
@@ -234,12 +238,14 @@ function Get-LVSignatureReduction {
         $operations = @($b.Operations | Sort-Object)
         $providerLocales = @($b.ProviderLocales | Sort-Object)
         $fallbackMessages = @($b.FallbackMessages | Sort-Object)
+        $providerTemplateSources = @($b.ProviderTemplateSources | Sort-Object)
         $resultCode = if ($resultCodes.Count -gt 0) { $resultCodes[0] } else { $null }
         $extendCode = if ($extendCodes.Count -gt 0) { $extendCodes[0] } else { $null }
         $phase = if ($phases.Count -gt 0) { $phases[0] } else { $null }
         $operation = if ($operations.Count -gt 0) { $operations[0] } else { $null }
         $providerLocale = if ($providerLocales.Count -gt 0) { $providerLocales[0] } else { $null }
         $fallbackMessage = if ($fallbackMessages.Count -gt 0) { $fallbackMessages[0] } else { $null }
+        $providerTemplateSource = if ($providerTemplateSources.Count -gt 0) { $providerTemplateSources[0] } else { $null }
         $b | Add-Member -NotePropertyName 'ResultCodes' -NotePropertyValue $resultCodes -Force
         $b | Add-Member -NotePropertyName 'ExtendCodes' -NotePropertyValue $extendCodes -Force
         $b | Add-Member -NotePropertyName 'Phases' -NotePropertyValue $phases -Force
@@ -252,9 +258,11 @@ function Get-LVSignatureReduction {
         $b | Add-Member -NotePropertyName 'Operation' -NotePropertyValue $operation -Force
         $b | Add-Member -NotePropertyName 'ProviderLocale' -NotePropertyValue $providerLocale -Force
         $b | Add-Member -NotePropertyName 'FallbackMessage' -NotePropertyValue $fallbackMessage -Force
+        $b | Add-Member -NotePropertyName 'ProviderTemplateSources' -NotePropertyValue $providerTemplateSources -Force
+        $b | Add-Member -NotePropertyName 'ProviderTemplateSource' -NotePropertyValue $providerTemplateSource -Force
         $b | Add-Member -NotePropertyName 'ErrorContext' -NotePropertyValue ([pscustomobject][ordered]@{
             ResultCodes=$resultCodes; ExtendCodes=$extendCodes; Phases=$phases; Operations=$operations
-            ProviderLocales=$providerLocales; FallbackMessages=$fallbackMessages
+            ProviderLocales=$providerLocales; FallbackMessages=$fallbackMessages; ProviderTemplateSources=$providerTemplateSources
         }) -Force
         # Sorted once here rather than by every consumer. The correlator's sliding window
         # is only correct over an ordered sequence, and records do not arrive in time

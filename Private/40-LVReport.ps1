@@ -674,6 +674,7 @@ function ConvertTo-LVFlatFindingRow {
             Operation         = $finding.Operation
             ProviderLocale    = $finding.ProviderLocale
             FallbackMessage   = $finding.FallbackMessage
+            ProviderTemplateSource = if ($finding.PSObject.Properties['ProviderTemplateSource']) { $finding.ProviderTemplateSource } else { $null }
             ErrorCode         = $finding.ErrorCode
             ErrorCatalogKind  = $finding.ErrorCatalogKind
             ErrorName         = $finding.ErrorName

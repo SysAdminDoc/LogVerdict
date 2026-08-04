@@ -165,6 +165,28 @@ LogVerdict.exe -AdvisoryPackage PowerShell -AdvisoryVersion 7.4.0  match the shi
 
 `-IncludeEvidence` writes a zip beside the report holding the reports, the matching text-log lines and, only with the explicit `-AllowRawEvidence` override, the scanned event channels as `.evtx`. Raw bundles are forensic artifacts and are never described as sanitized. `-Redact` runs a deterministic audit over the staged text, records hashed findings and substitution counts in `PRIVACY-AUDIT.json`, and refuses to create the zip if a known secret, SID, account/path identifier, or script-block marker remains. Combined with `-Redact` the channel exports are deliberately left out - `.evtx` is binary and carries the identifiers redaction removes from the text, and the manifest says so, so a withheld channel is never mistaken for a clean one. Redacted attachments are held below the 4.5 MB pre-base64 ceiling and fail closed if that cannot be achieved.
 
+Provider message templates can be supplied when Windows cannot render an event because
+the provider's message resource is not installed. The normal scan stays offline and
+does not download a corpus. Import a normalized JSON or NDJSON projection from a
+licensed source such as the Apache-2.0 [libyal/winevt-kb](https://github.com/libyal/winevt-kb) project, pin the source
+revision, and keep the generated cache on the operator's machine:
+
+```powershell
+.\Tools\Import-LogVerdictProviderTemplates.ps1 `
+    -InputPath .\provider-templates.ndjson `
+    -OutputPath "$env:LOCALAPPDATA\LogVerdict\provider-templates.json" `
+    -SourceName libyal/winevt-kb -License Apache-2.0 -SourceRevision 20260413
+
+Invoke-LogVerdictScan -ProviderTemplatePath "$env:LOCALAPPDATA\LogVerdict\provider-templates.json"
+```
+
+The cache records source license, revision, hash, locale, provider identity, event
+version, and bounded template text. A recovered message is marked with its cache source,
+while coverage still reports that the local provider resource was absent. Pass the same
+cache to `Export-LogVerdictReport -IncludeEvidence -Redact` (or use
+`-AllowRawEvidence` for an explicitly raw bundle) and an offline reviewer will consume
+the carried `PROVIDER-TEMPLATES.json` without querying the reviewing machine.
+
 `-Redact` masks the account name, machine name, profile paths, SIDs and mail addresses in the returned result as well as in captured log messages before they are written. Redaction is deny-by-default: an unrecognised top-level result field refuses publication instead of being copied through silently. When combined with `-ExplainUnknown` or `-PromoteToRule`, the scan also masks the prompt-specific finding copy before it crosses the loopback Ollama boundary. Use it when the report is going to a ticket or a vendor - the default result keeps everything, because locally that is the evidence. The GUI's **Redact reports and clipboard** toggle applies the same masking to copied findings, and its status line states whether the copied payload is redacted. The reports say when they were redacted, and say that an identifier Windows wrote in a form this tool does not recognize may still be in there: read before sending.
 
 `-Format Markdown` writes `LogVerdict-Ticket-Summary.md`, `.txt`, and `.html`: one bounded projection leading with the worst verdict, both suppression ratios, the top ten incidents needing attention, the tool/rule-database provenance, unambiguous UTC timestamps, and coverage caveats. The HTML body uses inline styles only and no media queries. The Findings page has **Copy summary for ticket**, which uses the same Markdown projection; its redaction state follows the **Redact reports and clipboard** toggle. `-Intune` is the unattended entry-point mode: it emits a non-empty UTF-8/no-BOM digest under 2,048 characters and exits 1 for any non-benign verdict, otherwise 0.

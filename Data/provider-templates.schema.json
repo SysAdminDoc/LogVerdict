@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://logverdict.dev/schema/provider-templates.v1.json",
+  "title": "LogVerdict provider message-template cache",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name", "source", "generatedAt", "templates"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "name": { "const": "LogVerdict.ProviderTemplates" },
+    "generatedAt": { "type": "string", "format": "date-time", "maxLength": 64 },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "license", "revision"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "license": { "enum": ["Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "CC-BY-4.0", "MIT"] },
+        "uri": { "type": ["string", "null"], "pattern": "^https://", "maxLength": 2048 },
+        "revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "contentSha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }
+      }
+    },
+    "templates": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider", "eventId", "locale", "template"],
+        "properties": {
+          "provider": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "providerId": { "type": ["string", "null"], "maxLength": 128 },
+          "eventId": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "version": { "type": ["integer", "null"], "minimum": 0, "maximum": 65535 },
+          "locale": { "type": "string", "minLength": 1, "maxLength": 32 },
+          "template": { "type": "string", "minLength": 1, "maxLength": 32768 }
+        }
+      }
+    }
+  }
+}

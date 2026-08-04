@@ -268,6 +268,7 @@ function New-LVEvidenceBundle {
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ReportFile,
         [switch]$Redact,
         [switch]$AllowRawEvidence,
+        [AllowNull()][string]$ProviderTemplatePath,
         [AllowNull()][string]$OriginalMachineName,
         [AllowNull()][string]$OriginalUserName,
         [AllowNull()][ref]$Audit
@@ -291,6 +292,16 @@ function New-LVEvidenceBundle {
         $target = Join-Path $staging (Split-Path -Leaf $r)
         Copy-Item -LiteralPath $r -Destination $target -Force
         $content.Add($target) | Out-Null
+    }
+
+    if ($ProviderTemplatePath) {
+        if (Test-Path -LiteralPath $ProviderTemplatePath -PathType Leaf) {
+            $templateTarget = Join-Path $staging 'PROVIDER-TEMPLATES.json'
+            Copy-Item -LiteralPath $ProviderTemplatePath -Destination $templateTarget -Force
+            $content.Add($templateTarget) | Out-Null
+        } else {
+            $omission.Add(('Provider template export was not found at {0}.' -f $ProviderTemplatePath)) | Out-Null
+        }
     }
 
     if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {

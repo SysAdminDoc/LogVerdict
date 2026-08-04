@@ -2773,6 +2773,143 @@ Describe 'Crash artifact header decoding' {
     }
 }
 
+Describe 'Provider message-template cache' {
+    It 'imports a bounded export into the reader-compatible cache contract' {
+        $inputPath = Join-Path $TestDrive 'provider-templates-input.json'
+        $outputPath = Join-Path $TestDrive 'nested\provider-templates.json'
+        [pscustomobject]@{
+            source = [pscustomobject]@{ name = 'import fixture'; license = 'MIT'; revision = 'fixture-1'; uri = 'https://example.test/provider-templates' }
+            templates = @([pscustomobject]@{ provider = 'Imported'; eventId = 19; locale = 'en-US'; message = 'Imported event %1' })
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $inputPath -Encoding UTF8
+        $tool = Join-Path (Split-Path $PSScriptRoot -Parent) 'Tools\Import-LogVerdictProviderTemplates.ps1'
+        $summary = & $tool -InputPath $inputPath -OutputPath $outputPath -SourceName 'import fixture' -License 'MIT' -SourceRevision 'fixture-2'
+        $summary.Action | Should -BeExactly 'import'
+        $summary.EntryCount | Should -Be 1
+        Test-Path -LiteralPath $outputPath -PathType Leaf | Should -BeTrue
+        $schemaPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'Data\provider-templates.schema.json'
+        if (Get-Command Test-Json -ErrorAction SilentlyContinue) {
+            (Test-Json -LiteralPath $outputPath -SchemaFile $schemaPath -ErrorAction Stop) | Should -BeTrue
+        }
+        InModuleScope LogVerdict -Parameters @{ path = $outputPath } {
+            param($path)
+            $cache = Read-LVProviderTemplateCache -Path $path
+            $cache.Source.License | Should -BeExactly 'MIT'
+            $cache.Source.Revision | Should -BeExactly 'fixture-2'
+            $cache.Templates[0].Template | Should -BeExactly 'Imported event %1'
+        }
+    }
+
+    It 'resolves missing live provider prose from the licensed cache and records coverage' {
+        $cachePath = Join-Path $TestDrive 'provider-templates.json'
+        [pscustomobject]@{
+            schemaVersion = 1
+            name = 'LogVerdict.ProviderTemplates'
+            source = [pscustomobject]@{ name = 'fixture provider resources'; license = 'Apache-2.0'; revision = ('a' * 40); uri = 'https://example.test/templates.json' }
+            generatedAt = '2026-08-04T00:00:00Z'
+            templates = @([pscustomobject]@{ provider = 'Orphaned'; eventId = 7; locale = 'en-US'; template = 'Recovered provider event %1' })
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $cachePath -Encoding UTF8
+        InModuleScope LogVerdict -Parameters @{ path = $cachePath } {
+            param($path)
+            Initialize-LVProviderTemplateCache -Path $path | Should -Not -BeNullOrEmpty
+            Mock Get-WinEvent {
+                [pscustomobject]@{
+                    ProviderName = 'Orphaned'; Id = 7; Version = 1; Level = 2; LevelDisplayName = 'Error'
+                    TimeCreated = (Get-Date); MachineName = 'T'; RecordId = 1; Message = $null; ProviderLocale = 'en-US'
+                    Properties = @([pscustomobject]@{ Value = 'disk-1' })
+                }
+            }
+            $rec = @(Get-LVEventRecord -Channel @('Fake') -DaysBack 30 -MaxPerChannel 10)
+            $rec.Count | Should -Be 1
+            $rec[0].Message | Should -BeExactly 'Recovered provider event disk-1'
+            $rec[0].ProviderTemplateSource | Should -Match 'fixture provider resources.*Apache-2.0'
+            $signature = @(Get-LVSignatureReduction -Record $rec -WindowDays 30).Signatures[0]
+            $signature.ProviderTemplateSource | Should -Match 'fixture provider resources.*Apache-2.0'
+            $script:LVEventCoverage[0].Reason | Should -Match '1 record\(s\) had no provider message template.*1 were resolved'
+            Initialize-LVProviderTemplateCache -Path $null | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'rejects a cache that omits licensing provenance without breaking the collector' {
+        $cachePath = Join-Path $TestDrive 'provider-templates-no-license.json'
+        [pscustomobject]@{
+            schemaVersion = 1
+            name = 'LogVerdict.ProviderTemplates'
+            source = [pscustomobject]@{ name = 'unlicensed fixture'; revision = ('a' * 40) }
+            generatedAt = '2026-08-04T00:00:00Z'
+            templates = @([pscustomobject]@{ provider = 'Orphaned'; eventId = 7; locale = 'en-US'; template = 'unsafe' })
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $cachePath -Encoding UTF8
+        InModuleScope LogVerdict -Parameters @{ path = $cachePath } {
+            param($path)
+            Initialize-LVProviderTemplateCache -Path $path | Should -BeNullOrEmpty
+            $script:LVProviderTemplateCoverage.Cache | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'imports a normalized projection and emits a cache the module accepts' {
+        $inputPath = Join-Path $TestDrive 'provider-templates.ndjson'
+        $outputPath = Join-Path $TestDrive 'imported-provider-templates.json'
+        [pscustomobject]@{
+            source = [pscustomobject]@{ name = 'fixture knowledge base'; license = 'Apache-2.0'; revision = '20260413'; uri = 'https://example.test/kb' }
+            entries = @([pscustomobject]@{ provider = 'Orphaned'; eventId = '0x7'; locale = 'en-US'; template = 'Imported event %1' })
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $inputPath -Encoding UTF8
+
+        $tool = Join-Path (Split-Path $PSScriptRoot -Parent) 'Tools\Import-LogVerdictProviderTemplates.ps1'
+        $import = & $tool -InputPath $inputPath -OutputPath $outputPath
+        $import.Action | Should -BeExactly 'import'
+        $import.EntryCount | Should -Be 1
+        $document = Get-Content -LiteralPath $outputPath -Raw | ConvertFrom-Json
+        $document.name | Should -BeExactly 'LogVerdict.ProviderTemplates'
+        (Get-Content -LiteralPath $outputPath -Raw) | Should -Match '"generatedAt"\s*:\s*"[^"]+Z"'
+        $document.source.license | Should -BeExactly 'Apache-2.0'
+        $document.templates[0].template | Should -BeExactly 'Imported event %1'
+
+        InModuleScope LogVerdict -Parameters @{ path = $outputPath } {
+            param($path)
+            $cache = Initialize-LVProviderTemplateCache -Path $path
+            $cache.Source.Revision | Should -BeExactly '20260413'
+            (Resolve-LVProviderTemplate -Cache $cache -Provider 'Orphaned' -EventId 7 -Version 1 -Locale 'en-US').Template |
+                Should -BeExactly 'Imported event %1'
+        }
+    }
+
+    It 're-evaluates report-only event signatures with the carried template cache' {
+        $root = Join-Path $TestDrive 'provider-offline'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $reportPath = Join-Path $root 'LogVerdict-Report.json'
+        $cachePath = Join-Path $root 'PROVIDER-TEMPLATES.json'
+        [ordered]@{
+            Tool = 'LogVerdict'; Version = '0.8.2'; MachineName = 'ARCHIVE-HOST'; DaysBack = 9; Elevated = $true
+            Channels = @('System'); DeniedChannels = @(); CoverageNotes = @(); Coverage = @()
+            Reduction = [ordered]@{ RecordCount = 2; SignatureCount = 1; InitialSignatureCount = 1 }
+            Findings = @([ordered]@{
+                Key = 'Orphaned/7'; Source = 'event'; Channel = 'System'; Provider = 'Orphaned'; ProviderId = $null; Id = 7; Version = 1
+                Count = 2; UndatedCount = 0; FirstSeen = '2026-08-01T09:00:00Z'; LastSeen = '2026-08-01T09:05:00Z'
+                WorstLevel = 2; LevelName = 'Error'; SampleMessage = '(no message template registered for this provider on this machine)'
+                Samples = @('(no message template registered for this provider on this machine)')
+                FallbackMessage = '(no message template registered for this provider on this machine)'; ProviderLocale = 'en-US'
+                Times = @('2026-08-01T09:00:00Z', '2026-08-01T09:05:00Z'); Template = $null; PerDay = 0.2; SpanDays = 0
+            })
+        } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $reportPath -Encoding UTF8
+        [ordered]@{
+            schemaVersion = 1; name = 'LogVerdict.ProviderTemplates'; generatedAt = '2026-08-04T00:00:00Z'
+            source = [ordered]@{ name = 'fixture provider resources'; license = 'Apache-2.0'; revision = 'fixture-1' }
+            templates = @([ordered]@{ provider = 'Orphaned'; eventId = 7; locale = 'en-US'; message = 'Recovered offline event' })
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $cachePath -Encoding UTF8
+
+        InModuleScope LogVerdict -Parameters @{ report = $reportPath } {
+            param($report)
+            $result = Invoke-LVOfflineScan -EvidencePath $report `
+                -SkipTextLogs -SkipReliability -IncludeBenign -IncludeLowConfidence
+            $result.Reduction.SignatureCount | Should -Be 1
+            $result.Findings[0].SampleMessage | Should -BeExactly 'Recovered offline event'
+            $result.Findings[0].ProviderTemplateSource | Should -Match 'fixture provider resources.*Apache-2.0'
+            $result.CoverageNotes | Should -Contain '2 record(s) had no provider message template registered locally; local provider metadata was absent. 2 record(s) were restored from the provider-template cache.'
+            @($result.Coverage | Where-Object { $_.Source -eq 'provider-template' -and $_.ObservedRecords -eq 2 }).Count | Should -Be 1
+            Initialize-LVProviderTemplateCache -Path $null | Out-Null
+        }
+    }
+}
+
 Describe 'Event collection failure handling' {
     It 'treats an empty channel as empty, not as an error' {
         InModuleScope LogVerdict {
@@ -2838,7 +2975,10 @@ Describe 'Event collection failure handling' {
     }
 
     It 'substitutes a placeholder when a provider has no message template' {
-        InModuleScope LogVerdict {
+        $missingCache = Join-Path $TestDrive 'provider-template-cache-does-not-exist.json'
+        InModuleScope LogVerdict -Parameters @{ cache = $missingCache } {
+            param($cache)
+            Initialize-LVProviderTemplateCache -Path $cache | Should -BeNullOrEmpty
             Mock Get-WinEvent {
                 [pscustomobject]@{
                     ProviderName = 'Orphaned'; Id = 7; Level = 2; LevelDisplayName = 'Error'

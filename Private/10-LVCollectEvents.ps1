@@ -363,20 +363,39 @@ function Get-LVEventRecord {
         $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
         $observedThisChannel = 0
         $metadataMissing = 0
+        $templateRecovered = 0
 
         foreach ($e in $events) {
             if ($budgetStop) { break }
             $message = $e.Message
             $fallbackMessage = $null
+            $providerTemplateSource = $null
+            $providerLocale = if ($e.PSObject.Properties['ProviderLocale']) { [string]$e.ProviderLocale } elseif ($e.PSObject.Properties['Locale']) { [string]$e.Locale } else { [string]$script:LVUICulture }
             if ([string]::IsNullOrWhiteSpace($message)) {
-                # Provider metadata missing (uninstalled software, or an offline copy).
-                # Keep the record - the signature is still valid, the prose just is not.
-                $message = '(no message template registered for this provider on this machine)'
-                $fallbackMessage = $message
                 $metadataMissing++
+                $template = $null
+                $providerVersion = if ($e.PSObject.Properties['Version'] -and $null -ne $e.Version) { [int]$e.Version } else { $null }
+                if ($null -ne $e.Id) {
+                    $template = Resolve-LVProviderTemplate -Cache $script:LVProviderTemplateCoverage.Cache `
+                        -Provider ([string]$e.ProviderName) `
+                        -ProviderId $(if ($e.PSObject.Properties['ProviderId']) { [string]$e.ProviderId } else { $null }) `
+                        -EventId ([int]$e.Id) -Version $providerVersion -Locale $providerLocale
+                }
+                if ($template) {
+                    $message = ConvertTo-LVProviderTemplateMessage -Template ([string]$template.Template) -EventObject $e
+                    $fallbackMessage = $script:LVProviderTemplateMissingMessage
+                    $providerTemplateSource = '{0} [{1}]' -f $script:LVProviderTemplateCoverage.Cache.Source.Name, $script:LVProviderTemplateCoverage.Cache.Source.License
+                    $templateRecovered++
+                    $script:LVProviderTemplateCoverage.CacheResolved++
+                } else {
+                    # Provider metadata missing (uninstalled software, or an offline copy).
+                    # Keep the record - the signature is still valid, the prose just is not.
+                    $message = '(no message template registered for this provider on this machine)'
+                    $fallbackMessage = $message
+                }
+                $script:LVProviderTemplateCoverage.LocalMissing++
             }
 
-            $providerLocale = if ($e.PSObject.Properties['ProviderLocale']) { [string]$e.ProviderLocale } elseif ($e.PSObject.Properties['Locale']) { [string]$e.Locale } else { [string]$script:LVUICulture }
             $errorContext = New-LVErrorContext -InputObject $e -Message ([string]$message) -FallbackMessage $fallbackMessage -ProviderLocale $providerLocale
             $structuredData = Get-LVEventStructuredData -EventObject $e
 
@@ -410,6 +429,7 @@ function Get-LVEventRecord {
                 Operation    = $errorContext.Operation
                 ProviderLocale = $errorContext.ProviderLocale
                 FallbackMessage = $errorContext.FallbackMessage
+                ProviderTemplateSource = $providerTemplateSource
                 ErrorContext = $errorContext
             }) | Out-Null
             if ($CollectionBudget) { Add-LVCollectionBudgetUsage -Budget $CollectionBudget -Bytes $estimatedBytes -Records 1 }
@@ -474,13 +494,25 @@ function Get-LVEventRecord {
         if ($budgetStop) { $isTruncated = $true; $truncated.Add($ch) | Out-Null }
         $coverageStatus = if ($budgetStop) { $budgetStop } elseif ($isTruncated) { 'truncated' } elseif ($observedThisChannel -eq 0) { 'empty' } else { 'readable' }
         $coverageReason = if ($budgetStop) {
-            ('The shared collection {0} budget stopped this channel; observed records are a lower bound.' -f $budgetStop)
+            $reason = ('The shared collection {0} budget stopped this channel; observed records are a lower bound.' -f $budgetStop)
+            if ($metadataMissing -gt 0) {
+                $reason += if ($script:LVProviderTemplateCoverage.Cache) {
+                    (' {0} record(s) lacked a local provider template; {1} were resolved from the supplied cache.' -f $metadataMissing, $templateRecovered)
+                } else {
+                    (' {0} record(s) had no provider message template on this machine.' -f $metadataMissing)
+                }
+            }
+            $reason
         } elseif ($isTruncated) {
             ('The per-channel record cap of {0} was reached; observed records are a lower bound.' -f $MaxPerChannel)
         } elseif ($observedThisChannel -eq 0) {
             'No matching error or warning event was observed in the requested window.'
         } elseif ($metadataMissing -gt 0) {
-            ('{0} record(s) had no provider message template on this machine.' -f $metadataMissing)
+            if ($script:LVProviderTemplateCoverage.Cache) {
+                ('{0} record(s) had no provider message template on this machine; {1} were resolved from the supplied cache.' -f $metadataMissing, $templateRecovered)
+            } else {
+                ('{0} record(s) had no provider message template on this machine.' -f $metadataMissing)
+            }
         } else { $null }
         $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status $coverageStatus `
             -Reason $coverageReason -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel `

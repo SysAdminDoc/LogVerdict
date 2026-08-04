@@ -6,6 +6,13 @@
 # captured signatures preserve text-log and Reliability Monitor evidence, because the
 # bundle intentionally carries excerpts rather than multi-hundred-megabyte source logs.
 
+function Find-LVProviderTemplateExport {
+    param([Parameter(Mandatory)][string]$Root)
+    $found = @(Get-ChildItem -LiteralPath $Root -Recurse -File -Filter 'PROVIDER-TEMPLATES.json' -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($found.Count -eq 1) { return $found[0].FullName }
+    return $null
+}
+
 function Expand-LVEvidencePackage {
     <#
         .SYNOPSIS
@@ -26,6 +33,7 @@ function Expand-LVEvidencePackage {
             Temporary  = $false
             ReportOnly = $false
             EventPath  = $null
+            ProviderTemplatePath = Find-LVProviderTemplateExport -Root ([IO.Path]::GetFullPath($resolved))
         }
     }
 
@@ -36,6 +44,7 @@ function Expand-LVEvidencePackage {
             Temporary  = $false
             ReportOnly = $false
             EventPath  = $resolved
+            ProviderTemplatePath = Find-LVProviderTemplateExport -Root (Split-Path -Parent $resolved)
         }
     }
 
@@ -46,6 +55,7 @@ function Expand-LVEvidencePackage {
             Temporary  = $false
             ReportOnly = $true
             EventPath  = $null
+            ProviderTemplatePath = Find-LVProviderTemplateExport -Root (Split-Path -Parent $resolved)
         }
     }
 
@@ -82,6 +92,7 @@ function Expand-LVEvidencePackage {
             if ([string]::IsNullOrWhiteSpace($entry.Name)) { continue }
             $keep = ($entry.Name -eq 'LogVerdict-Report.json' -or
                 $entry.Name -eq 'MANIFEST.txt' -or
+                $entry.Name -eq 'PROVIDER-TEMPLATES.json' -or
                 [IO.Path]::GetExtension($entry.Name) -eq '.evtx')
             if (-not $keep) { continue }
             if (Test-Path -LiteralPath $destination) {
@@ -133,6 +144,7 @@ function Expand-LVEvidencePackage {
         Temporary  = $true
         ReportOnly = $false
         EventPath  = $null
+        ProviderTemplatePath = Find-LVProviderTemplateExport -Root $workspace
     }
 }
 
@@ -193,7 +205,9 @@ function ConvertFrom-LVArchivedSignature {
         Source        = [string]$Finding.Source
         Channel       = [string]$Finding.Channel
         Provider      = [string]$Finding.Provider
+        ProviderId    = if ($Finding.PSObject.Properties['ProviderId']) { [string]$Finding.ProviderId } else { $null }
         Id            = [int]$Finding.Id
+        Version       = if ($Finding.PSObject.Properties['Version'] -and $null -ne $Finding.Version) { [int]$Finding.Version } else { $null }
         Template      = $Finding.Template
         TemplateTokenCount = $(if ($Finding.PSObject.Properties['TemplateTokenCount']) { [int]$Finding.TemplateTokenCount } else { 0 })
         PromotedSlots = $(if ($Finding.PSObject.Properties['PromotedSlots']) { @($Finding.PromotedSlots) } else { @() })
@@ -212,12 +226,41 @@ function ConvertFrom-LVArchivedSignature {
         Operation     = if ($Finding.PSObject.Properties['Operation']) { $Finding.Operation } else { $null }
         ProviderLocale = if ($Finding.PSObject.Properties['ProviderLocale']) { $Finding.ProviderLocale } else { $null }
         FallbackMessage = if ($Finding.PSObject.Properties['FallbackMessage']) { $Finding.FallbackMessage } else { $null }
+        ProviderTemplateSource = if ($Finding.PSObject.Properties['ProviderTemplateSource']) { [string]$Finding.ProviderTemplateSource } else { $null }
         ErrorContext  = if ($Finding.PSObject.Properties['ErrorContext']) { $Finding.ErrorContext } else { $null }
         Times         = @($times.ToArray() | Sort-Object)
         Area          = $Finding.Area
         PerDay        = [double]$Finding.PerDay
         SpanDays      = [double]$Finding.SpanDays
     }
+}
+
+function Resolve-LVArchivedProviderTemplate {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Signature)
+
+    if ($Signature.Source -ne 'event') { return $false }
+    $sample = if ($Signature.PSObject.Properties['SampleMessage']) { [string]$Signature.SampleMessage } else { $null }
+    $fallback = if ($Signature.PSObject.Properties['FallbackMessage']) { [string]$Signature.FallbackMessage } else { $null }
+    if (-not (Test-LVProviderTemplateMissingMessage -Message $sample) -and
+        -not (Test-LVProviderTemplateMissingMessage -Message $fallback)) { return $false }
+
+    $missingCount = [Math]::Max([int64]1, [int64]$Signature.Count)
+    $script:LVProviderTemplateCoverage.LocalMissing += $missingCount
+    if ($null -eq $script:LVProviderTemplateCoverage.Cache) { return $false }
+
+    $template = Resolve-LVProviderTemplate -Cache $script:LVProviderTemplateCoverage.Cache `
+        -Provider ([string]$Signature.Provider) -ProviderId ([string]$Signature.ProviderId) `
+        -EventId ([int]$Signature.Id) -Version $Signature.Version -Locale ([string]$Signature.ProviderLocale)
+    if ($null -eq $template) { return $false }
+
+    $message = ConvertTo-LVProviderTemplateMessage -Template ([string]$template.Template) -EventObject $null
+    $Signature.SampleMessage = $message
+    $Signature.Samples = @($message)
+    $Signature.FallbackMessage = $script:LVProviderTemplateMissingMessage
+    $Signature.ProviderTemplateSource = '{0} [{1}]' -f $script:LVProviderTemplateCoverage.Cache.Source.Name, $script:LVProviderTemplateCoverage.Cache.Source.License
+    $script:LVProviderTemplateCoverage.CacheResolved += $missingCount
+    return $true
 }
 
 function Get-LVEvtxSha256 {
@@ -446,20 +489,42 @@ function Read-LVArchivedEventFile {
     }
 
     $records = New-Object System.Collections.Generic.List[object]
+    $metadataMissing = 0
+    $templateRecovered = 0
     foreach ($eventRecord in $events) {
         $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
         if ($budgetStop) { break }
         $message = $null
         try { $message = $eventRecord.Message } catch { $message = $null }
         $fallbackMessage = $null
+        $providerTemplateSource = $null
+        $providerLocale = if ($eventRecord.PSObject.Properties['ProviderLocale']) { [string]$eventRecord.ProviderLocale } elseif ($eventRecord.PSObject.Properties['Locale']) { [string]$eventRecord.Locale } else { [string]$script:LVUICulture }
         if ([string]::IsNullOrWhiteSpace([string]$message)) {
-            $message = '(no message template registered for this provider on this machine)'
-            $fallbackMessage = $message
+            $metadataMissing++
+            $template = $null
+            $providerVersion = if ($eventRecord.PSObject.Properties['Version'] -and $null -ne $eventRecord.Version) { [int]$eventRecord.Version } else { $null }
+            if ($null -ne $eventRecord.Id) {
+                $template = Resolve-LVProviderTemplate -Cache $script:LVProviderTemplateCoverage.Cache `
+                    -Provider ([string]$eventRecord.ProviderName) `
+                    -ProviderId $(if ($eventRecord.PSObject.Properties['ProviderId']) { [string]$eventRecord.ProviderId } else { $null }) `
+                    -EventId ([int]$eventRecord.Id) -Version $providerVersion -Locale $providerLocale
+            }
+            if ($template) {
+                $message = ConvertTo-LVProviderTemplateMessage -Template ([string]$template.Template) -EventObject $eventRecord
+                $fallbackMessage = $script:LVProviderTemplateMissingMessage
+                $providerTemplateSource = '{0} [{1}]' -f $script:LVProviderTemplateCoverage.Cache.Source.Name, $script:LVProviderTemplateCoverage.Cache.Source.License
+                $templateRecovered++
+                $script:LVProviderTemplateCoverage.CacheResolved++
+            } else {
+                $message = '(no message template registered for this provider on this machine)'
+                $fallbackMessage = $message
+            }
+            $script:LVProviderTemplateCoverage.LocalMissing++
         }
         $recordChannel = $channel
         if ($eventRecord.LogName) { $recordChannel = [string]$eventRecord.LogName }
         $errorContext = New-LVErrorContext -InputObject $eventRecord -Message ([string]$message) `
-            -FallbackMessage $fallbackMessage
+            -FallbackMessage $fallbackMessage -ProviderLocale $providerLocale
         $structuredData = Get-LVEventStructuredData -EventObject $eventRecord
         $estimatedBytes = 256
         if ($message) { $estimatedBytes += [Text.Encoding]::UTF8.GetByteCount([string]$message) }
@@ -486,6 +551,7 @@ function Read-LVArchivedEventFile {
             Operation   = $errorContext.Operation
             ProviderLocale = $errorContext.ProviderLocale
             FallbackMessage = $errorContext.FallbackMessage
+            ProviderTemplateSource = $providerTemplateSource
             ErrorContext = $errorContext
         }) | Out-Null
         if ($CollectionBudget) { Add-LVCollectionBudgetUsage -Budget $CollectionBudget -Bytes $estimatedBytes -Records 1 }
@@ -497,6 +563,8 @@ function Read-LVArchivedEventFile {
         Channel   = $channel
         Oldest    = $oldest
         Records   = @($records.ToArray())
+        MetadataMissing = $metadataMissing
+        TemplateRecovered = $templateRecovered
         Truncated = (($events.Count -ge $MaxEvents) -or ($budgetStop -eq 'truncated'))
         BudgetStop = $budgetStop
         Error     = $null
@@ -532,6 +600,7 @@ function Invoke-LVOfflineScan {
         [string]$OllamaEndpoint = 'http://127.0.0.1:11434',
         [switch]$PromoteToRule,
         [string]$LocalRulePath,
+        [string]$ProviderTemplatePath,
         [AllowNull()]$CollectionBudget
     )
 
@@ -553,6 +622,8 @@ function Invoke-LVOfflineScan {
     $package = $null
     try {
         $package = Expand-LVEvidencePackage -Path $EvidencePath
+        $cachePath = if ($ProviderTemplatePath) { $ProviderTemplatePath } elseif ($package.ProviderTemplatePath) { [string]$package.ProviderTemplatePath } else { $null }
+        Initialize-LVProviderTemplateCache -Path $cachePath | Out-Null
         $reportPath = $package.ReportPath
         if (-not $reportPath) {
             $found = @(Get-ChildItem -LiteralPath $package.Root -Recurse -File -Filter 'LogVerdict-Report.json')
@@ -647,6 +718,14 @@ function Invoke-LVOfflineScan {
             & $recordPerformance -Source 'offline-evtx' -Kind 'parser' -Name 'archived event channel' `
                 -Status $(if (@($data.Records).Count -eq 0) { 'empty' } else { 'readable' }) -ObservedRecords @($data.Records).Count -SkippedRecords 0 `
                 -Cap $MaxPerChannel -ElapsedMilliseconds $data.ParseMilliseconds -Origin 'offline'
+            $templateReason = if ([int]$data.MetadataMissing -gt 0 -and $script:LVProviderTemplateCoverage.Cache) {
+                ('{0} record(s) had no local provider message template; {1} were resolved from the supplied cache.' -f [int]$data.MetadataMissing, [int]$data.TemplateRecovered)
+            } elseif ([int]$data.MetadataMissing -gt 0) {
+                ('{0} record(s) had no local provider message template on this machine.' -f [int]$data.MetadataMissing)
+            } else { $null }
+            if ($templateReason) {
+                $manifestEntry.Reason = if ($manifestEntry.Reason) { '{0} {1}' -f $manifestEntry.Reason, $templateReason } else { $templateReason }
+            }
             $parsedChannels.Add($data.Channel) | Out-Null
             $channelStatus[$data.Channel] = [pscustomobject]@{ Channel=$data.Channel; Access='readable'; Oldest=$data.Oldest; Origin='evidence' }
             foreach ($record in @($data.Records)) { $records.Add($record) | Out-Null }
@@ -689,6 +768,7 @@ function Invoke-LVOfflineScan {
                 # The report fills sources the bundle cannot carry raw (text logs and
                 # Reliability), channels omitted by the export cap, and redacted bundles.
                 if ($archived.Source -eq 'event' -and $parsedChannels -contains $archived.Channel) { continue }
+                Resolve-LVArchivedProviderTemplate -Signature $archived | Out-Null
                 $signatureByKey[$archived.Key] = $archived
                 $archivedRecordCount += [long]$archived.Count
                 if ($archived.Source -eq 'event' -and -not $channelStatus.ContainsKey($archived.Channel)) {
@@ -789,9 +869,16 @@ function Invoke-LVOfflineScan {
         $incidentReduction = Get-LVIncidentReduction -Finding @($findings)
         $incidents = @($incidentReduction.Incidents)
 
+        $providerTemplateCoverage = New-LVProviderTemplateCoverageRecord -Cache $script:LVProviderTemplateCoverage.Cache `
+            -LocalMissing $script:LVProviderTemplateCoverage.LocalMissing `
+            -CacheResolved $script:LVProviderTemplateCoverage.CacheResolved `
+            -Origin 'offline' -CollectionBudget $CollectionBudget
         $coverageNotes = New-Object System.Collections.Generic.List[string]
         $coverageNotes.Add('This is offline analysis. No event channel, text log, Reliability Monitor provider, or crash directory on the reviewing PC was queried.') | Out-Null
         foreach ($note in @($sourceReport.CoverageNotes | Where-Object { $_ })) { $coverageNotes.Add([string]$note) | Out-Null }
+        if ($providerTemplateCoverage -and $providerTemplateCoverage.Reason) {
+            $coverageNotes.Add([string]$providerTemplateCoverage.Reason) | Out-Null
+        }
         if ($evtxDiscovery.More) {
             $coverageNotes.Add(('The offline EVTX file-count cap of {0} was reached; additional files were not enumerated.' -f $MaxEvtxFiles)) | Out-Null
         }
@@ -895,6 +982,7 @@ function Invoke-LVOfflineScan {
                 $coverageSources.Add($normalized) | Out-Null
             }
         }
+        if ($providerTemplateCoverage) { $coverageSources.Add($providerTemplateCoverage) | Out-Null }
 
         $healthProfiles = @()
         if ($sourceReport -and $sourceReport.PSObject.Properties['HealthProfiles']) {
