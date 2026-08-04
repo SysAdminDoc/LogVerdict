@@ -1232,6 +1232,19 @@ Describe 'Channel access classification' {
         }
     }
 
+    It 'does not read records from a channel whose logging is disabled' {
+        InModuleScope LogVerdict {
+            Mock Get-WinEvent { [pscustomobject]@{ LogName='Fake'; IsEnabled=$false } } -ParameterFilter { $ListLog -eq 'Fake' }
+            Mock Get-WinEvent { throw 'disabled channels must not be read' } -ParameterFilter { $LogName -eq 'Fake' }
+
+            $status = Get-LVChannelStatus -Channel @('Fake')
+            $status['Fake'].Access | Should -BeExactly 'readable'
+            $status['Fake'].IsEnabled | Should -BeFalse
+            $status['Fake'].Reason | Should -Match 'disabled'
+            Assert-MockCalled Get-WinEvent -Times 0 -ParameterFilter { $LogName -eq 'Fake' }
+        }
+    }
+
     It 'always probes the restricted channels so they cannot vanish from a sweep' {
         InModuleScope LogVerdict {
             # Get-WinEvent -ListLog omits channels it cannot stat, so unelevated
@@ -2081,6 +2094,18 @@ Describe 'Event collection failure handling' {
             $script:LVDeniedChannel.Count | Should -Be 0
             $script:LVEventCoverage[0].Status | Should -BeExactly 'empty'
             $script:LVEventCoverage[0].Reason | Should -Match 'No matching'
+        }
+    }
+
+    It 'reports a channel with logging disabled as disabled rather than empty' {
+        InModuleScope LogVerdict {
+            Mock Get-WinEvent { throw 'disabled channels must not be read' }
+            $status = @{ Fake = [pscustomobject]@{ Access='readable'; IsEnabled=$false; Reason=$null } }
+            $rec = @(Get-LVEventRecord -Channel @('Fake') -DaysBack 30 -ChannelStatus $status)
+            $rec.Count | Should -Be 0
+            Assert-MockCalled Get-WinEvent -Times 0
+            $script:LVEventCoverage[0].Status | Should -BeExactly 'disabled'
+            $script:LVEventCoverage[0].Reason | Should -Match 'disabled'
         }
     }
 
@@ -3234,6 +3259,22 @@ Describe 'Report rendering' {
                 ObservedRecords=0; SkippedRecords=0; RecordGap=$null; ParserError=$null
                 SizeBytes=$null; ParseMilliseconds=12; SHA256=$null; Origin='live'
             })
+            $result.Coverage = @($result.Coverage) + @(
+                [pscustomobject]@{
+                    Source='reliability'; Kind='provider'; Name='Reliability Monitor'; Status='policy-disabled'
+                    Reason='Configure Reliability WMI Providers is disabled'; Path=$null
+                    WindowStart=(Get-Date).AddDays(-1); WindowEnd=(Get-Date); Cap=$null
+                    ObservedRecords=0; SkippedRecords=0; RecordGap=$null; ParserError=$null
+                    SizeBytes=$null; ParseMilliseconds=4; SHA256=$null; Origin='live'
+                },
+                [pscustomobject]@{
+                    Source='reliability'; Kind='provider'; Name='Reliability Monitor'; Status='provider-absent'
+                    Reason='ReliabilityMetricsProvider is not registered'; Path=$null
+                    WindowStart=(Get-Date).AddDays(-1); WindowEnd=(Get-Date); Cap=$null
+                    ObservedRecords=0; SkippedRecords=0; RecordGap=$null; ParserError=$null
+                    SizeBytes=$null; ParseMilliseconds=4; SHA256=$null; Origin='live'
+                }
+            )
             $result | Add-Member -NotePropertyName HealthProfiles -NotePropertyValue @([pscustomobject]@{
                 Profile='provider-metadata'; Source='event'; Name='FakeProvider'; Status='readable'
                 RequiredConfiguration='Provider manifest required'; ObservedConfiguration='Observed EventID(s): 7; versions: 7=3'
@@ -3249,12 +3290,15 @@ Describe 'Report rendering' {
             $manifest = Format-LVEvidenceManifest -Result $result -Content @()
             $text | Should -Match 'COVERAGE DETAIL.*per-source status'
             $html | Should -Match 'Coverage detail'
-            @($csv | ConvertFrom-Csv | Where-Object RowType -eq 'coverage').Count | Should -Be 1
+            @($csv | ConvertFrom-Csv | Where-Object RowType -eq 'coverage').Count | Should -Be 3
             @($csv | ConvertFrom-Csv | Where-Object RowType -eq 'health').Count | Should -Be 1
             $csv | Should -Match 'CoverageStatus'
             $csv | Should -Match 'HealthEventVersions'
             $manifest | Should -Match 'COVERAGE SOURCES'
             $manifest | Should -Match 'System: empty'
+            $text | Should -Match 'reliability/provider Reliability Monitor - policy-disabled'
+            $html | Should -Match 'reliability/provider - Reliability Monitor'
+            $manifest | Should -Match 'Reliability Monitor: policy-disabled'
             $text | Should -Match 'CONFIGURATION HEALTH.*advisory profiles'
             $html | Should -Match 'Configuration health'
             $manifest | Should -Match 'CONFIGURATION HEALTH PROFILES'
@@ -5676,12 +5720,58 @@ Describe 'Reliability Monitor collection' {
         # The provider is Group Policy gated and off by default on Server. Silence from
         # a source that was never read must never be reported as a clean result.
         InModuleScope LogVerdict {
+            Mock Get-ItemProperty { [pscustomobject]@{} } -ParameterFilter { $LiteralPath -like '*Reliability Analysis*' }
             Mock Get-CimInstance { throw 'Invalid class' } -ParameterFilter { $ClassName -eq 'Win32_ReliabilityRecords' }
+            Mock Get-CimInstance { @() } -ParameterFilter { $ClassName -eq '__Provider' }
 
             $script:LVReliabilityAvailable = $true
             @(Get-LVReliabilityRecord -DaysBack 30).Count | Should -Be 0
             $script:LVReliabilityAvailable | Should -BeFalse
             $script:LVReliabilitySkipReason | Should -Not -BeNullOrEmpty
+            $script:LVReliabilityStatus | Should -BeExactly 'provider-absent'
+        }
+    }
+
+    It 'reports an explicitly disabled Reliability policy separately from an absent provider' {
+        InModuleScope LogVerdict {
+            Mock Get-ItemProperty { [pscustomobject]@{ WMIEnable = 0 } } -ParameterFilter { $LiteralPath -like '*Reliability Analysis*' }
+            Mock Get-CimInstance { throw 'the disabled policy should stop before the provider query' }
+
+            @(Get-LVReliabilityRecord -DaysBack 30).Count | Should -Be 0
+            $script:LVReliabilityAvailable | Should -BeFalse
+            $script:LVReliabilityStatus | Should -BeExactly 'policy-disabled'
+            $script:LVReliabilitySkipReason | Should -Match 'WMIEnable=0'
+            Assert-MockCalled Get-CimInstance -Times 0
+        }
+    }
+
+    It 'recognizes the default-disabled Reliability policy on Windows Server' {
+        InModuleScope LogVerdict {
+            Mock Get-ItemProperty { [pscustomobject]@{} } -ParameterFilter { $LiteralPath -like '*Reliability Analysis*' }
+            Mock Get-CimInstance {
+                param($ClassName)
+                if ($ClassName -eq 'Win32_ReliabilityRecords') { throw 'Provider load failure' }
+                if ($ClassName -eq '__Provider') { return [pscustomobject]@{ Name='ReliabilityMetricsProvider' } }
+                if ($ClassName -eq 'Win32_OperatingSystem') { return [pscustomobject]@{ ProductType=3 } }
+            }
+
+            @(Get-LVReliabilityRecord -DaysBack 30).Count | Should -Be 0
+            $script:LVReliabilityAvailable | Should -BeFalse
+            $script:LVReliabilityStatus | Should -BeExactly 'policy-disabled'
+            $script:LVReliabilitySkipReason | Should -Match 'Windows Server disables'
+        }
+    }
+
+    It 'reports an enabled provider whose records cannot be read as unreadable' {
+        InModuleScope LogVerdict {
+            Mock Get-ItemProperty { [pscustomobject]@{ WMIEnable = 1 } } -ParameterFilter { $LiteralPath -like '*Reliability Analysis*' }
+            Mock Get-CimInstance { throw 'record query failed' } -ParameterFilter { $ClassName -eq 'Win32_ReliabilityRecords' }
+            Mock Get-CimInstance { [pscustomobject]@{ Name='ReliabilityMetricsProvider' } } -ParameterFilter { $ClassName -eq '__Provider' }
+
+            @(Get-LVReliabilityRecord -DaysBack 30).Count | Should -Be 0
+            $script:LVReliabilityAvailable | Should -BeFalse
+            $script:LVReliabilityStatus | Should -BeExactly 'unreadable'
+            $script:LVReliabilitySkipReason | Should -Match 'record query failed'
         }
     }
 

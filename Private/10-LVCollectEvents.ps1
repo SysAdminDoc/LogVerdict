@@ -119,8 +119,10 @@ function Get-LVChannelStatus {
                 # let the health profile explain the missing retention metadata.
                 $entry.Reason = $_.Exception.Message
             }
-            $oldest = Get-WinEvent -LogName $ch -Oldest -MaxEvents 1 -ErrorAction Stop
-            if ($oldest) { $entry.Oldest = $oldest.TimeCreated }
+            if ($entry.IsEnabled -ne $false) {
+                $oldest = Get-WinEvent -LogName $ch -Oldest -MaxEvents 1 -ErrorAction Stop
+                if ($oldest) { $entry.Oldest = $oldest.TimeCreated }
+            }
         } catch {
             $kind = Get-LVErrorKind -ErrorRecord $_
             if ($kind -eq 'other') {
@@ -130,6 +132,9 @@ function Get-LVChannelStatus {
                 $entry.Access = $kind
             }
             $entry.Reason = $_.Exception.Message
+        }
+        if ($entry.PSObject.Properties['IsEnabled'] -and $entry.IsEnabled -eq $false) {
+            $entry.Reason = 'Event logging is disabled for this channel; no events can be observed.'
         }
         $status[$ch] = $entry
     }
@@ -248,6 +253,13 @@ function Get-LVEventRecord {
         if ($ChannelStatus -and $ChannelStatus.ContainsKey($ch)) {
             $probe = $ChannelStatus[$ch]
             $access = $probe.Access
+            if ($probe.PSObject.Properties['IsEnabled'] -and $probe.IsEnabled -eq $false) {
+                $disabledReason = if ($probe.Reason) { [string]$probe.Reason } else { 'Event logging is disabled for this channel; no events can be observed.' }
+                $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'disabled' `
+                    -Reason $disabledReason -WindowStart $windowStart -WindowEnd $windowEnd -Cap $MaxPerChannel `
+                    -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
+                continue
+            }
             if ($access -eq 'denied') {
                 $denied.Add($ch) | Out-Null
                 $coverage.Add((New-LVCoverageRecord -Source 'event' -Kind 'channel' -Name $ch -Status 'not-observed' `

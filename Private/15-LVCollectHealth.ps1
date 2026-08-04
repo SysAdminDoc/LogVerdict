@@ -89,13 +89,14 @@ function Get-LVProviderHealthProfile {
     foreach ($channel in $channels) {
         $channelRecords = @($eventRecords | Where-Object { [string]$_.Channel -eq [string]$channel })
         $channelState = $ChannelStatus[$channel]
+        $channelDisabled = $channelState.PSObject.Properties['IsEnabled'] -and $channelState.IsEnabled -eq $false
         if ($channelRecords.Count -eq 0) {
-            $status = if ($channelState.Access -in @('denied', 'missing', 'unreadable')) { 'not-observed' } else { 'empty' }
+            $status = if ($channelDisabled) { 'disabled' } elseif ($channelState.Access -in @('denied', 'missing', 'unreadable')) { 'not-observed' } else { 'empty' }
             $reason = switch ([string]$channelState.Access) {
                 'denied'     { 'The channel was denied before provider metadata could be observed.'; break }
                 'missing'    { 'The channel does not exist on this machine.'; break }
                 'unreadable' { 'The channel could not be read, so provider metadata was not observed.'; break }
-                default      { 'No event in the requested window identified a provider manifest.' }
+                default      { if ($channelDisabled) { 'Event logging is disabled for this channel, so provider metadata was not observed.' } else { 'No event in the requested window identified a provider manifest.' } }
             }
             $profiles.Add((New-LVHealthProfile -Profile 'provider-metadata' -Source 'event' `
                 -Name ([string]$channel) -Status $status -RequiredConfiguration `
@@ -159,7 +160,8 @@ function Get-LVRetentionHealthProfile {
     $offset = [int][DateTimeOffset]::Now.Offset.TotalMinutes
     foreach ($channel in @($ChannelStatus.Keys | Sort-Object)) {
         $entry = $ChannelStatus[$channel]
-        $status = if ($entry.Access -in @('denied', 'missing', 'unreadable')) { 'not-observed' } else { 'readable' }
+        $channelDisabled = $entry.PSObject.Properties['IsEnabled'] -and $entry.IsEnabled -eq $false
+        $status = if ($channelDisabled) { 'disabled' } elseif ($entry.Access -in @('denied', 'missing', 'unreadable')) { 'not-observed' } else { 'readable' }
         $parts = New-Object System.Collections.Generic.List[string]
         foreach ($property in @('RecordCount', 'LogMode', 'IsEnabled', 'MaximumSizeInBytes')) {
             if ($entry.PSObject.Properties[$property] -and $null -ne $entry.$property) {
@@ -169,7 +171,8 @@ function Get-LVRetentionHealthProfile {
         if ($entry.Oldest) { $parts.Add(('OldestRecord={0:o}' -f $entry.Oldest)) | Out-Null }
         if ($parts.Count -eq 0) { $parts.Add(('Access={0}' -f $entry.Access)) | Out-Null }
         $reason = $null
-        if ($entry.Access -ne 'readable') { $reason = 'Channel retention metadata was not observed because the channel is not readable.' }
+        if ($channelDisabled) { $reason = 'Event logging is disabled for this channel; retention does not provide event coverage.' }
+        elseif ($entry.Access -ne 'readable') { $reason = 'Channel retention metadata was not observed because the channel is not readable.' }
         $profiles.Add((New-LVHealthProfile -Profile 'retention-and-clock' -Source 'event' -Name ([string]$channel) `
             -Status $status -RequiredConfiguration ('The channel should retain records from {0:o} through {1:o}; event timestamps are interpreted with a local clock offset of {2} minutes.' -f $WindowStart, $WindowEnd, $offset) `
             -ObservedConfiguration ($parts -join '; ') -RetentionMode $(if ($entry.PSObject.Properties['LogMode']) { [string]$entry.LogMode } else { $null }) `

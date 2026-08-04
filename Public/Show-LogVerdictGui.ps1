@@ -463,14 +463,22 @@ function Show-LogVerdictGui {
             foreach ($name in @($Result.ChannelStatus.Keys | Sort-Object)) {
                 $entry = $Result.ChannelStatus[$name]
                 $totalChannels++
-                if ($entry.Access -eq 'readable') { $readable++ }
-                $availability = [string]$entry.Access
-                if ($entry.Oldest) { $availability = 'oldest {0:yyyy-MM-dd HH:mm}' -f $entry.Oldest }
-                $channelLines.Add(('{0,-36} {1,-11} {2}' -f $name, ([string]$entry.Access).ToUpperInvariant(), $availability)) | Out-Null
+                $disabled = $entry.PSObject.Properties['IsEnabled'] -and $entry.IsEnabled -eq $false
+                if ($entry.Access -eq 'readable' -and -not $disabled) { $readable++ }
+                $statusLabel = if ($disabled) { 'disabled' } else { [string]$entry.Access }
+                $availability = if ($disabled) { 'event logging is disabled' } else { [string]$entry.Access }
+                if (-not $disabled -and $entry.Oldest) { $availability = 'oldest {0:yyyy-MM-dd HH:mm}' -f $entry.Oldest }
+                $channelLines.Add(('{0,-36} {1,-11} {2}' -f $name, $statusLabel.ToUpperInvariant(), $availability)) | Out-Null
             }
         }
         if ($Result.PSObject.Properties['SetupDiag'] -and $Result.SetupDiag) {
             $channelLines.Add(('SetupDiag                            {0,-11} {1}' -f ([string]$Result.SetupDiag.Status).ToUpperInvariant(), $Result.SetupDiag.Message)) | Out-Null
+        }
+        foreach ($coverage in @($Result.Coverage | Where-Object { $_ -and [string]$_.Source -notin @('event', 'SetupDiag') })) {
+            $label = '{0}/{1} {2}' -f $coverage.Source, $coverage.Kind, $coverage.Name
+            $label = $label.Substring(0, [Math]::Min(36, $label.Length))
+            $detail = if ($coverage.Reason) { [string]$coverage.Reason } else { '{0} observed' -f $coverage.ObservedRecords }
+            $channelLines.Add(('{0,-36} {1,-11} {2}' -f $label, ([string]$coverage.Status).ToUpperInvariant(), $detail)) | Out-Null
         }
         foreach ($health in @($Result.HealthProfiles | Where-Object { $_ })) {
             $healthDetail = if ($health.ObservedConfiguration) { [string]$health.ObservedConfiguration } elseif ($health.Reason) { [string]$health.Reason } else { '' }

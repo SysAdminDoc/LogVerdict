@@ -17,6 +17,95 @@
 # The provider is Group Policy gated and disabled by default on Windows Server. Its
 # absence is reported as a source that was skipped, never as evidence of health.
 
+function Get-LVReliabilityPolicyValue {
+    [CmdletBinding()]
+    param()
+
+    $path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Reliability Analysis\WMI'
+    try {
+        $policy = Get-ItemProperty -LiteralPath $path -Name 'WMIEnable' -ErrorAction Stop
+        if ($policy -and $policy.PSObject.Properties['WMIEnable']) {
+            return [int]$policy.WMIEnable
+        }
+    } catch {
+        # A missing policy key is meaningful: Windows client enables the provider by
+        # default, while Windows Server disables it by default. The provider probe and
+        # OS product type below resolve that default without changing machine state.
+        Write-Verbose 'Reliability WMI policy is not explicitly configured; resolving the operating-system default.'
+    }
+    return $null
+}
+
+function Get-LVReliabilityProviderState {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]$PolicyValue,
+        [AllowNull()]$RecordError
+    )
+
+    if ($null -eq $PolicyValue) { $PolicyValue = Get-LVReliabilityPolicyValue }
+    $recordReason = if ($RecordError) { [string]$RecordError.Exception.Message } else { $null }
+
+    if ($PolicyValue -eq 0) {
+        return [pscustomobject]@{
+            Status = 'policy-disabled'
+            Reason = 'Configure Reliability WMI Providers is disabled (WMIEnable=0); Reliability Monitor data is unavailable.'
+        }
+    }
+    if ($null -ne $PolicyValue -and $PolicyValue -ne 1) {
+        return [pscustomobject]@{
+            Status = 'unreadable'
+            Reason = ('The Reliability WMI policy value was not understood; Reliability Monitor query result: {0}' -f $PolicyValue)
+        }
+    }
+
+    $provider = @()
+    try {
+        $provider = @(Get-CimInstance -Namespace 'root\cimv2' -ClassName '__Provider' `
+                -Filter "Name = 'ReliabilityMetricsProvider'" -ErrorAction Stop)
+    } catch {
+        return [pscustomobject]@{
+            Status = 'unreadable'
+            Reason = ('The ReliabilityMetricsProvider registration could not be inspected: {0}' -f $_.Exception.Message)
+        }
+    }
+    if ($provider.Count -eq 0) {
+        return [pscustomobject]@{
+            Status = 'provider-absent'
+            Reason = 'ReliabilityMetricsProvider is not registered on this system; Reliability Monitor data is unavailable.'
+        }
+    }
+    if ($PolicyValue -eq 1) {
+        if ($RecordError) {
+            return [pscustomobject]@{
+                Status = 'unreadable'
+                Reason = ('ReliabilityMetricsProvider is registered, but Win32_ReliabilityRecords could not be read: {0}' -f $recordReason)
+            }
+        }
+        return [pscustomobject]@{ Status = 'available'; Reason = $null }
+    }
+
+    try {
+        $os = @(Get-CimInstance -ClassName 'Win32_OperatingSystem' -ErrorAction Stop | Select-Object -First 1)
+        $productType = if ($os.Count -gt 0 -and $os[0].PSObject.Properties['ProductType']) { [int]$os[0].ProductType } else { $null }
+    } catch {
+        $productType = $null
+    }
+    if ($productType -in @(2, 3)) {
+        return [pscustomobject]@{
+            Status = 'policy-disabled'
+            Reason = 'Configure Reliability WMI Providers is not configured and Windows Server disables it by default; Reliability Monitor data is unavailable.'
+        }
+    }
+    if ($RecordError) {
+        return [pscustomobject]@{
+            Status = 'unreadable'
+            Reason = ('ReliabilityMetricsProvider is registered, but Win32_ReliabilityRecords could not be read: {0}' -f $recordReason)
+        }
+    }
+    return [pscustomobject]@{ Status = 'available'; Reason = $null }
+}
+
 function Get-LVReliabilityRecord {
     <#
         .SYNOPSIS
@@ -38,6 +127,19 @@ function Get-LVReliabilityRecord {
     $cutoff = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
     $records = New-Object System.Collections.Generic.List[object]
     $script:LVReliabilityBudgetStop = $null
+    $script:LVReliabilityStatus = 'available'
+    $script:LVReliabilityAvailable = $true
+    $script:LVReliabilitySkipReason = $null
+
+    $policyValue = Get-LVReliabilityPolicyValue
+    if ($policyValue -eq 0) {
+        $state = Get-LVReliabilityProviderState -PolicyValue $policyValue
+        $script:LVReliabilityStatus = $state.Status
+        $script:LVReliabilityAvailable = $false
+        $script:LVReliabilitySkipReason = $state.Reason
+        Write-LVLog -Level warn -Message ('Reliability Monitor is unavailable ({0}).' -f $state.Reason)
+        return ConvertTo-LVArrayOutput -Value @()
+    }
 
     $seen = @{}
     foreach ($r in $ExistingRecord) {
@@ -53,20 +155,35 @@ function Get-LVReliabilityRecord {
         }
         if ($readLimit -lt 1) {
             $script:LVReliabilityBudgetStop = 'truncated'
+            $script:LVReliabilityStatus = 'truncated'
             return ConvertTo-LVArrayOutput -Value @()
         }
         $raw = @(Get-CimInstance -ClassName Win32_ReliabilityRecords -ErrorAction Stop | Select-Object -First $readLimit)
     } catch {
         # Absence is a coverage gap, not a clean bill of health. Group Policy can
         # disable the provider outright and Server disables it by default.
-        $script:LVReliabilityAvailable = $false
-        $script:LVReliabilitySkipReason = $_.Exception.Message
-        Write-LVLog -Level warn -Message ('Reliability Monitor is not available on this machine ({0}); that source was skipped, not cleared.' -f $_.Exception.Message)
+        $state = Get-LVReliabilityProviderState -PolicyValue $policyValue -RecordError $_
+        $script:LVReliabilityStatus = $state.Status
+        $script:LVReliabilityAvailable = ($state.Status -eq 'available')
+        $script:LVReliabilitySkipReason = $state.Reason
+        Write-LVLog -Level warn -Message ('Reliability Monitor is unavailable ({0}); that source was skipped, not cleared.' -f $state.Reason)
         return ConvertTo-LVArrayOutput -Value @()
     }
 
     $script:LVReliabilityAvailable = $true
+    $script:LVReliabilityStatus = 'available'
     $script:LVReliabilitySkipReason = $null
+
+    if ($raw.Count -eq 0 -and $policyValue -ne 1) {
+        $state = Get-LVReliabilityProviderState -PolicyValue $policyValue
+        if ($state.Status -in @('policy-disabled', 'provider-absent')) {
+            $script:LVReliabilityStatus = $state.Status
+            $script:LVReliabilityAvailable = $false
+            $script:LVReliabilitySkipReason = $state.Reason
+            Write-LVLog -Level warn -Message ('Reliability Monitor returned no records because {0}.' -f $state.Reason)
+            return ConvertTo-LVArrayOutput -Value @()
+        }
+    }
 
     $duplicates = 0
     $tooOld = 0
@@ -115,6 +232,7 @@ function Get-LVReliabilityRecord {
     if (-not $script:LVReliabilityBudgetStop) {
         $script:LVReliabilityBudgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
     }
+    if ($script:LVReliabilityBudgetStop) { $script:LVReliabilityStatus = $script:LVReliabilityBudgetStop }
 
     $detail = ''
     if ($duplicates -gt 0) { $detail += (' ({0} already seen in an event channel)' -f $duplicates) }

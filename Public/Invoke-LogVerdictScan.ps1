@@ -172,6 +172,9 @@ function Invoke-LogVerdictScan {
     $performanceStatus = {
         param([object[]]$Coverage, [int64]$ObservedRecords)
         $statuses = @($Coverage | Where-Object { $_ } | ForEach-Object { [string]$_.Status })
+        foreach ($status in @('disabled', 'policy-disabled', 'provider-absent')) {
+            if ($statuses -contains $status) { return $status }
+        }
         if ($statuses -contains 'unreadable') { return 'unreadable' }
         if ($statuses -contains 'not-observed') { return 'not-observed' }
         if ($statuses -contains 'truncated') { return 'truncated' }
@@ -193,6 +196,7 @@ function Invoke-LogVerdictScan {
     $elevated = Test-LVElevated
     $advisoryContext = Get-LVAdvisoryScanContext -Path $AdvisoryPath -Package $AdvisoryPackage -Version $AdvisoryVersion
     $script:LVReliabilityAvailable = $true
+    $script:LVReliabilityStatus = 'available'
     $script:LVReliabilitySkipReason = $null
     $script:LVReliabilityBudgetStop = $null
 
@@ -341,7 +345,7 @@ function Invoke-LogVerdictScan {
         }
         if ($reliabilityTimer) {
             $reliabilityTimer.Stop()
-            $reliabilityStatus = if ($script:LVReliabilityBudgetStop) { $script:LVReliabilityBudgetStop } elseif (-not $script:LVReliabilityAvailable) { 'unreadable' } elseif (@($reliabilityRecords).Count -eq 0) { 'empty' } else { 'readable' }
+            $reliabilityStatus = if ($script:LVReliabilityBudgetStop) { $script:LVReliabilityBudgetStop } elseif (-not $script:LVReliabilityAvailable) { $script:LVReliabilityStatus } elseif (@($reliabilityRecords).Count -eq 0) { 'empty' } else { 'readable' }
             & $recordPerformance -Source 'reliability' -Kind 'provider' -Name 'Reliability Monitor' -Status $reliabilityStatus `
                 -ObservedRecords @($reliabilityRecords).Count -SkippedRecords 0 -Cap $null -ElapsedMilliseconds ([int64][Math]::Round($reliabilityTimer.Elapsed.TotalMilliseconds, 0)) -Origin 'live'
         }
@@ -496,6 +500,10 @@ function Invoke-LogVerdictScan {
     if (@($script:LVDeniedChannel).Count -gt 0) {
         $coverageNotes.Add(('Access was denied to {0} channel(s) and they were not scanned: {1}. Re-run elevated.' -f @($script:LVDeniedChannel).Count, (@($script:LVDeniedChannel) -join ', '))) | Out-Null
     }
+    $disabledChannels = @($channelStatus.Values | Where-Object { $_.IsEnabled -eq $false } | Select-Object -ExpandProperty Channel)
+    if ($disabledChannels.Count -gt 0) {
+        $coverageNotes.Add(('Event logging is disabled for {0} requested channel(s); they were not observed: {1}.' -f $disabledChannels.Count, ($disabledChannels -join ', '))) | Out-Null
+    }
     if ($script:LVChannelMetadataErrorCount -gt 0) {
         $coverageNotes.Add(('{0} channel(s) would not report their metadata and were never enumerated. Elevation may reveal more.' -f $script:LVChannelMetadataErrorCount)) | Out-Null
     }
@@ -521,7 +529,7 @@ function Invoke-LogVerdictScan {
     if ($SkipReliability) {
         $coverageNotes.Add('Reliability Monitor was skipped by request, so the software install and removal history was not read.') | Out-Null
     } elseif (-not $script:LVReliabilityAvailable) {
-        $coverageNotes.Add(('Reliability Monitor could not be read, so the software install and removal history is missing from this scan. It is Group Policy gated and disabled by default on Windows Server. Reason: {0}' -f $script:LVReliabilitySkipReason)) | Out-Null
+        $coverageNotes.Add(('Reliability Monitor coverage is {0}; the software install and removal history is missing from this scan. Reason: {1}' -f $script:LVReliabilityStatus, $script:LVReliabilitySkipReason)) | Out-Null
     }
     if ($SkipTextLogs) {
         $coverageNotes.Add('Plain-text logs and crash artifacts were skipped by request, so Report.wer and minidump headers were not checked.') | Out-Null
@@ -556,7 +564,7 @@ function Invoke-LogVerdictScan {
             -Reason ([string]$setupDiagStatus.Message) -Path $setupDiagStatus.ExecutablePath -WindowStart $cutoff -WindowEnd $started `
             -ObservedRecords @($setupDiag.Records).Count -ParserError $(if ($setupStatus -eq 'unreadable') { [string]$setupDiagStatus.Message } else { $null }) -CollectionBudget $collectionBudget -Origin 'live')) | Out-Null
     }
-    $reliabilityStatus = if ($SkipReliability) { 'not-observed' } elseif ($script:LVReliabilityBudgetStop) { $script:LVReliabilityBudgetStop } elseif (-not $script:LVReliabilityAvailable) { 'unreadable' } elseif (@($reliabilityRecords).Count -eq 0) { 'empty' } else { 'readable' }
+    $reliabilityStatus = if ($SkipReliability) { 'not-observed' } elseif ($script:LVReliabilityBudgetStop) { $script:LVReliabilityBudgetStop } elseif (-not $script:LVReliabilityAvailable) { $script:LVReliabilityStatus } elseif (@($reliabilityRecords).Count -eq 0) { 'empty' } else { 'readable' }
     $coverageSources.Add((New-LVCoverageRecord -Source 'reliability' -Kind 'provider' -Name 'Reliability Monitor' -Status $reliabilityStatus `
         -Reason $(if ($SkipReliability) { 'Skipped by request.' } elseif (-not $script:LVReliabilityAvailable) { [string]$script:LVReliabilitySkipReason } elseif (@($reliabilityRecords).Count -eq 0) { 'No reliability records were observed in the requested window.' } else { $null }) `
         -WindowStart $cutoff -WindowEnd $started -ObservedRecords @($reliabilityRecords).Count -CollectionBudget $collectionBudget -Origin 'live')) | Out-Null

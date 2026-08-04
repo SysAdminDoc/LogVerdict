@@ -92,6 +92,17 @@ function Write-LVConsoleReport {
     }
     if (@($Result.CoverageNotes).Count -gt 0) { Write-Host '' }
 
+    $coverageGaps = @($Result.Coverage | Where-Object { $_ -and $_.Status -in @('disabled', 'policy-disabled', 'provider-absent') })
+    if ($coverageGaps.Count -gt 0) {
+        Write-Host '  COVERAGE DETAIL : explicitly unavailable sources' -ForegroundColor Yellow
+        foreach ($source in $coverageGaps) {
+            $detail = '{0}/{1} {2} - {3}' -f $source.Source, $source.Kind, $source.Name, $source.Status
+            if ($source.Reason) { $detail += '; ' + [string]$source.Reason }
+            Write-Host ('    - ' + $detail) -ForegroundColor Yellow
+        }
+        Write-Host ''
+    }
+
     if ($Result.PSObject.Properties['History'] -and $Result.History) {
         $history = $Result.History
         Write-Host '  BASELINE (ADVISORY ONLY)' -ForegroundColor Cyan

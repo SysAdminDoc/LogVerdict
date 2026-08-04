@@ -37,6 +37,7 @@ $script:LVCorrelationType = @('temporal', 'temporal_ordered', 'event_count')
 # have to be distinguishable from one that read it, and "absent" must never be
 # reported as "clean".
 $script:LVReliabilityAvailable = $true
+$script:LVReliabilityStatus = 'available'
 $script:LVReliabilitySkipReason = $null
 $script:LVReliabilityBudgetStop = $null
 
@@ -579,11 +580,12 @@ function New-LVCoverageRecord {
         Create the stable per-source coverage shape shared by collectors and reports.
 
         .DESCRIPTION
-        `empty` means a source was observed and no matching record existed. The
-        other non-success states deliberately describe evidence that was not
-        observed, was unreadable, or was bounded before the complete source could
-        be read. Keep all fields present so JSON, CSV and old callers can project
-        the same contract without guessing which collector supplied the record.
+        `empty` means a source was observed and no matching record existed.
+        Disabled and unavailable sources remain distinct from empty; the other
+        non-success states describe evidence that was not observed, was unreadable,
+        or was bounded before the complete source could be read. Keep all fields
+        present so JSON, CSV and old callers can project the same contract without
+        guessing which collector supplied the record.
     #>
     [CmdletBinding()]
     param(
