@@ -146,7 +146,7 @@ function Update-LogVerdictDatabase {
                 'https://api.github.com/repos/{0}/releases/latest' -f $Repository
             }
             $headers = @{ 'User-Agent' = 'LogVerdict-database-updater' }
-            $release = Invoke-RestMethod -Uri $apiUri -Headers $headers
+            $release = Invoke-RestMethod -Uri $apiUri -Headers $headers -UseBasicParsing
             if ($release.draft -or $release.prerelease) {
                 throw 'GitHub returned a draft or prerelease; only published stable releases may update the database.'
             }

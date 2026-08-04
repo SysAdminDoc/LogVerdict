@@ -5807,6 +5807,49 @@ Describe 'Package-manager manifest generation' {
     }
 }
 
+Describe 'Operator-state-safe tooling' {
+    It 'uses basic parsing for every production web request' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $paths = @(
+            Get-ChildItem -LiteralPath (Join-Path $root 'Private') -Filter '*.ps1' -File -Recurse
+            Get-ChildItem -LiteralPath (Join-Path $root 'Public') -Filter '*.ps1' -File -Recurse
+            Get-ChildItem -LiteralPath (Join-Path $root 'Tools') -Filter '*.ps1' -File -Recurse
+        )
+        foreach ($path in $paths) {
+            foreach ($line in @(Get-Content -LiteralPath $path.FullName | Where-Object { $_ -match 'Invoke-(?:WebRequest|RestMethod)\b' })) {
+                $line | Should -Match '-UseBasicParsing'
+            }
+        }
+    }
+
+    It 'does not create advisory output or contact NVD under WhatIf' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $refresh = Join-Path $root 'Tools/Refresh-LogVerdictAdvisoryCache.ps1'
+        $output = Join-Path $TestDrive 'whatif/advisories.json'
+        & $refresh -OutputPath $output -CveId 'CVE-NOT-REQUESTED' -WhatIf | Out-Null
+
+        Test-Path -LiteralPath $output | Should -BeFalse
+        Test-Path -LiteralPath (Split-Path -Parent $output) | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $root 'Data/advisories.json.previous.json') | Should -BeFalse
+
+        $source = Get-Content -LiteralPath $refresh -Raw
+        $source.IndexOf('ShouldProcess', [StringComparison]::Ordinal) |
+            Should -BeLessThan $source.IndexOf('Invoke-WebRequest', [StringComparison]::Ordinal)
+        $source | Should -Match "GetTempPath\(\).*LogVerdict-advisory-backups"
+    }
+
+    It 'isolates GUI smoke settings and closes through the window path first' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $source = Get-Content -LiteralPath (Join-Path $root 'Tools/Test-LogVerdictGuiArtifact.ps1') -Raw
+        $source | Should -Match '\$env:LOCALAPPDATA\s*=\s*\$smokeLocalAppData'
+        $source | Should -Match 'settingsPreserved'
+        $closeIndex = $source.IndexOf('WindowPattern.Close', [StringComparison]::Ordinal)
+        $forceIndex = $source.IndexOf('Stop-Process -Id', [StringComparison]::Ordinal)
+        $closeIndex | Should -BeGreaterThan -1
+        $forceIndex | Should -BeGreaterThan $closeIndex
+    }
+}
+
 Describe 'Release supply-chain metadata' {
     BeforeAll {
         $root = Split-Path $PSScriptRoot -Parent

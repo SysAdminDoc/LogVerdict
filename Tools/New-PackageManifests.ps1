@@ -95,7 +95,7 @@ function Get-LVReleaseAsset {
     }
 
     $path = Join-Path $DownloadDirectory $Name
-    $null = Invoke-WebRequest -Uri $asset[0].browser_download_url -OutFile $path -Headers @{ 'User-Agent'='LogVerdict-package-manifest-generator' }
+    $null = Invoke-WebRequest -Uri $asset[0].browser_download_url -OutFile $path -Headers @{ 'User-Agent'='LogVerdict-package-manifest-generator' } -UseBasicParsing
     return $path
 }
 
@@ -119,7 +119,7 @@ try {
         }
     } else {
         $apiUrl = 'https://api.github.com/repos/{0}/releases/tags/{1}' -f $Repository, $tag
-        $release = Invoke-RestMethod -Uri $apiUrl -Headers @{ 'User-Agent'='LogVerdict-package-manifest-generator' }
+        $release = Invoke-RestMethod -Uri $apiUrl -Headers @{ 'User-Agent'='LogVerdict-package-manifest-generator' } -UseBasicParsing
         if ($release.draft -or $release.prerelease) {
             throw ("Release {0} is not a published stable release." -f $tag)
         }

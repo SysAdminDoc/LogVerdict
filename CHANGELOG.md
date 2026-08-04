@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [0.8.2] - 2026-08-02
 
+- Isolated GUI artifact smoke settings from operator state, closed the tested window through its own WPF close path, made advisory refresh `-WhatIf` side-effect-free, staged refresh backups outside the repository, and added Windows PowerShell basic parsing to every web request.
 - Made release provenance fail closed on dirty source trees, revision drift, tracked-file omissions, and unpinned dependency content; split runtime-agnostic release gates across the Windows PowerShell and PowerShell Core CI legs.
 - Added bounded ticket handoffs, email-safe Markdown/plain/inline-HTML summaries, a UTF-8 Intune digest with a binary exit contract, and a pre-base64 redacted evidence-bundle size cap.
 - Aligned standard adapters with their wire contracts: ECS is one-finding-per-line NDJSON, SARIF uses the cos02 schema and real locations only, OTLP int64 JSON values are strings without fabricated epoch timestamps, STIX IDs are deterministic UUIDv5 values, and OCSF remains explicitly a normalized-evidence compatibility envelope.

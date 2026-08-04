@@ -155,7 +155,7 @@ $sample
         options = @{ temperature = 0 }
     }
 
-    $response = Invoke-RestMethod -Method Post -Uri $generateUri.AbsoluteUri `
+    $response = Invoke-RestMethod -Method Post -Uri $generateUri.AbsoluteUri -UseBasicParsing `
         -ContentType 'application/json' -Body ($request | ConvertTo-Json -Depth 12 -Compress) `
         -TimeoutSec $TimeoutSec -ErrorAction Stop
     return ConvertFrom-LVModelExplanationResponse -Response $response -Model $Model

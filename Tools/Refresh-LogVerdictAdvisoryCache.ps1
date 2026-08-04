@@ -26,6 +26,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $OutputPath) { $OutputPath = Join-Path $repoRoot 'Data\advisories.json' }
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
+if (-not $PSCmdlet.ShouldProcess($OutputPath, 'refresh the committed advisory cache')) { return }
 $outputDirectory = Split-Path -Parent $OutputPath
 if (-not (Test-Path -LiteralPath $outputDirectory -PathType Container)) {
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
@@ -162,15 +163,18 @@ $document = [ordered]@{
 }
 $json = $document | ConvertTo-Json -Depth 20
 $temporary = Join-Path $outputDirectory ('.advisories-refresh-' + [guid]::NewGuid().ToString('N') + '.tmp')
-$backup = $OutputPath + '.previous.json'
+$backupRoot = Join-Path ([IO.Path]::GetTempPath()) 'LogVerdict-advisory-backups'
+$backup = Join-Path $backupRoot ('advisories-{0}.previous.json' -f [guid]::NewGuid().ToString('N'))
 try {
     [IO.File]::WriteAllText($temporary, $json, (New-Object Text.UTF8Encoding($false)))
     Import-Module (Join-Path $repoRoot 'LogVerdict.psd1') -Force
     if (-not (Test-LogVerdictAdvisoryDatabase -Path $temporary -Quiet)) {
         throw 'Generated advisory cache failed the module validation gate.'
     }
-    if (-not $PSCmdlet.ShouldProcess($OutputPath, 'refresh the committed advisory cache')) { return }
     if (Test-Path -LiteralPath $OutputPath -PathType Leaf) {
+        if (-not (Test-Path -LiteralPath $backupRoot -PathType Container)) {
+            New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
+        }
         [IO.File]::Replace($temporary, $OutputPath, $backup, $true)
     } else {
         Move-Item -LiteralPath $temporary -Destination $OutputPath -Force

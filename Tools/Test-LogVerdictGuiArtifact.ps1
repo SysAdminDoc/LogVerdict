@@ -55,10 +55,20 @@ $evidence = [ordered]@{
     passed = $false
 }
 $process = $null
+$rootElement = $null
+$smokeLocalAppData = Join-Path ([IO.Path]::GetTempPath()) ('LogVerdict-gui-smoke-appdata-' + [guid]::NewGuid().ToString('N'))
 $oldHighContrast = $env:LOGVERDICT_TEST_HIGH_CONTRAST
 $oldHold = $env:LOGVERDICT_GUI_SMOKE_HOLD_MS
 $oldScreenshotPath = $env:LOGVERDICT_GUI_SCREENSHOT_PATH
 $oldComputerName = $env:COMPUTERNAME
+$oldLocalAppData = $env:LOCALAPPDATA
+$originalSettingsPath = if ([string]::IsNullOrWhiteSpace($oldLocalAppData)) { $null } else { Join-Path (Join-Path $oldLocalAppData 'LogVerdict') 'settings.json' }
+$originalSettingsHash = $null
+if ($originalSettingsPath -and (Test-Path -LiteralPath $originalSettingsPath -PathType Leaf)) {
+    $originalHashAlgorithm = [Security.Cryptography.SHA256]::Create()
+    try { $originalSettingsHash = ([BitConverter]::ToString($originalHashAlgorithm.ComputeHash([IO.File]::ReadAllBytes($originalSettingsPath)))).Replace('-', '').ToLowerInvariant() }
+    finally { $originalHashAlgorithm.Dispose() }
+}
 
 function Add-SmokeCheck {
     param(
@@ -204,7 +214,16 @@ function Save-SmokeScreenshot {
     }
 }
 
+function Close-SmokeWindow {
+    param([Parameter(Mandatory)]$Root)
+
+    $windowPattern = $Root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+    $windowPattern.Close()
+}
+
 try {
+    New-Item -ItemType Directory -Path $smokeLocalAppData -Force | Out-Null
+    $env:LOCALAPPDATA = $smokeLocalAppData
     if ($Theme -eq 'HighContrast') { $env:LOGVERDICT_TEST_HIGH_CONTRAST = '1' }
     else { $env:LOGVERDICT_TEST_HIGH_CONTRAST = '0' }
     $env:LOGVERDICT_GUI_SMOKE_HOLD_MS = '5000'
@@ -314,9 +333,47 @@ try {
     $evidence.passed = $true
 } finally {
     if ($process -and -not $process.HasExited) {
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        $process.WaitForExit(5000)
+        try {
+            if ($rootElement) {
+                Close-SmokeWindow -Root $rootElement
+                $evidence.closeMethod = 'WindowPattern.Close'
+            }
+        } catch {
+            $evidence.closeError = $_.Exception.Message
+        }
+        if (-not $evidence.closeMethod) {
+            try {
+                if ($process.CloseMainWindow()) { $evidence.closeMethod = 'CloseMainWindow' }
+            } catch {
+                $evidence.closeError = $_.Exception.Message
+            }
+        }
+        $closeDeadline = (Get-Date).AddSeconds(5)
+        do {
+            $process.Refresh()
+            if ($process.HasExited) { break }
+            Start-Sleep -Milliseconds 100
+        } while ((Get-Date) -lt $closeDeadline)
+        if (-not $process.HasExited) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            $process.WaitForExit(5000)
+            $evidence.forcedTermination = $true
+        }
     }
+    $isolatedSettingsPath = Join-Path (Join-Path $smokeLocalAppData 'LogVerdict') 'settings.json'
+    $evidence.settingsIsolated = Test-Path -LiteralPath $isolatedSettingsPath -PathType Leaf
+    if ($originalSettingsPath) {
+        $currentSettingsHash = $null
+        if (Test-Path -LiteralPath $originalSettingsPath -PathType Leaf) {
+            $currentHashAlgorithm = [Security.Cryptography.SHA256]::Create()
+            try { $currentSettingsHash = ([BitConverter]::ToString($currentHashAlgorithm.ComputeHash([IO.File]::ReadAllBytes($originalSettingsPath)))).Replace('-', '').ToLowerInvariant() }
+            finally { $currentHashAlgorithm.Dispose() }
+        }
+        $evidence.settingsPreserved = ($currentSettingsHash -eq $originalSettingsHash)
+    } else {
+        $evidence.settingsPreserved = $true
+    }
+    if (-not $evidence.settingsIsolated -or -not $evidence.settingsPreserved) { $evidence.passed = $false }
     if ($null -eq $oldHighContrast) { Remove-Item Env:LOGVERDICT_TEST_HIGH_CONTRAST -ErrorAction SilentlyContinue }
     else { $env:LOGVERDICT_TEST_HIGH_CONTRAST = $oldHighContrast }
     if ($null -eq $oldHold) { Remove-Item Env:LOGVERDICT_GUI_SMOKE_HOLD_MS -ErrorAction SilentlyContinue }
@@ -325,6 +382,11 @@ try {
     else { $env:LOGVERDICT_GUI_SCREENSHOT_PATH = $oldScreenshotPath }
     if ($null -eq $oldComputerName) { Remove-Item Env:COMPUTERNAME -ErrorAction SilentlyContinue }
     else { $env:COMPUTERNAME = $oldComputerName }
+    if ($null -eq $oldLocalAppData) { Remove-Item Env:LOCALAPPDATA -ErrorAction SilentlyContinue }
+    else { $env:LOCALAPPDATA = $oldLocalAppData }
+    if (Test-Path -LiteralPath $smokeLocalAppData) {
+        Remove-Item -LiteralPath $smokeLocalAppData -Recurse -Force -ErrorAction SilentlyContinue
+    }
     $evidence.finishedAt = (Get-Date).ToUniversalTime().ToString('o')
     $parent = Split-Path -Parent $EvidencePath
     if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
