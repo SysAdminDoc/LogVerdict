@@ -149,6 +149,8 @@ function Test-LVWindowsBuildMatch {
 }
 
 function Get-LVSignatureInstalledKbs {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '',
+        Justification = 'KB is an identifier acronym; this helper returns the installed KB set.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Signature)
 
