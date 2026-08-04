@@ -56,7 +56,7 @@ function Test-LVReleaseJsonSchema {
     )
 
     if (-not (Get-Command -Name Test-Json -ErrorAction SilentlyContinue)) {
-        throw 'JSON schema validation requires PowerShell 7 or newer with Test-Json.'
+        throw 'JSON schema validation requires PowerShell 7.6 or newer with Test-Json.'
     }
     try {
         $valid = Test-Json -LiteralPath $Path -SchemaFile $SchemaPath -ErrorAction Stop
@@ -263,7 +263,7 @@ $advisoryStatus = Get-LogVerdictAdvisoryStatus -Path $advisoryCache
 if ($advisoryStatus.Status -ne 'fresh') {
     throw ("Offline advisory cache is {0}: {1}" -f $advisoryStatus.Status, $advisoryStatus.Reason)
 }
-foreach ($runtimeName in @('Windows PowerShell 5.1', 'PowerShell 7.x')) {
+foreach ($runtimeName in @('Windows PowerShell 5.1', 'PowerShell 7.6 LTS')) {
     if (@($advisoryStatus.Coverage.runtime.verifiedRuntimes) -notcontains $runtimeName) {
         throw ("Supported-runtime coverage is missing {0}." -f $runtimeName)
     }

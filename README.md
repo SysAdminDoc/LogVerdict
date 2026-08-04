@@ -1,6 +1,6 @@
 # LogVerdict
 
-![Version](https://img.shields.io/badge/version-0.8.2-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207.x-5391FE)
+![Version](https://img.shields.io/badge/version-0.8.2-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207.6%2B-5391FE)
 
 Scan a Windows PC's logs, collapse them into the handful of distinct things that actually happened, and rule on each one in plain English: **what it means, why it matters, and what to do about it.**
 
@@ -119,7 +119,7 @@ The Overview page exposes the deterministic live-scan and report choices rather 
 | Structured finding filters and sorting | UI Automation-labelled source/channel/provider/event ID/correlation/rule-state filters plus count/rate/latest sorting over lightweight row projections | GUI |
 | GUI accessibility and scaling smoke | STA UI Automation names, keyboard targets, normal/high-contrast resources, long/error text, and 125% layout checks | `Tools/Test-LogVerdictGui.ps1` |
 | Opt-in diagnostic performance telemetry | Content-free source status, bounded counts, caps, and elapsed timing in JSON, text, HTML, CSV, and standard exports | `-PerformanceTelemetry` |
-| Content-free performance budgets | Temporary small, large, malformed-text, and malformed-EVTX fixtures; aggregate counts/status/timing only, checked on Windows PowerShell 5.1 and PowerShell 7.x | `Tools/Test-LogVerdictPerformance.ps1` |
+| Content-free performance budgets | Temporary small, large, malformed-text, and malformed-EVTX fixtures; aggregate counts/status/timing only, checked on Windows PowerShell 5.1 and PowerShell 7.6 LTS | `Tools/Test-LogVerdictPerformance.ps1` |
 | Shared collection safety budgets | One byte, normalized-record, and elapsed-time allowance across live/offline collectors; incomplete sources remain `truncated` or `timeout` | `-MaxCollectionBytes`, `-MaxCollectionRecords`, `-MaxCollectionSeconds` |
 | Output format selection | The window always saves Text, JSON, CSV, and HTML together | `-Format` (`Text`, `Json`, `Csv`, `Html`, or `All`) |
 | Console lifecycle | Not applicable to a persistent window | `-NoReport`, `-Pause`, `-NoPause` |
@@ -168,7 +168,7 @@ The helper reads the two supported PowerShell CVEs from the NVD 2.0 API, derives
 
 Case profiles make a scan repeatable without copying raw event messages. `New-LogVerdictCaseProfile` records the selected sources, time bounds, redaction policy, operator choices, notes, and per-source SHA-256 values under a canonical profile id. `Invoke-LogVerdictScan -CaseProfilePath` attaches a validated profile for attribution; it does not override explicit scan parameters. `Export-LogVerdictHandoff` writes the profile, reviewable KAPE and Velociraptor collection recipes, deterministic attributed Timesketch and Hayabusa CSV timelines, and `LogVerdict-Timeline.jsonl`. The JSONL file is UTF-8 without a BOM, emits one versioned metadata/event/finding/correlation/coverage/provider object per line, normalizes timestamps to UTC, carries provider/channel/event/record IDs and rule provenance, and states whether the line is raw or redacted. It is written incrementally and atomically, so large handoffs do not create a second complete output graph. Timesketch rows include `message`, `datetime`, and `timestamp_desc`; source hashes and the profile id remain on every handoff row. The handoff contains normalized findings, not raw EVTX.
 The cache declares a 60-day UTC freshness threshold and reports fresh, stale, or unavailable state in advisory scan context. A stale or unavailable cache never changes event findings, WorstVerdict, or the event exit code; the release gate rejects stale metadata until the cache is refreshed.
-The shipped coverage manifest records Windows PowerShell 5.1 and PowerShell 7.x verification, plus the pinned Pester 5.9.0, PSScriptAnalyzer 1.25.0, and ps2exe 1.0.18 roles and runtimes.
+The shipped coverage manifest records Windows PowerShell 5.1 and PowerShell 7.6 LTS verification, plus the pinned Pester 5.9.0, PSScriptAnalyzer 1.25.0, and ps2exe 1.0.18 roles and runtimes. The CI Core leg fails closed below PowerShell 7.6; Windows PowerShell 5.1 remains the Desktop-edition floor.
 
 `-Format Csv` writes `LogVerdict-Report.csv` with one scalar row per ordinary finding. Its stable columns include
 the scan identity, source (`event`, `text`, or `reliability`), provider and event id, occurrence count and rate,
@@ -235,7 +235,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Build-LogVerdictExe.
 `VERSION` is the release source of truth. The build refuses a manifest-version mismatch, and
 `Tools\Test-LogVerdictRelease.ps1` checks the module, README badge, typed catalog, verdict
 provenance, package manifests, generated JSON contracts, and (when supplied) executable hashes.
-The schema-validation portion runs under PowerShell 7 or newer because it uses the built-in
+The schema-validation portion runs under PowerShell 7.6 or newer because it uses the built-in
 `Test-Json` command; the LogVerdict module itself remains compatible with Windows PowerShell 5.1.
 Generate package metadata
 from local assets without contacting GitHub with:
@@ -462,7 +462,7 @@ The entrypoint receives a read-only context and must return one schema-versioned
 
 ## Requirements
 
-Windows 10/11. Windows PowerShell 5.1 (stock) or PowerShell 7.x. **No dependencies** - the whole point is that it runs on a broken machine with nothing installed.
+Windows 10/11. Windows PowerShell 5.1 (stock) or PowerShell 7.6 LTS and newer. **No dependencies** - the whole point is that it runs on a broken machine with nothing installed.
 
 Runs without admin; elevation unlocks the Security channel and some text logs.
 
@@ -471,7 +471,7 @@ Runs without admin; elevation unlocks the Security channel and some text logs.
 | Area | Supported behavior | Recovery or verification |
 |---|---|---|
 | Windows | Windows 10 and Windows 11; event channels and diagnostic text logs are read locally | Start with `LogVerdict-GUI.exe` or `Invoke-LogVerdict.ps1 -DaysBack 30` |
-| PowerShell | Windows PowerShell 5.1 (stock) and PowerShell 7.x; the GUI uses an STA thread for WPF | Run `Tools\Test-LogVerdictGui.ps1 -Theme Normal -ScalePercent 125` |
+| PowerShell | Windows PowerShell 5.1 (stock) and PowerShell 7.6 LTS or newer; the GUI uses an STA thread for WPF | Run `Tools\Test-LogVerdictGui.ps1 -Theme Normal -ScalePercent 125` |
 | Elevation | Optional; standard access reports unreadable Security/setup sources instead of calling the result clean | Use the GUI's **Restart as administrator** action, or rerun the console from an elevated PowerShell |
 | SetupDiag | Persisted XML/registry results are read without elevation; otherwise only an existing Microsoft-signed executable is used, and built-in Panther rules remain active | Treat `artifact-read`, `executed`, rejected, missing, and unreadable states as explicit coverage evidence |
 | WEF | Optional, module-only health context; no fleet agent or remote connection is required | Use `Watch-LogVerdict -IncludeWEFHealth` when the Windows Event Collector service is in scope |

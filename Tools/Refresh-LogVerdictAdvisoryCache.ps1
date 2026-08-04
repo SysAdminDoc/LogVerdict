@@ -6,10 +6,12 @@ Refresh the committed PowerShell advisory cache from the NVD 2.0 API.
 
 .DESCRIPTION
 The refresh is explicit and networked. It reads only the two PowerShell CVEs
-that define this repository's supported 7.4 and 7.5 coverage, derives affected
-version ranges from NVD CPE records, validates the generated document through
-the module, and installs it atomically. The ordinary scan and release gate
-never contact the network.
+that define this repository's historical 7.4 and 7.5 advisory coverage, derives
+affected version ranges from NVD CPE records, validates the generated document
+through the module, and installs it atomically. The supported PowerShell 7
+runtime floor is the 7.6 LTS release; older 7.4/7.5 entries remain in the cache
+so legacy installations can still be assessed. The ordinary scan and release
+gate never contact the network.
 
 .EXAMPLE
 .\Tools\Refresh-LogVerdictAdvisoryCache.ps1

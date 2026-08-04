@@ -192,6 +192,21 @@ Describe 'Module surface' {
         $manifest.Version.ToString() | Should -BeExactly $version
         (Get-Content -LiteralPath (Join-Path $root 'README.md') -Raw) | Should -Match ("shields\.io/badge/version-{0}-blue" -f [regex]::Escape($version))
     }
+
+    It 'declares both PSEditions, a complete module file list, and release notes' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $manifest = Test-ModuleManifest -Path (Join-Path $root 'LogVerdict.psd1')
+        @($manifest.CompatiblePSEditions) | Should -Be @('Desktop', 'Core')
+        @($manifest.PrivateData.PSData.Tags) | Should -Contain 'PSEdition_Desktop'
+        @($manifest.PrivateData.PSData.Tags) | Should -Contain 'PSEdition_Core'
+        [string]::IsNullOrWhiteSpace([string]$manifest.PrivateData.PSData.ReleaseNotes) | Should -BeFalse
+        @($manifest.FileList).Count | Should -BeGreaterThan 60
+        foreach ($file in @($manifest.FileList)) {
+            Test-Path -LiteralPath $file -PathType Leaf | Should -BeTrue -Because "manifest FileList entry '$file' must exist"
+        }
+        $advisories = Get-Content -LiteralPath (Join-Path $root 'Data\advisories.json') -Raw | ConvertFrom-Json
+        @($advisories.coverage.runtime.verifiedRuntimes) | Should -Contain 'PowerShell 7.6 LTS'
+    }
 }
 
 Describe 'Versioned provider extension contract' {
@@ -335,7 +350,7 @@ Describe 'Dependency advisory knowledge' {
             $database.freshness.Status | Should -BeExactly 'fresh'
             $database.freshness.MaxCacheAgeDays | Should -Be 60
             @($database.coverage.runtime.verifiedRuntimes) | Should -Contain 'Windows PowerShell 5.1'
-            @($database.coverage.runtime.verifiedRuntimes) | Should -Contain 'PowerShell 7.x'
+            @($database.coverage.runtime.verifiedRuntimes) | Should -Contain 'PowerShell 7.6 LTS'
             foreach ($tool in @(
                 [pscustomobject]@{ Name = 'Pester'; Version = '5.9.0' }
                 [pscustomobject]@{ Name = 'PSScriptAnalyzer'; Version = '1.25.0' }

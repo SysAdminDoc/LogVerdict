@@ -37,6 +37,9 @@ jobs:
           foreach ($path in $paths) {
             [void][scriptblock]::Create((Get-Content -LiteralPath $path.FullName -Raw))
           }
+          if ('${{ matrix.shell }}' -eq 'pwsh' -and $PSVersionTable.PSVersion -lt [version]'7.6.0') {
+            throw ("The PowerShell Core CI leg must run PowerShell 7.6 or newer; found {0}." -f $PSVersionTable.PSVersion)
+          }
           Test-ModuleManifest -Path .\LogVerdict.psd1 | Out-Null
 
       - name: Run tests
