@@ -30,6 +30,8 @@ function Get-LVDiagnosticChannel {
         'Microsoft-Windows-AppModel-Runtime/Admin'
         'Microsoft-Windows-Resource-Exhaustion-Detector/Operational'
         'Microsoft-Windows-Kernel-Boot/Operational'
+        'Microsoft-Windows-Dhcp-Client/Admin'
+        'Microsoft-Windows-TaskScheduler/Operational'
     )
 }
 

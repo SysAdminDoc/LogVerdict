@@ -20,12 +20,16 @@ logs, deduplicates them into signatures, and returns a plain-English explanation
 curated non-LLM rule database. SetupDiag remains useful for upgrade-specific cases; cmtraceopen remains useful as a
 viewer and text-log specialist.
 
+The rule database prioritizes ordinary Windows breakage and keeps Sysmon and Defender telemetry as contextual
+evidence rather than expanding security-product taxonomy without diagnostic value. Use `-DiagnosticChannels` for the
+focused operational channels that add signal without requiring a full channel sweep.
+
 ## What it reads
 
 | Source | Why it matters |
 |---|---|
 | System / Application event channels | The bulk of client troubleshooting signal |
-| Focused operational channels (`-DiagnosticChannels`) | Storage, code integrity, device setup, packaged apps, memory pressure, and boot security without a full sweep |
+| Focused operational channels (`-DiagnosticChannels`) | Storage, code integrity, device setup, packaged apps, memory pressure, boot security, DHCP, and Task Scheduler without a full sweep |
 | Any other populated channel (`-AllChannels`) | ~128 hold records on a typical machine |
 | `CBS.log` | Component store damage - the reason updates fail and SFC cannot repair |
 | `dism.log` | Image servicing failures |
@@ -138,7 +142,7 @@ rejected; choose one channel tier.
 
 ```
 LogVerdict.exe                                  scan the last 30 days
-LogVerdict.exe -DiagnosticChannels              add six focused operational channels
+LogVerdict.exe -DiagnosticChannels              add eight focused operational channels
 LogVerdict.exe -DaysBack 7 -AllChannels         narrower window, every populated channel
 LogVerdict.exe -IncludeBenign                   show the signatures ruled harmless too
 LogVerdict.exe -IncludeLowConfidence             include curated low-confidence rulings
@@ -566,7 +570,7 @@ Invoke-Pester -Path .\Tests
 
 ## Honest limitations
 
-- **Coverage is the roadmap.** 182 rules ship, alongside a 3,157-entry typed Microsoft error and stop-code catalog. A first scan will still report `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
+- **Coverage is the roadmap.** 192 rules ship, alongside a 3,157-entry typed Microsoft error and stop-code catalog. A first scan will still report `unknown` signatures - that is the tool refusing to guess, and each one is a candidate rule.
 - **Crash-stack analysis is bounded.** LogVerdict reads the bug-check code and four parameters from supported kernel dump headers, but naming the responsible driver still needs a debugger and symbols. Unsupported, truncated or access-controlled dumps remain inventoried with the reason they were not decoded.
 - **A clean result is not proof of health.** An in-place upgrade or a cleared log resets the event channels, so the report states each channel's oldest surviving record and warns when that horizon falls inside the requested window.
 - Offline review is bounded by what the bundle captured. Exported event channels are re-read in full, while text logs and Reliability Monitor are re-evaluated from the signature summaries in the source report rather than copied wholesale.

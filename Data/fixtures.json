@@ -1078,7 +1078,7 @@
     {
       "ruleId": "LV-0149",
       "origin": "constructed",
-      "expect": "informational",
+      "expect": "unknown",
       "signature": {
         "Source": "reliability",
         "Channel": "Reliability",
@@ -1598,7 +1598,7 @@
     {
       "ruleId": "LV-0202",
       "origin": "constructed",
-      "expect": "investigate",
+      "expect": "informational",
       "signature": {
         "Source": "event",
         "Channel": "Microsoft-Windows-Sysmon/Operational",
@@ -1754,7 +1754,7 @@
     {
       "ruleId": "LV-0215",
       "origin": "constructed",
-      "expect": "investigate",
+      "expect": "informational",
       "signature": {
         "Source": "event",
         "Channel": "Microsoft-Windows-Sysmon/Operational",
@@ -2316,6 +2316,129 @@
         "Provider": "Microsoft SRUM ESE",
         "Id": 0,
         "SampleMessage": "SRUM database state: Dirty Shutdown; path=C:\\Windows\\System32\\sru\\SRUDB.dat"
+      }
+    },
+    {
+      "ruleId": "LV-0330",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Display",
+        "Id": 4101,
+        "SampleMessage": "Display driver stopped responding and has recovered."
+      }
+    },
+    {
+      "ruleId": "LV-0331",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Service Control Manager",
+        "Id": 7031,
+        "ProviderLocale": "en-US",
+        "SampleMessage": "The Print Spooler service terminated unexpectedly."
+      }
+    },
+    {
+      "ruleId": "LV-0332",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-Kernel-PnP",
+        "Id": 219,
+        "ProviderLocale": "en-US",
+        "SampleMessage": "The driver \\Driver\\USBSTOR failed to load for the device USB\\VID_1234&PID_5678."
+      }
+    },
+    {
+      "ruleId": "LV-0333",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Service Control Manager",
+        "Id": 7031,
+        "ProviderLocale": "en-US",
+        "SampleMessage": "The Windows Audio service terminated unexpectedly."
+      }
+    },
+    {
+      "ruleId": "LV-0334",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "BTHUSB",
+        "Id": 17,
+        "SampleMessage": "The local Bluetooth adapter has failed in an undetermined manner and will not be used."
+      }
+    },
+    {
+      "ruleId": "LV-0335",
+      "origin": "constructed",
+      "expect": "informational",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "Microsoft-Windows-Power-Troubleshooter",
+        "Id": 1,
+        "SampleMessage": "The system has returned from a low power state. Wake Source: Timer."
+      }
+    },
+    {
+      "ruleId": "LV-0336",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Dhcp-Client/Admin",
+        "Provider": "Microsoft-Windows-Dhcp-Client",
+        "Id": 1001,
+        "SampleMessage": "The DHCP client was unable to renew the lease for the network adapter."
+      }
+    },
+    {
+      "ruleId": "LV-0337",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "System",
+        "Provider": "stornvme",
+        "Id": 6,
+        "SampleMessage": "The IO operation at logical block address 0x1234 was retried."
+      }
+    },
+    {
+      "ruleId": "LV-0338",
+      "origin": "constructed",
+      "expect": "investigate",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-TaskScheduler/Operational",
+        "Provider": "Microsoft-Windows-TaskScheduler",
+        "Id": 101,
+        "SampleMessage": "Task Scheduler failed to start task \\Example\\Maintenance."
+      }
+    },
+    {
+      "ruleId": "LV-0339",
+      "origin": "constructed",
+      "expect": "actionable",
+      "signature": {
+        "Source": "event",
+        "Channel": "Microsoft-Windows-Resource-Exhaustion-Detector/Operational",
+        "Provider": "Microsoft-Windows-Resource-Exhaustion-Detector",
+        "Id": 2004,
+        "SampleMessage": "Windows successfully diagnosed a low virtual memory condition."
       }
     }
   ]

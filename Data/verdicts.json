@@ -1,7 +1,7 @@
 {
   "schemaVersion": 6,
   "name": "LogVerdict core verdict database",
-  "updated": "2026-08-01",
+  "updated": "2026-08-03",
   "freshness": {
     "maxAgeDays": 730,
     "dateBasis": "UTC"
@@ -1926,11 +1926,11 @@
       "match": {
         "source": "reliability"
       },
-      "verdict": "informational",
+      "verdict": "unknown",
       "title": "Reliability Monitor recorded an event with no more specific rule",
       "plain": "Windows' own Reliability Monitor logged this, and no rule covers it specifically. The raw message below is the evidence.",
-      "why": "Reliability Monitor is a curated view rather than a raw channel, so anything in it was considered worth recording by whoever wrote the event. A catch-all here keeps that visible instead of letting it fall through to 'unknown', while still being honest that no specific ruling exists.",
-      "action": "Read the message. Anything already collected from an event channel was dropped before this point, so what reaches here is genuinely additional.",
+      "why": "Reliability Monitor is a curated view rather than a raw channel, but its event families are broad and localized. Without a specific ruling the signature is evidence that needs context, not a benign or informational classification.",
+      "action": "Read the message and correlate its timestamp with the matching event-channel records, application activity, and recent system changes before deciding whether it needs escalation.",
       "confidence": "low",
       "references": [],
       "falsepositives": [
@@ -3041,17 +3041,18 @@
         "provider": "Microsoft-Windows-Sysmon",
         "eventId": 2
       },
-      "verdict": "investigate",
+      "verdict": "informational",
       "title": "File creation time changed",
-      "plain": "A process changed a file creation timestamp.",
-      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
-      "action": "Check the image and target file. Legitimate installers do this; unexpected changes can be an attempt to hide when a file arrived.",
+      "plain": "A process changed a file creation timestamp, and Sysmon recorded the observation.",
+      "why": "Installers, archive tools, and administration commonly normalize timestamps. The observation becomes a lead only when the image, target, or surrounding activity makes the change unusual.",
+      "action": "Use the image and target file as timeline context; escalate only when the change is unexpected or pairs with process, file, or network evidence.",
       "confidence": "high",
       "references": [
         "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
       ],
       "falsepositives": [
-        "Approved administration, development, security, and software deployment can produce this event."
+        "Installers, archive extraction, file-management tools, and approved administration can normalize creation timestamps on a healthy machine.",
+        "A timestamp change alone does not show that a file was replaced or that an attacker was present."
       ],
       "sources": [
         {
@@ -3418,17 +3419,18 @@
         "provider": "Microsoft-Windows-Sysmon",
         "eventId": 15
       },
-      "verdict": "investigate",
+      "verdict": "informational",
       "title": "Alternate data stream created",
       "plain": "A process created a named file stream and Sysmon recorded its hash.",
-      "why": "Microsoft documents Sysmon events as observational rather than alerts. Meaning comes from the process, file, registry, or network context and from nearby events.",
-      "action": "Check the stream name, file origin, and process. Browsers create Zone.Identifier legitimately; payload staging can also use streams.",
+      "why": "Browsers routinely write Zone.Identifier for downloaded files, so an alternate stream is not suspicious by itself. The stream name, origin, and creating process determine whether it is a useful lead.",
+      "action": "Check the stream name, file origin, and process; escalate when the stream is unexpected or pairs with payload staging or other suspicious activity.",
       "confidence": "high",
       "references": [
         "https://learn.microsoft.com/en-us/windows/security/operating-system-security/sysmon/sysmon-events"
       ],
       "falsepositives": [
-        "Approved administration, development, security, and software deployment can produce this event."
+        "Browsers routinely write Zone.Identifier alternate data streams for downloaded files on a healthy machine.",
+        "Approved administration, development, security, and software deployment can also create named streams."
       ],
       "sources": [
         {
@@ -4691,6 +4693,302 @@
         {
           "uri": "https://github.com/WithSecureLabs/chainsaw/wiki/SRUM-Analysis",
           "retrieved": "2026-08-04"
+        }
+      ]
+    },
+    {
+      "id": "LV-0330",
+      "status": "stable",
+      "verified": "2026-08-03",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Display",
+        "eventId": 4101
+      },
+      "verdict": "investigate",
+      "title": "The display driver stopped responding and recovered",
+      "plain": "Windows reset the graphics driver after it stopped completing work within the timeout window.",
+      "why": "A recovered timeout can be a transient driver or workload problem, but repeated resets are evidence of a graphics driver, GPU, power, or thermal fault and often precede visible hangs.",
+      "action": "Record the driver and GPU model, check for a matching display-driver update or rollback, and correlate repeated 4101 events with LiveKernelEvent 141 or 117 reports before replacing hardware.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-hardware/drivers/display/timeout-detection-and-recovery"
+      ],
+      "falsepositives": [
+        "A one-off timeout during a driver update, resume, or unusually heavy graphics workload can recover without a lasting fault."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-hardware/drivers/display/timeout-detection-and-recovery",
+          "retrieved": "2026-08-03"
+        }
+      ]
+    },
+    {
+      "id": "LV-0331",
+      "status": "stable",
+      "verified": "2026-08-03",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Service Control Manager",
+        "eventId": 7031,
+        "messagePattern": "(?i)\\bPrint\\s+Spooler\\b"
+      },
+      "locale": "en-US",
+      "verdict": "investigate",
+      "title": "The Print Spooler service terminated unexpectedly",
+      "plain": "The Windows Print Spooler stopped unexpectedly and Service Control Manager restarted or attempted to restart it.",
+      "why": "A spooler crash can be caused by a printer driver, a corrupt queued job, or the spooler itself. The generic service-crash event is not enough to blame the printer or the driver without the neighboring spooler evidence.",
+      "action": "Check the PrintService operational log, queue, and recently installed printer drivers; clear only the affected queue after preserving the event details.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/win32/printdocs/print-spooler"
+      ],
+      "falsepositives": [
+        "A deliberate spooler restart during printer-driver maintenance can produce the same service event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/win32/printdocs/print-spooler",
+          "retrieved": "2026-08-03"
+        }
+      ]
+    },
+    {
+      "id": "LV-0332",
+      "status": "stable",
+      "verified": "2026-08-03",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Microsoft-Windows-Kernel-PnP",
+        "eventId": 219,
+        "messagePattern": "(?i)failed\\s+to\\s+load\\s+for\\s+the\\s+device\\s+USB\\\\"
+      },
+      "locale": "en-US",
+      "verdict": "investigate",
+      "title": "A USB device driver failed to load",
+      "plain": "Kernel Plug and Play could not load a driver for a USB device during enumeration.",
+      "why": "The generic 219 event covers many device classes. A USB-specific instance points first to the device cable, port, firmware, or driver package rather than to a general Plug and Play outage.",
+      "action": "Capture the USB VID/PID and instance path, move the device to a known-good port, and inspect the matching driver and Kernel-PnP configuration events before reinstalling it.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-hardware/drivers/install/device-installation-error-messages"
+      ],
+      "falsepositives": [
+        "A device being unplugged during startup or a stale driver package after a clean removal can leave one 219 record without an ongoing fault."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-hardware/drivers/install/device-installation-error-messages",
+          "retrieved": "2026-08-03"
+        }
+      ]
+    },
+    {
+      "id": "LV-0333",
+      "status": "stable",
+      "verified": "2026-08-03",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Service Control Manager",
+        "eventId": 7031,
+        "messagePattern": "(?i)\\bWindows\\s+Audio\\b"
+      },
+      "locale": "en-US",
+      "verdict": "investigate",
+      "title": "The Windows Audio service terminated unexpectedly",
+      "plain": "The Windows Audio service stopped unexpectedly and Service Control Manager recorded the restart.",
+      "why": "Audio service crashes are usually a driver, enhancement, endpoint, or service dependency problem. Treating every 7031 as an audio fault would be wrong, so this ruling is limited to the named service.",
+      "action": "Check the audio endpoint and driver events around the timestamp, disable recently added enhancements, and update or roll back the audio driver if the crash repeats.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/audio-devices"
+      ],
+      "falsepositives": [
+        "A controlled restart during an audio-driver or Windows servicing update can produce a single 7031 event."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/audio-devices",
+          "retrieved": "2026-08-03"
+        }
+      ]
+    },
+    {
+      "id": "LV-0334",
+      "status": "stable",
+      "verified": "2026-08-03",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "BTHUSB",
+        "eventId": 17
+      },
+      "verdict": "investigate",
+      "title": "The Bluetooth adapter reported a failure",
+      "plain": "The Bluetooth USB transport reported that the local adapter failed and would not be used.",
+      "why": "This provider-specific event is stronger evidence of an adapter, firmware, USB power, or transport problem than a generic device warning, but a single failure can still clear after a restart or reconnect.",
+      "action": "Power-cycle or reconnect the adapter, capture the adapter and USB driver versions, and correlate repeated BTHUSB events with Kernel-PnP and power transitions.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/bluetooth-driver-stack"
+      ],
+      "falsepositives": [
+        "A transient adapter reset during resume, pairing, or a deliberate reconnect can leave one event without a persistent hardware fault."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/bluetooth-driver-stack",
+          "retrieved": "2026-08-03"
+        }
+      ]
+    },
+    {
+      "id": "LV-0335",
+      "status": "stable",
+      "verified": "2026-08-03",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "Microsoft-Windows-Power-Troubleshooter",
+        "eventId": 1
+      },
+      "verdict": "informational",
+      "title": "Windows recorded the source that woke the PC",
+      "plain": "The Power-Troubleshooter provider recorded a return from a low-power state and the wake source context.",
+      "why": "A wake record explains why a sleep or hibernate transition ended; it is useful context, not proof that the wake was unwanted or faulty.",
+      "action": "Read the Wake Source detail and compare it with the sleep schedule, USB devices, and power requests when the wake was unexpected.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/modern-standby"
+      ],
+      "falsepositives": [
+        "A normal keyboard, mouse, timer, network, or maintenance wake is expected and should not be treated as a failure."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/modern-standby",
+          "retrieved": "2026-08-03"
+        }
+      ]
+    },
+    {
+      "id": "LV-0336",
+      "status": "stable",
+      "verified": "2026-08-03",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Dhcp-Client/Admin",
+        "provider": "Microsoft-Windows-Dhcp-Client",
+        "eventId": 1001
+      },
+      "verdict": "actionable",
+      "title": "The DHCP client could not renew its lease",
+      "plain": "The DHCP client failed to renew an address lease for a network interface.",
+      "why": "A failed renewal can leave the machine with a stale or missing address and explains intermittent loss of network access. The event does not by itself distinguish the adapter, access point, or DHCP server.",
+      "action": "Check the named interface, link state, VLAN or wireless association, and DHCP-server reachability; compare neighboring DHCP-Client and NDIS events before resetting the stack.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-server/networking/technologies/dhcp/dhcp-top"
+      ],
+      "falsepositives": [
+        "A brief disconnect or a network change while roaming can cause one failed renewal that succeeds on the next attempt."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-server/networking/technologies/dhcp/dhcp-top",
+          "retrieved": "2026-08-03"
+        }
+      ]
+    },
+    {
+      "id": "LV-0337",
+      "status": "stable",
+      "verified": "2026-08-03",
+      "match": {
+        "source": "event",
+        "channel": "System",
+        "provider": "stornvme",
+        "eventId": 6
+      },
+      "verdict": "actionable",
+      "title": "The NVMe storage driver retried an I/O operation",
+      "plain": "The stornvme driver reported a retried I/O operation against an NVMe device.",
+      "why": "A retry can be transient, but repeated controller or media retries are an early storage reliability signal and can precede data loss or an unexpected restart.",
+      "action": "Back up important data, check the NVMe firmware and health telemetry, and correlate the timestamp with disk, Ntfs, and controller-reset events before stressing the device further.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows-hardware/drivers/storage/stornvme"
+      ],
+      "falsepositives": [
+        "A controller reset during firmware maintenance or a transient bus interruption can produce a single retry without media damage."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows-hardware/drivers/storage/stornvme",
+          "retrieved": "2026-08-03"
+        }
+      ]
+    },
+    {
+      "id": "LV-0338",
+      "status": "stable",
+      "verified": "2026-08-03",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-TaskScheduler/Operational",
+        "provider": "Microsoft-Windows-TaskScheduler",
+        "eventId": 101
+      },
+      "verdict": "investigate",
+      "title": "Task Scheduler could not start a task",
+      "plain": "Task Scheduler recorded a failure while starting a scheduled task.",
+      "why": "Event 101 identifies a task-start failure but not whether the cause is a missing executable, credentials, conditions, or a dependency. It is an operational fault, not evidence of malicious persistence by itself.",
+      "action": "Read the task name and error code, verify its action path and run-as account, and compare the task history with the service and application events at the same time.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/windows/win32/taskschd/task-scheduler-1-0-events"
+      ],
+      "falsepositives": [
+        "A task intentionally disabled, deleted, or blocked by a maintenance window can leave a single start-failure record."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/windows/win32/taskschd/task-scheduler-1-0-events",
+          "retrieved": "2026-08-03"
+        }
+      ]
+    },
+    {
+      "id": "LV-0339",
+      "status": "stable",
+      "verified": "2026-08-03",
+      "match": {
+        "source": "event",
+        "channel": "Microsoft-Windows-Resource-Exhaustion-Detector/Operational",
+        "provider": "Microsoft-Windows-Resource-Exhaustion-Detector",
+        "eventId": 2004
+      },
+      "verdict": "actionable",
+      "title": "Windows diagnosed a low virtual-memory condition",
+      "plain": "The Resource-Exhaustion-Detector recorded that available virtual memory was low enough to trigger a system diagnosis.",
+      "why": "Event 2004 is the user-visible low-memory diagnosis. It can explain application termination, paging storms, and apparent hangs, but it does not identify which process caused the pressure without the event details.",
+      "action": "Read the process list in the event, check committed memory and pagefile configuration, and investigate a leaking or runaway process before reducing the pagefile or killing random applications.",
+      "confidence": "high",
+      "references": [
+        "https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/event-id-2004-diagnostic-policy-service"
+      ],
+      "falsepositives": [
+        "A short-lived allocation burst during a large build, update, or media workload can trigger one diagnosis and then clear."
+      ],
+      "sources": [
+        {
+          "uri": "https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/event-id-2004-diagnostic-policy-service",
+          "retrieved": "2026-08-03"
         }
       ]
     }

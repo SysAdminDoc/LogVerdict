@@ -1641,6 +1641,8 @@ Describe 'Channel access classification' {
                 'Microsoft-Windows-AppModel-Runtime/Admin'
                 'Microsoft-Windows-Resource-Exhaustion-Detector/Operational'
                 'Microsoft-Windows-Kernel-Boot/Operational'
+                'Microsoft-Windows-Dhcp-Client/Admin'
+                'Microsoft-Windows-TaskScheduler/Operational'
             )
         }
     }
@@ -7203,9 +7205,10 @@ Describe 'Reliability Monitor collection' {
         }
     }
 
-    It 'rules every reliability source it collects so the new source does not just raise the unknown count' {
-        # Adding a collector that produces nothing but unrecognized signatures would make
-        # every scan noisier and every exit code worse, for no diagnostic gain.
+    It 'rules known reliability sources without demoting unmatched evidence' {
+        # Known install records retain their specific rulings. An unrecognized Reliability
+        # family must remain unknown so the catch-all cannot demote a lead below the rank
+        # promised by the resolver contract.
         InModuleScope LogVerdict {
             $db = Get-LogVerdictDatabase
             $sigs = @('MsiInstaller/1033', 'MsiInstaller/1034', 'MsiInstaller/1035', 'MsiInstaller/1036', 'Anything/9999') |
@@ -7218,7 +7221,11 @@ Describe 'Reliability Monitor collection' {
                     }
                 }
             foreach ($f in (Resolve-LVVerdict -Signature @($sigs) -Database $db)) {
-                $f.Verdict | Should -Not -Be 'unknown' -Because "$($f.Key) must be ruled, even if only by the catch-all"
+                if ($f.Key -like '*Anything/9999') {
+                    $f.Verdict | Should -BeExactly 'unknown' -Because "$($f.Key) has no specific ruling"
+                } else {
+                    $f.Verdict | Should -Not -BeExactly 'unknown' -Because "$($f.Key) has a specific Reliability ruling"
+                }
             }
         }
     }
