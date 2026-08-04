@@ -274,6 +274,7 @@ function Invoke-LogVerdictScan {
     $script:LVEventSequence = @()
     $script:LVEventSequenceIncompleteChannel = @()
     $script:LVTextLogCoverage = @()
+    $script:LVCrashCoverage = @()
 
     Write-LVLog -Level info -Message ('Probing {0} channel(s) for access and history...' -f @($channels).Count)
     $channelStatus = Get-LVChannelStatus -Channel $channels -Metadata $channelMetadata
@@ -342,8 +343,8 @@ function Invoke-LogVerdictScan {
         }
 
         $crashTimer = if ($performanceEnabled) { [Diagnostics.Stopwatch]::StartNew() } else { $null }
+        $crash = @(Get-LVCrashArtifact -DaysBack ([Math]::Max($DaysBack, 90)) -CollectionBudget $collectionBudget)
         $crashBudgetStop = Get-LVCollectionBudgetStopReason -Budget $collectionBudget
-        if ($crashBudgetStop) { $crash = @() } else { $crash = @(Get-LVCrashArtifact -DaysBack ([Math]::Max($DaysBack, 90))) }
         if ($crashTimer) {
             $crashTimer.Stop()
             & $recordPerformance -Source 'crash' -Kind 'inventory' -Name 'crash artifacts' `
@@ -672,10 +673,20 @@ function Invoke-LogVerdictScan {
     $coverageSources.Add((New-LVCoverageRecord -Source 'reliability' -Kind 'provider' -Name 'Reliability Monitor' -Status $reliabilityStatus `
         -Reason $(if ($SkipReliability) { 'Skipped by request.' } elseif (-not $script:LVReliabilityAvailable) { [string]$script:LVReliabilitySkipReason } elseif (@($reliabilityRecords).Count -eq 0) { 'No reliability records were observed in the requested window.' } else { $null }) `
         -WindowStart $cutoff -WindowEnd $started -ObservedRecords @($reliabilityRecords).Count -CollectionBudget $collectionBudget -Origin 'live')) | Out-Null
-    $coverageSources.Add((New-LVCoverageRecord -Source 'crash' -Kind 'directory' -Name 'WER and minidump inventory' `
-        -Status $(if ($SkipTextLogs) { 'not-observed' } elseif ($crashBudgetStop) { $crashBudgetStop } elseif ($crash.Count -eq 0) { 'empty' } else { 'readable' }) `
-        -Reason $(if ($SkipTextLogs) { 'Skipped by request.' } elseif ($crashBudgetStop) { ('The shared collection {0} budget stopped the crash inventory.' -f $crashBudgetStop) } elseif ($crash.Count -eq 0) { 'No readable crash artifact was observed in the inventory window.' } else { $null }) `
-        -WindowStart $started.AddDays(-1 * [Math]::Max($DaysBack, 90)) -WindowEnd $started -ObservedRecords $crash.Count -CollectionBudget $collectionBudget -Origin 'live')) | Out-Null
+    if ($SkipTextLogs) {
+        $coverageSources.Add((New-LVCoverageRecord -Source 'crash' -Kind 'directory' -Name 'WER and minidump inventory' -Status 'not-observed' `
+            -Reason 'Skipped by request.' -WindowStart $started.AddDays(-1 * [Math]::Max($DaysBack, 90)) -WindowEnd $started `
+            -ObservedRecords 0 -CollectionBudget $collectionBudget -Origin 'live')) | Out-Null
+    } elseif (@($script:LVCrashCoverage).Count -gt 0) {
+        foreach ($entry in @($script:LVCrashCoverage)) {
+            if ($entry) { $coverageSources.Add($entry) | Out-Null }
+        }
+    } else {
+        $coverageSources.Add((New-LVCoverageRecord -Source 'crash' -Kind 'directory' -Name 'WER and minidump inventory' `
+            -Status $(if ($crashBudgetStop) { $crashBudgetStop } elseif ($crash.Count -eq 0) { 'empty' } else { 'readable' }) `
+            -Reason $(if ($crashBudgetStop) { ('The shared collection {0} budget stopped the crash inventory.' -f $crashBudgetStop) } elseif ($crash.Count -eq 0) { 'No readable crash artifact was observed in the inventory window.' } else { $null }) `
+            -WindowStart $started.AddDays(-1 * [Math]::Max($DaysBack, 90)) -WindowEnd $started -ObservedRecords $crash.Count -CollectionBudget $collectionBudget -Origin 'live')) | Out-Null
+    }
 
     $healthProfiles = @()
     try {
@@ -688,7 +699,7 @@ function Invoke-LogVerdictScan {
             -ObservedConfiguration 'The health-profile collector failed before all profiles were available.' `
             -Reason $_.Exception.Message -Advice 'Review configuration health separately; this is not a maliciousness verdict.' -Origin 'live'))
     }
-    foreach ($profile in @($diagnosticEvidence.HealthProfiles | Where-Object { $_ })) { $healthProfiles += $profile }
+    foreach ($healthProfile in @($diagnosticEvidence.HealthProfiles | Where-Object { $_ })) { $healthProfiles += $healthProfile }
 
     # Precomputed here so callers (including the entry script) never need a private helper.
     # Correlations count toward the worst verdict: a pairing that is graver than either

@@ -2304,8 +2304,12 @@ Describe 'Text-log collection against fixtures' {
             $target = @(@{ Name='HUGE'; Path=$p; Pattern='^\s*!!!'; Area='t'; Hint='t' })
             $rec = @(Get-LVTextLogRecord -DaysBack 30 -MaxMatchesPerFile 10 -Target $target)
             $rec.Count | Should -Be 10 -Because 'the cap must bound the result'
+            $rec[0].Message | Should -Match 'failure 41'
+            $rec[-1].Message | Should -Match 'failure 50'
             $script:LVTextLogCoverage[0].Status | Should -BeExactly 'truncated'
             $script:LVTextLogCoverage[0].Cap | Should -Be 10
+            $script:LVTextLogCoverage[0].ObservedRecords | Should -Be 10
+            $script:LVTextLogCoverage[0].Reason | Should -Match 'kept the newest 10.*40 older'
         }
     }
 
@@ -2674,6 +2678,45 @@ Describe 'Crash artifact header decoding' {
             $signature = @(Group-LVSignature -Record @($record) -WindowDays 1)[0]
             $signature.Key | Should -BeExactly 'WER/widget.exe/widget-core.dll'
             $signature.SampleMessage | Should -Match 'application version=4\.2\.1\.0'
+        }
+    }
+
+    It 'keeps the newest WER directories when the inventory cap is reached' {
+        $root = Join-Path $script:CrashFixtureDir 'capped-archive'
+        1..3 | ForEach-Object {
+            $directory = Join-Path $root ('Report-{0}' -f $_)
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+            (Get-Item -LiteralPath $directory).LastWriteTime = (Get-Date).AddMinutes(-1 * $_)
+        }
+        InModuleScope LogVerdict -Parameters @{ root = $root } {
+            param($root)
+            $artifacts = @(Get-LVCrashArtifact -DaysBack 1 -DumpPath @() -WerRoot $root -MaxWerDirectories 1)
+            $artifacts.Count | Should -Be 1
+            $artifacts[0].Path | Should -Match 'Report-1$'
+            $script:LVCrashCoverage.Count | Should -Be 1
+            $script:LVCrashCoverage[0].Status | Should -BeExactly 'truncated'
+            $script:LVCrashCoverage[0].Cap | Should -Be 1
+            $script:LVCrashCoverage[0].SkippedRecords | Should -Be 2
+            $script:LVCrashCoverage[0].Reason | Should -Match 'kept the newest directories'
+        }
+    }
+
+    It 'stops WER enumeration at the shared collection budget and records coverage' {
+        $root = Join-Path $script:CrashFixtureDir 'budget-archive'
+        1..2 | ForEach-Object {
+            $directory = Join-Path $root ('Report-{0}' -f $_)
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+            (Get-Item -LiteralPath $directory).LastWriteTime = (Get-Date).AddMinutes(-1 * $_)
+        }
+        InModuleScope LogVerdict -Parameters @{ root = $root } {
+            param($root)
+            $budget = New-LVCollectionBudget -MaxBytes 1MB -MaxRecords 1 -MaxSeconds 60
+            $artifacts = @(Get-LVCrashArtifact -DaysBack 1 -DumpPath @() -WerRoot $root -CollectionBudget $budget)
+            $artifacts.Count | Should -Be 1
+            $budget.RecordsRead | Should -Be 1
+            $script:LVCrashCoverage[0].Status | Should -BeExactly 'truncated'
+            $script:LVCrashCoverage[0].Reason | Should -Match 'shared collection.*budget'
+            $script:LVCrashCoverage[0].SkippedRecords | Should -Be 1
         }
     }
 

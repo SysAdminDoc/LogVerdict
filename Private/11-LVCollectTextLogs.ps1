@@ -167,6 +167,7 @@ function Get-LVTextLogRecord {
         $matched = 0
         $skippedOld = 0
         $undated = 0
+        $recentMatches = New-Object System.Collections.Generic.Queue[object]
         $sectionTime = $null
         $reader = $null
         $stream = $null
@@ -180,7 +181,6 @@ function Get-LVTextLogRecord {
             if ($target.SectionTimePattern) { $sectionRegex = [regex]$target.SectionTimePattern }
 
             while ($true) {
-                if ($matched -ge $MaxMatchesPerFile) { break }
                 $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
                 if ($budgetStop) { break }
 
@@ -220,7 +220,7 @@ function Get-LVTextLogRecord {
                 }
 
                 $matched++
-                $records.Add([pscustomobject]@{
+                $record = [pscustomobject]@{
                     Source      = 'textlog'
                     Channel     = $target.Name
                     Provider    = $target.Name
@@ -234,10 +234,16 @@ function Get-LVTextLogRecord {
                     Area        = $target.Area
                     Hint        = $target.Hint
                     Message     = $line.Trim()
-                }) | Out-Null
+                }
+                if ($MaxMatchesPerFile -gt 0) {
+                    if ($recentMatches.Count -ge $MaxMatchesPerFile) { [void]$recentMatches.Dequeue() }
+                    $recentMatches.Enqueue($record)
+                }
+                if ($CollectionBudget) { Add-LVCollectionBudgetUsage -Budget $CollectionBudget -Records 1 }
             }
         } catch {
             $parserError = $_.Exception.Message
+            foreach ($record in $recentMatches) { $records.Add($record) | Out-Null }
             Write-LVLog -Level warn -Message ("{0}: unreadable ({1})" -f $target.Name, $_.Exception.Message)
             $coverage.Add((New-LVCoverageRecord -Source 'textlog' -Kind 'file' -Name $target.Name -Status 'unreadable' `
                 -Reason 'The text-log parser failed before the file was fully observed.' -Path $path -WindowStart $cutoff -WindowEnd $windowEnd `
@@ -247,31 +253,39 @@ function Get-LVTextLogRecord {
             if ($reader) { $reader.Dispose() }
         }
 
-        if ($matched -ge $MaxMatchesPerFile) {
-            Write-LVLog -Level warn -Message ("{0}: hit the {1}-match cap; report is truncated for this file" -f $target.Name, $MaxMatchesPerFile)
+        foreach ($record in $recentMatches) { $records.Add($record) | Out-Null }
+        $retained = $recentMatches.Count
+        $droppedByCap = [Math]::Max(0, $matched - $retained)
+        $capReached = ($MaxMatchesPerFile -gt 0 -and $droppedByCap -gt 0)
+        if ($capReached) {
+            Write-LVLog -Level warn -Message ("{0}: hit the {1}-match cap; kept the newest {2} matching line(s)" -f $target.Name, $MaxMatchesPerFile, $retained)
         }
-        if ($matched -gt 0) {
+        if ($retained -gt 0) {
             $detail = ''
             if ($skippedOld -gt 0) { $detail += (' ({0} older line(s) outside the window)' -f $skippedOld) }
             if ($undated -gt 0)    { $detail += (' ({0} undated line(s))' -f $undated) }
-            Write-LVLog -Level ok -Message ("{0}: {1} error line(s){2}" -f $target.Name, $matched, $detail)
+            Write-LVLog -Level ok -Message ("{0}: {1} retained error line(s) from {2} observed match(es){3}" -f $target.Name, $retained, $matched, $detail)
         }
         if (-not $budgetStop) { $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget }
-        $status = if ($budgetStop) { $budgetStop } elseif ($matched -ge $MaxMatchesPerFile) { 'truncated' } elseif ($matched -gt 0) { 'readable' } else { 'empty' }
+        $status = if ($budgetStop) { $budgetStop } elseif ($capReached) { 'truncated' } elseif ($retained -gt 0) { 'readable' } else { 'empty' }
         $reason = if ($budgetStop) {
-            ('The shared collection {0} budget stopped this file; observed lines are a lower bound.' -f $budgetStop)
+            $budgetReason = ('The shared collection {0} budget stopped this file; observed lines are a lower bound.' -f $budgetStop)
+            if ($droppedByCap -gt 0) {
+                $budgetReason += (' The newest {0} matching line(s) were retained; {1} older matching line(s) were discarded.' -f $retained, $droppedByCap)
+            }
+            $budgetReason
         } elseif ($status -eq 'truncated') {
-            ('The per-file match cap of {0} was reached; observed lines are a lower bound.' -f $MaxMatchesPerFile)
+            ('The per-file match cap of {0} kept the newest {1} matching line(s); {2} older matching line(s) were discarded.' -f $MaxMatchesPerFile, $retained, $droppedByCap)
         } elseif ($matched -eq 0 -and $skippedOld -gt 0) {
             ('No matching error line was observed in the requested window; {0} older line(s) were skipped.' -f $skippedOld)
         } elseif ($matched -eq 0) {
             'No matching error-shaped line was observed in the requested window.'
         } elseif ($undated -gt 0) {
-            ('Observed {0} matching line(s); {1} had no parseable timestamp.' -f $matched, $undated)
+            ('Observed {0} matching line(s); {1} had no parseable timestamp.' -f $retained, $undated)
         } else { $null }
         $coverage.Add((New-LVCoverageRecord -Source 'textlog' -Kind 'file' -Name $target.Name -Status $status `
             -Reason $reason -Path $path -WindowStart $cutoff -WindowEnd $windowEnd -Cap $MaxMatchesPerFile `
-            -ObservedRecords $matched -SkippedRecords $skippedOld -SizeBytes $file.Length -ParserError $parserError `
+            -ObservedRecords $retained -SkippedRecords ($skippedOld + $droppedByCap) -SizeBytes $file.Length -ParserError $parserError `
             -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
     }
 
@@ -1365,11 +1379,17 @@ function Get-LVCrashArtifact {
     param(
         [int]$DaysBack = 90,
         [string[]]$DumpPath = @('C:\Windows\Minidump', 'C:\Windows\MEMORY.DMP'),
-        [string]$WerRoot = (Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportArchive')
+        [string]$WerRoot = (Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportArchive'),
+        [ValidateRange(1, 100000)][int]$MaxWerDirectories = 256,
+        [AllowNull()]$CollectionBudget
     )
 
     $cutoff = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
     $items = New-Object System.Collections.Generic.List[object]
+    $coverage = New-Object System.Collections.Generic.List[object]
+    $budgetStop = $null
+    $werSkipped = 0
+    $werCapReached = $false
 
     foreach ($p in $DumpPath) {
         if (-not (Test-Path -LiteralPath $p)) { continue }
@@ -1377,10 +1397,18 @@ function Get-LVCrashArtifact {
         if ($null -eq $pathItem) { continue }
         $dump = @($pathItem)
         if ($pathItem.PSIsContainer) {
-            $dump = @(Get-ChildItem -LiteralPath $p -Filter '*.dmp' -File -ErrorAction SilentlyContinue)
+            $dump = @(Get-ChildItem -LiteralPath $p -Filter '*.dmp' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
         }
         foreach ($file in @($dump | Where-Object { -not $_.PSIsContainer -and $_.LastWriteTime -ge $cutoff })) {
+            $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+            if ($budgetStop) { break }
+            $headerBytes = [Math]::Min([int64]$file.Length, [int64]0x60)
+            if ($CollectionBudget -and ([int64]$CollectionBudget.BytesRead + $headerBytes) -gt [int64]$CollectionBudget.MaxBytes) {
+                $budgetStop = 'truncated'
+                break
+            }
             $header = Get-LVKernelDumpHeader -Path $file.FullName
+            if ($CollectionBudget) { Add-LVCollectionBudgetUsage -Budget $CollectionBudget -Bytes $headerBytes -Records 1 }
             $items.Add([pscustomobject]@{
                 Kind               = 'minidump'
                 Path               = $file.FullName
@@ -1393,39 +1421,74 @@ function Get-LVCrashArtifact {
                 BugCheckParameters = @($header.BugCheckParameters)
             }) | Out-Null
         }
+        if ($budgetStop) { break }
     }
 
-    if (Test-Path -LiteralPath $werRoot) {
-        Get-ChildItem -LiteralPath $werRoot -Directory -ErrorAction SilentlyContinue |
+    if (-not $budgetStop -and (Test-Path -LiteralPath $WerRoot)) {
+        $werDirectories = @(Get-ChildItem -LiteralPath $WerRoot -Directory -ErrorAction SilentlyContinue |
             Where-Object { $_.LastWriteTime -ge $cutoff } |
-            ForEach-Object {
-                $wer = Join-Path $_.FullName 'Report.wer'
-                $app = $_.Name
-                $metadata = $null
-                if (Test-Path -LiteralPath $wer) {
-                    $metadata = Get-LVWerReport -Path $wer
-                    if ($metadata.App) { $app = $metadata.App }
-                } else {
-                    $metadata = [pscustomobject]@{
-                        Decoded = $false; Reason = 'The report directory contains no Report.wer file.'
-                        EventType = $null; App = $null; AppVersion = $null; Module = $null; ExceptionCode = $null
-                    }
-                }
-                $items.Add([pscustomobject]@{
-                    Kind          = 'wer'
-                    Path          = $_.FullName
-                    ReportPath    = $wer
-                    When          = $_.LastWriteTime
-                    App           = $app
-                    AppVersion    = $metadata.AppVersion
-                    Module        = $metadata.Module
-                    ExceptionCode = $metadata.ExceptionCode
-                    EventType     = $metadata.EventType
-                    Decoded       = [bool]$metadata.Decoded
-                    DecodeStatus  = $(if ($metadata.Decoded) { 'decoded' } else { $metadata.Reason })
-                }) | Out-Null
+            Sort-Object LastWriteTime -Descending)
+        if ($werDirectories.Count -gt $MaxWerDirectories) {
+            $werCapReached = $true
+            $werSkipped = $werDirectories.Count - $MaxWerDirectories
+            $werDirectories = @($werDirectories | Select-Object -First $MaxWerDirectories)
+        }
+        for ($index = 0; $index -lt $werDirectories.Count; $index++) {
+            $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget
+            if ($budgetStop) {
+                $werSkipped += $werDirectories.Count - $index
+                break
             }
+            $directory = $werDirectories[$index]
+            $wer = Join-Path $directory.FullName 'Report.wer'
+            $app = $directory.Name
+            $metadata = $null
+            $reportBytes = 0
+            if (Test-Path -LiteralPath $wer) {
+                $reportItem = Get-Item -LiteralPath $wer -ErrorAction SilentlyContinue
+                if ($reportItem) { $reportBytes = [int64]$reportItem.Length }
+                if ($CollectionBudget -and ([int64]$CollectionBudget.BytesRead + $reportBytes) -gt [int64]$CollectionBudget.MaxBytes) {
+                    $budgetStop = 'truncated'
+                    $werSkipped += $werDirectories.Count - $index
+                    break
+                }
+                $metadata = Get-LVWerReport -Path $wer
+                if ($metadata.App) { $app = $metadata.App }
+            } else {
+                $metadata = [pscustomobject]@{
+                    Decoded = $false; Reason = 'The report directory contains no Report.wer file.'
+                    EventType = $null; App = $null; AppVersion = $null; Module = $null; ExceptionCode = $null
+                }
+            }
+            if ($CollectionBudget) { Add-LVCollectionBudgetUsage -Budget $CollectionBudget -Bytes $reportBytes -Records 1 }
+            $items.Add([pscustomobject]@{
+                Kind          = 'wer'
+                Path          = $directory.FullName
+                ReportPath    = $wer
+                When          = $directory.LastWriteTime
+                App           = $app
+                AppVersion    = $metadata.AppVersion
+                Module        = $metadata.Module
+                ExceptionCode = $metadata.ExceptionCode
+                EventType     = $metadata.EventType
+                Decoded       = [bool]$metadata.Decoded
+                DecodeStatus  = $(if ($metadata.Decoded) { 'decoded' } else { $metadata.Reason })
+            }) | Out-Null
+        }
     }
 
+    if (-not $budgetStop) { $budgetStop = Get-LVCollectionBudgetStopReason -Budget $CollectionBudget }
+    $status = if ($budgetStop) { $budgetStop } elseif ($werCapReached) { 'truncated' } elseif ($items.Count -eq 0) { 'empty' } else { 'readable' }
+    $reason = if ($budgetStop) {
+        ('The shared collection {0} budget stopped the crash inventory; later artifacts were not read.' -f $budgetStop)
+    } elseif ($werCapReached) {
+        ('The WER directory cap of {0} kept the newest directories; {1} older directory(ies) were not read.' -f $MaxWerDirectories, $werSkipped)
+    } elseif ($items.Count -eq 0) {
+        'No readable crash artifact was observed in the inventory window.'
+    } else { $null }
+    $coverage.Add((New-LVCoverageRecord -Source 'crash' -Kind 'directory' -Name 'WER and minidump inventory' -Status $status `
+        -Reason $reason -Path $WerRoot -WindowStart $cutoff -WindowEnd (Get-Date) -Cap $MaxWerDirectories `
+        -ObservedRecords $items.Count -SkippedRecords $werSkipped -CollectionBudget $CollectionBudget -Origin 'live')) | Out-Null
+    $script:LVCrashCoverage = @($coverage.ToArray())
     return ConvertTo-LVArrayOutput -Value @($items.ToArray())
 }
