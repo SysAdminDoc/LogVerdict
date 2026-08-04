@@ -4194,6 +4194,48 @@ Describe 'GUI pure presentation logic' {
         $entry | Should -Match '\[string\]\$AdvisoryVersion'
         $entry | Should -Match "guiArgs\['AdvisoryVersion'\]"
     }
+
+    It 'keeps an advisory-enabled headless render refreshing its filter and finding count' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $gui = Get-Content -LiteralPath (Join-Path $root 'Public/Show-LogVerdictGui.ps1') -Raw
+        $gui | Should -Match '\$advisoryState\s*=\s*if\s*\(\$advisory\.Matched\)'
+        $gui | Should -Not -Match '\$state\s*=\s*if\s*\(\$advisory\.Matched\)'
+
+        # This is the closure contract used by the WPF render callback, exercised
+        # without starting a window: an advisory label must not replace the mutable
+        # state object before the nested filter callback runs.
+        $state = @{
+            Result = $null
+            Rows = @()
+            AdvisoryLabels = @()
+            View = [pscustomobject]@{ RefreshCount = 0 }
+        }
+        $state.View | Add-Member -MemberType ScriptMethod -Name Refresh -Value { $this.RefreshCount++ } -Force
+        $ui = [pscustomobject]@{ TxtShown = [pscustomobject]@{ Text = '' } }
+        $applyFilter = {
+            $state.View.Refresh()
+            $ui.TxtShown.Text = '{0} finding(s)' -f @($state.Rows).Count
+        }
+        $renderResult = {
+            param($Result)
+            $state.Result = $Result
+            $state.Rows = @($Result.Findings)
+            foreach ($advisory in @($Result.Advisories | Where-Object { $_ })) {
+                $advisoryState = if ($advisory.Matched) { 'AFFECTED' } else { 'CACHE ENTRY' }
+                $state.AdvisoryLabels += $advisoryState
+            }
+            & $applyFilter
+        }
+
+        & $renderResult ([pscustomobject]@{
+            Findings = @([pscustomobject]@{ Verdict = 'actionable' })
+            Advisories = @([pscustomobject]@{ Matched = $true })
+        })
+
+        $state.View.RefreshCount | Should -Be 1
+        $ui.TxtShown.Text | Should -BeExactly '1 finding(s)'
+        @($state.AdvisoryLabels) | Should -Be @('AFFECTED')
+    }
 }
 
 Describe 'Package-manager manifest generation' {

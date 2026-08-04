@@ -32,6 +32,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added `LogVerdict-Ticket-Summary.md` and the Findings-page **Copy summary for ticket** action. Both share one bounded Markdown projection with worst verdict, suppression count, actionable findings, coverage caveats, version metadata, and the redaction toggle.
 - Made GUI cancellation first-class: the Overview exposes a visible Cancel action, elapsed time updates while a scan runs, realistic look-back-specific timing guidance replaces the old vague promise, and cancelled runs report partial coverage without saving a misleading report.
 - Closed CI quality gaps by running PSScriptAnalyzer on both PowerShell legs, pinning GitHub Actions to verified commits, directly verifying supply-chain metadata in the package job, and checking PowerShell script status without stale native exit codes.
+- Fixed advisory-enabled GUI renders so dependency labels cannot shadow the mutable window state; the findings filter and count now refresh normally when advisory context is present.
 
 - Added a user-visible GUI settings reset that atomically restores safe scan defaults,
   resets the window size and transient source/report fields, and reports persistence failures;

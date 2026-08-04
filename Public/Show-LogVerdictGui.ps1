@@ -497,9 +497,9 @@ function Show-LogVerdictGui {
             $channelLines.Add('DEPENDENCY ADVISORIES (SEPARATE FROM EVENT FINDINGS)') | Out-Null
             $channelLines.Add(('Status: {0}; knowledge records are not Windows event verdicts.' -f $Result.AdvisoryStatus)) | Out-Null
             foreach ($advisory in @($Result.Advisories | Where-Object { $_ })) {
-                $state = if ($advisory.Matched) { 'AFFECTED' } else { 'CACHE ENTRY' }
+                $advisoryState = if ($advisory.Matched) { 'AFFECTED' } else { 'CACHE ENTRY' }
                 $channelLines.Add(('[{0}] {1} - {2} {3}; CVSS {4}; fixed {5}' -f `
-                    $state, $advisory.Id, $advisory.Package, $advisory.Version, $advisory.CVSS, $advisory.FixedVersion)) | Out-Null
+                    $advisoryState, $advisory.Id, $advisory.Package, $advisory.Version, $advisory.CVSS, $advisory.FixedVersion)) | Out-Null
             }
         }
         if ($Result.PSObject.Properties['CaseProfile'] -and $Result.CaseProfile) {
